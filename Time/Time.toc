@@ -1,0 +1,8 @@
+## Interface: 110105, 110107
+## Title: Time
+## Notes: Just a handy addon
+## Author: Renvulf
+## SavedVariables: TimeDB
+## SavedVariablesPerCharacter: TimePerCharDB
+## IconTexture: Interface\AddOns\Time\Timeicon.tga
+Time.lua
