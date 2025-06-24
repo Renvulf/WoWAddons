@@ -74,6 +74,7 @@ local DEFAULTS = {
   -- BEGIN FEATURE: server time and hourly chime defaults
   useServerTime       = false,
   hourlyChime         = false,
+  timezoneOffset      = 0, -- hours difference from local/server time
   -- END FEATURE
   -- BEGIN TRACKING DEFAULTS
   trackSession        = false,
@@ -125,13 +126,46 @@ function frame:FormatSeconds(sec)
   return string.format("%dh %dm", h, m)
 end
 
+-- Utility: show tracking tooltip anchored to a frame
+function frame:ShowTrackingTooltip(anchor)
+  if not TimeDB.trackTooltip then return end
+  GameTooltip:SetOwner(anchor, "ANCHOR_RIGHT")
+  local now = time()
+  local sessionElapsed = now - (self.sessionStart or now)
+  if TimeDB.trackSession then
+    GameTooltip:AddLine("Session: " .. self:FormatSeconds(sessionElapsed))
+  end
+  if TimeDB.trackDay then
+    local dayTotal = (TimeDB.daySeconds or 0) + sessionElapsed
+    GameTooltip:AddLine("Today: " .. self:FormatSeconds(dayTotal))
+  end
+  if TimeDB.trackWeek then
+    local weekTotal = (TimeDB.weekSeconds or 0) + sessionElapsed
+    GameTooltip:AddLine("This Week: " .. self:FormatSeconds(weekTotal))
+  end
+  if TimeDB.trackMonth then
+    local monthTotal = (TimeDB.monthSeconds or 0) + sessionElapsed
+    GameTooltip:AddLine("This Month: " .. self:FormatSeconds(monthTotal))
+  end
+  if TimeDB.trackYear then
+    local yearTotal = (TimeDB.yearSeconds or 0) + sessionElapsed
+    GameTooltip:AddLine("This Year: " .. self:FormatSeconds(yearTotal))
+  end
+  GameTooltip:Show()
+end
+
 -- BEGIN FEATURE: helper for server/local time
 local function GetTimeValue(fmt)
+  local ts
   if TimeDB.useServerTime and GetServerTime then
-    return date(fmt, GetServerTime())
+    ts = GetServerTime()
   else
-    return date(fmt)
+    ts = time()
   end
+  if TimeDB.timezoneOffset and TimeDB.timezoneOffset ~= 0 then
+    ts = ts + TimeDB.timezoneOffset * 3600
+  end
+  return date(fmt, ts)
 end
 -- END FEATURE
 
@@ -328,13 +362,15 @@ function frame:CreateMinimapIcon()
 
   -- BEGIN MINIMAP ICON HOVER TOOLTIP
   icon:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:AddLine("Settings")
-    GameTooltip:Show()
+    if TimeDB.trackTooltip then
+      frame:ShowTrackingTooltip(self)
+    else
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:AddLine("Settings")
+      GameTooltip:Show()
+    end
   end)
-  icon:SetScript("OnLeave", function(self)
-    GameTooltip:Hide()
-  end)
+  icon:SetScript("OnLeave", GameTooltip_Hide)
   -- END MINIMAP ICON HOVER TOOLTIP
 
   self.minimapIcon = icon
@@ -636,6 +672,23 @@ function frame:CreateSettingsFrame()
     end)
     -- END FEATURE
 
+    -- Time Zone Offset Slider
+    local tz = CreateFrame("Slider", "TimeTZSlider", p, "OptionsSliderTemplate")
+    tz:SetPoint("TOPLEFT", 20, -230)
+    tz:SetMinMaxValues(-12, 14)
+    tz:SetValueStep(1)
+    tz:SetObeyStepOnDrag(true)
+    tz:SetWidth(300)
+    tz:SetValue(TimeDB.timezoneOffset or 0)
+    tz:SetScript("OnValueChanged", function(self, v)
+      TimeDB.timezoneOffset = v
+      _G[self:GetName() .. "Text"]:SetText("Time Zone Offset: " .. string.format("%+d", v))
+      frame:UpdateTime()
+    end)
+    _G[tz:GetName() .. "Low"]:SetText("-12")
+    _G[tz:GetName() .. "High"]:SetText("+14")
+    _G[tz:GetName() .. "Text"]:SetText("Time Zone Offset: " .. string.format("%+d", TimeDB.timezoneOffset or 0))
+
     -- Color Picker Button
     local cb = CreateFrame("Button","TimeColorButton",p,"UIPanelButtonTemplate")
     cb:SetSize(100,22)
@@ -765,6 +818,8 @@ function frame:CreateSettingsFrame()
       ss:SetChecked(TimeDB.showSeconds)
       ust:SetChecked(TimeDB.useServerTime)
       chime:SetChecked(TimeDB.hourlyChime)
+      tz:SetValue(TimeDB.timezoneOffset or 0)
+      _G[tz:GetName() .. "Text"]:SetText("Time Zone Offset: " .. string.format("%+d", TimeDB.timezoneOffset or 0))
       UIDropDownMenu_SetSelectedValue(fontDropdown, TimeDB.fontName)
       UIDropDownMenu_SetText(fontDropdown, TimeDB.fontName)
       mv:SetChecked(TimeDB.allowMove)
@@ -1153,33 +1208,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
       self.iconButton:SetAllPoints(self.icon)
       -- Show tracking tooltip when hovering icon next to clock text
       self.iconButton:SetScript("OnEnter", function(btn)
-        if TimeDB.trackTooltip then
-          GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
-          local now = time()
-          local sessionElapsed = now - (frame.sessionStart or now)
-          if TimeDB.trackSession then
-            GameTooltip:AddLine("Session: " .. frame:FormatSeconds(sessionElapsed))
-          end
-          if TimeDB.trackDay then
-            local dayTotal = (TimeDB.daySeconds or 0) + sessionElapsed
-            GameTooltip:AddLine("Today: " .. frame:FormatSeconds(dayTotal))
-          end
-          if TimeDB.trackWeek then
-            local weekTotal = (TimeDB.weekSeconds or 0) + sessionElapsed
-            GameTooltip:AddLine("This Week: " .. frame:FormatSeconds(weekTotal))
-          end
-          if TimeDB.trackMonth then
-            local monthTotal = (TimeDB.monthSeconds or 0) + sessionElapsed
-            GameTooltip:AddLine("This Month: " .. frame:FormatSeconds(monthTotal))
-          end
-          if TimeDB.trackYear then
-            local yearTotal = (TimeDB.yearSeconds or 0) + sessionElapsed
-            GameTooltip:AddLine("This Year: " .. frame:FormatSeconds(yearTotal))
-          end
-          GameTooltip:Show()
-        end
+        frame:ShowTrackingTooltip(btn)
       end)
-      self.iconButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
+      self.iconButton:SetScript("OnLeave", GameTooltip_Hide)
       self.iconButton:EnableMouse(true)
       -- ────────────────────────────────────────────────────────────────
     end
