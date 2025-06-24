@@ -119,6 +119,17 @@ for _, fname in ipairs(AVAILABLE_FONTS) do
   preloadFont:SetFont(path, TimeDB.fontSize, "")  -- empty-string flags
 end
 
+-- Capture the difference between local and server time (in seconds). This
+-- allows us to reliably shift the displayed time when "Use Server Time" is
+-- enabled even if `GetServerTime` returns a value in a different time zone.
+local SERVER_TIME_DIFF = 0
+if GetServerTime then
+  local ok, st = pcall(GetServerTime)
+  if ok and type(st) == "number" then
+    SERVER_TIME_DIFF = st - time()
+  end
+end
+
 -- ─── Helper: format seconds as "Xh Ym" ────────────────────────────────────────
 function frame:FormatSeconds(sec)
   local h = math.floor(sec / 3600)
@@ -156,11 +167,9 @@ end
 
 -- BEGIN FEATURE: helper for server/local time
 local function GetTimeValue(fmt)
-  local ts
-  if TimeDB.useServerTime and GetServerTime then
-    ts = GetServerTime()
-  else
-    ts = time()
+  local ts = time()
+  if TimeDB.useServerTime then
+    ts = ts + SERVER_TIME_DIFF
   end
   if TimeDB.timezoneOffset and TimeDB.timezoneOffset ~= 0 then
     ts = ts + TimeDB.timezoneOffset * 3600
@@ -683,9 +692,10 @@ function frame:CreateSettingsFrame()
     fs:SetPoint("TOPLEFT",20,-110)
     fs:SetMinMaxValues(15,48); fs:SetValueStep(1); fs:SetWidth(300)
     fs:SetValue(TimeDB.fontSize)
-    fs:SetScript("OnValueChanged",function(self,v)
+    fs:SetScript("OnValueChanged", function(self, v)
+      v = math.floor(v + 0.5)
       TimeDB.fontSize = v
-      _G[self:GetName().."Text"]:SetText("Font Size: "..math.floor(v))
+      _G[self:GetName() .. "Text"]:SetText("Font Size: " .. v)
       frame:ApplySettings()
     end)
     _G["TimeFontSizeSliderLow"]:SetText("15")
@@ -711,19 +721,19 @@ function frame:CreateSettingsFrame()
     end)
 
     -- BEGIN FEATURE: server time & hourly chime checkboxes
-    local ust = CreateCheckbox(p, "TimeUseServerCB", "Use Server Time", 20, -210, TimeDB.useServerTime, function(self)
+    local ust = CreateCheckbox(p, "TimeUseServerCB", "Use Server Time", 20, -220, TimeDB.useServerTime, function(self)
       TimeDB.useServerTime = self:GetChecked()
       frame:UpdateTime()
     end)
 
-    local chime = CreateCheckbox(p, "TimeChimeCB", "Hourly Chime", 160, -210, TimeDB.hourlyChime, function(self)
+    local chime = CreateCheckbox(p, "TimeChimeCB", "Hourly Chime", 160, -220, TimeDB.hourlyChime, function(self)
       TimeDB.hourlyChime = self:GetChecked()
     end)
     -- END FEATURE
 
     -- Time Zone Offset Slider
     local tz = CreateFrame("Slider", "TimeTZSlider", p, "OptionsSliderTemplate")
-    tz:SetPoint("TOPLEFT", 20, -230)
+    tz:SetPoint("TOPLEFT", 20, -250)
     tz:SetMinMaxValues(-12, 14)
     tz:SetValueStep(1)
     tz:SetObeyStepOnDrag(true)
@@ -768,7 +778,7 @@ function frame:CreateSettingsFrame()
 
     -- Clock Font Dropdown
     local fontDropdown = CreateFrame("Frame", "TimeFontDropdown", p, "UIDropDownMenuTemplate")
-    fontDropdown:SetPoint("TOPLEFT", 20, -250)
+    fontDropdown:SetPoint("TOPLEFT", 20, -280)
     UIDropDownMenu_SetWidth(fontDropdown, 150)
     UIDropDownMenu_Initialize(fontDropdown, function(self, level)
       for _, fname in ipairs(AVAILABLE_FONTS) do
@@ -800,7 +810,7 @@ function frame:CreateSettingsFrame()
       end
     end)
 
-    local startY = -290
+    local startY = -310
     local spacing = 25
 
     -- Move Clock Checkbox
