@@ -721,10 +721,7 @@ function frame:CreateSettingsFrame()
     end)
 
     -- BEGIN FEATURE: server time & hourly chime checkboxes
-    local ust = CreateCheckbox(p, "TimeUseServerCB", "Use Server Time", 20, -220, TimeDB.useServerTime, function(self)
-      TimeDB.useServerTime = self:GetChecked()
-      frame:UpdateTime()
-    end)
+    local ust = CreateCheckbox(p, "TimeUseServerCB", "Use Server Time", 20, -220, TimeDB.useServerTime)
 
     local chime = CreateCheckbox(p, "TimeChimeCB", "Hourly Chime", 160, -220, TimeDB.hourlyChime, function(self)
       TimeDB.hourlyChime = self:GetChecked()
@@ -733,7 +730,7 @@ function frame:CreateSettingsFrame()
 
     -- Time Zone Offset Slider
     local tz = CreateFrame("Slider", "TimeTZSlider", p, "OptionsSliderTemplate")
-    tz:SetPoint("TOPLEFT", 20, -250)
+    tz:SetPoint("TOPLEFT", 20, -270)
     tz:SetMinMaxValues(-12, 14)
     tz:SetValueStep(1)
     tz:SetObeyStepOnDrag(true)
@@ -747,6 +744,30 @@ function frame:CreateSettingsFrame()
     _G[tz:GetName() .. "Low"]:SetText("-12")
     _G[tz:GetName() .. "High"]:SetText("+14")
     _G[tz:GetName() .. "Text"]:SetText("Time Zone Offset: " .. string.format("%+d", TimeDB.timezoneOffset or 0))
+
+    ust:SetScript("OnClick", function(self)
+      TimeDB.useServerTime = self:GetChecked()
+      if self:GetChecked() then
+        TimeDB.timezoneOffset = 0
+        tz:SetValue(0)
+        tz:Disable()
+        tz:SetAlpha(0.5)
+      else
+        tz:Enable()
+        tz:SetAlpha(1)
+      end
+      _G[tz:GetName() .. "Text"]:SetText("Time Zone Offset: " .. string.format("%+d", TimeDB.timezoneOffset or 0))
+      frame:UpdateTime()
+    end)
+
+    if TimeDB.useServerTime then
+      tz:SetValue(0)
+      tz:Disable()
+      tz:SetAlpha(0.5)
+    else
+      tz:Enable()
+      tz:SetAlpha(1)
+    end
 
     -- Color Picker Button
     local cb = CreateFrame("Button","TimeColorButton",p,"UIPanelButtonTemplate")
@@ -778,7 +799,7 @@ function frame:CreateSettingsFrame()
 
     -- Clock Font Dropdown
     local fontDropdown = CreateFrame("Frame", "TimeFontDropdown", p, "UIDropDownMenuTemplate")
-    fontDropdown:SetPoint("TOPLEFT", 20, -280)
+    fontDropdown:SetPoint("TOPLEFT", 20, -330)
     UIDropDownMenu_SetWidth(fontDropdown, 150)
     UIDropDownMenu_Initialize(fontDropdown, function(self, level)
       for _, fname in ipairs(AVAILABLE_FONTS) do
@@ -810,7 +831,7 @@ function frame:CreateSettingsFrame()
       end
     end)
 
-    local startY = -310
+    local startY = -360
     local spacing = 25
 
     -- Move Clock Checkbox
@@ -890,6 +911,13 @@ function frame:CreateSettingsFrame()
       chime:SetChecked(TimeDB.hourlyChime)
       tz:SetValue(TimeDB.timezoneOffset or 0)
       _G[tz:GetName() .. "Text"]:SetText("Time Zone Offset: " .. string.format("%+d", TimeDB.timezoneOffset or 0))
+      if TimeDB.useServerTime then
+        tz:Disable()
+        tz:SetAlpha(0.5)
+      else
+        tz:Enable()
+        tz:SetAlpha(1)
+      end
       UIDropDownMenu_SetSelectedValue(fontDropdown, TimeDB.fontName)
       UIDropDownMenu_SetText(fontDropdown, TimeDB.fontName)
       mv:SetChecked(TimeDB.allowMove)
