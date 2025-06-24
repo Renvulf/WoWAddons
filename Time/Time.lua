@@ -870,6 +870,17 @@ function frame:CreateSettingsFrame()
       -- END MOD
 
       TimeDB.positionPoint = nil; TimeDB.positionRelPoint = nil; TimeDB.positionX = nil; TimeDB.positionY = nil
+      -- Restore minimap icon to default position
+      TimeDB.minimapAnchorPoint  = DEFAULTS.minimapAnchorPoint
+      TimeDB.minimapRelativePoint= DEFAULTS.minimapRelativePoint
+      TimeDB.minimapX            = DEFAULTS.minimapX
+      TimeDB.minimapY            = DEFAULTS.minimapY
+      if frame.minimapIcon then
+        frame.minimapIcon:ClearAllPoints()
+        frame.minimapIcon:SetPoint(TimeDB.minimapAnchorPoint, Minimap,
+                                   TimeDB.minimapRelativePoint,
+                                   TimeDB.minimapX, TimeDB.minimapY)
+      end
 
       fs:SetValue(TimeDB.fontSize)
       sd:SetChecked(TimeDB.showDate)
@@ -1101,6 +1112,10 @@ function frame:CreateSettingsFrame()
       TimeDB.weekSeconds  = 0
       TimeDB.monthSeconds = 0
       TimeDB.yearSeconds  = 0
+      TimeDB.dayDate  = date("%Y-%m-%d")
+      TimeDB.weekID   = date("%Y-%U")
+      TimeDB.monthID  = date("%Y-%m")
+      TimeDB.yearID   = date("%Y")
       frame.sessionStart = time()
       frame:UpdateTracking()
       print(addonName..": Tracking data reset.")
