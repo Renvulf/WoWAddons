@@ -212,7 +212,13 @@ function frame:UpdateTime()
     tinsert(parts, GetTimeValue("%p"))
   end
 
-  self.fs:SetText(table.concat(parts, " "))
+  local text = table.concat(parts, " ")
+  self.fs:SetText(text)
+  -- BEGIN FEATURE: update LDB feed
+  if self.dataObject then
+    self.dataObject.text = text
+  end
+  -- END FEATURE
 end
 
 function frame:ApplySettings()
@@ -374,6 +380,49 @@ function frame:CreateMinimapIcon()
   -- END MINIMAP ICON HOVER TOOLTIP
 
   self.minimapIcon = icon
+end
+
+-- ─── LibDataBroker Feed -------------------------------------------------------
+function frame:CreateLDB()
+  if self.dataObject then return end
+  local ldb = LibStub and LibStub:GetLibrary("LibDataBroker-1.1", true)
+  if not ldb then return end
+  local obj = ldb:NewDataObject(addonName, {
+    type = "data source",
+    text = "",
+    icon = "Interface\\AddOns\\Time\\Timeicon.tga",
+  })
+  obj.OnClick = function(_, btn)
+    if btn == "LeftButton" then frame:ToggleSettings() end
+  end
+  obj.OnTooltipShow = function(tt)
+    tt:AddLine(addonName)
+    if TimeDB.trackTooltip then
+      local now = time()
+      local sessionElapsed = now - (frame.sessionStart or now)
+      if TimeDB.trackSession then tt:AddLine("Session: " .. frame:FormatSeconds(sessionElapsed)) end
+      if TimeDB.trackDay then
+        local total = (TimeDB.daySeconds or 0) + sessionElapsed
+        tt:AddLine("Today: " .. frame:FormatSeconds(total))
+      end
+      if TimeDB.trackWeek then
+        local total = (TimeDB.weekSeconds or 0) + sessionElapsed
+        tt:AddLine("This Week: " .. frame:FormatSeconds(total))
+      end
+      if TimeDB.trackMonth then
+        local total = (TimeDB.monthSeconds or 0) + sessionElapsed
+        tt:AddLine("This Month: " .. frame:FormatSeconds(total))
+      end
+      if TimeDB.trackYear then
+        local total = (TimeDB.yearSeconds or 0) + sessionElapsed
+        tt:AddLine("This Year: " .. frame:FormatSeconds(total))
+      end
+    else
+      tt:AddLine("Left-click to open settings")
+    end
+  end
+  self.dataObject = obj
+  self:UpdateTime()
 end
 
 -- ─── QoL Settings ───────────────────────────────────────────────────────────
@@ -1217,6 +1266,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
     self:ApplySettings()
     self:CreateMinimapIcon()
+    self:CreateLDB()        -- new DataBroker feed
     self:ApplyQoLSettings()
     self:ApplyCombatSettings()
     self:ApplyMoveSettings()
