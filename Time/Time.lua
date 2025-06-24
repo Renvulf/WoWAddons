@@ -121,6 +121,21 @@ function frame:FormatSeconds(sec)
   return string.format("%dh %dm", h, m)
 end
 
+-- Small utility to create a checkbutton with sane defaults
+local function CreateCheckbox(parent, name, label, x, y, checked, onClick, onEnter, onLeave, relativeTo, relativePoint, point)
+  local cb = CreateFrame("CheckButton", name, parent, "UICheckButtonTemplate")
+  point = point or "TOPLEFT"
+  relativePoint = relativePoint or point
+  relativeTo = relativeTo or parent
+  cb:SetPoint(point, relativeTo, relativePoint, x, y)
+  cb.text:SetText(label)
+  cb:SetChecked(checked)
+  if onClick then cb:SetScript("OnClick", onClick) end
+  if onEnter then cb:SetScript("OnEnter", onEnter) end
+  if onLeave then cb:SetScript("OnLeave", onLeave) end
+  return cb
+end
+
 -- ─── Clock Core ───────────────────────────────────────────────────────────────
 function frame:RestartTicker()
   if self.ticker then self.ticker:Cancel() end
@@ -566,31 +581,19 @@ function frame:CreateSettingsFrame()
     _G["TimeFontSizeSliderText"]:SetText("Font Size: "..TimeDB.fontSize)
 
     -- Show Date Checkbox
-    local sd = CreateFrame("CheckButton","TimeShowDateCB",p,"UICheckButtonTemplate")
-    sd:SetPoint("TOPLEFT",20,-160)
-    sd.text:SetText("Show Date")
-    sd:SetChecked(TimeDB.showDate)
-    sd:SetScript("OnClick",function(self)
+    local sd = CreateCheckbox(p, "TimeShowDateCB", "Show Date", 20, -160, TimeDB.showDate, function(self)
       TimeDB.showDate = self:GetChecked()
       frame:ApplySettings()
     end)
 
     -- 24h Format Checkbox
-    local h24 = CreateFrame("CheckButton","Time24hCB",p,"UICheckButtonTemplate")
-    h24:SetPoint("TOPLEFT",160,-160)
-    h24.text:SetText("24h Format")
-    h24:SetChecked(TimeDB.is24h)
-    h24:SetScript("OnClick",function(self)
+    local h24 = CreateCheckbox(p, "Time24hCB", "24h Format", 160, -160, TimeDB.is24h, function(self)
       TimeDB.is24h = self:GetChecked()
       frame:ApplySettings()
     end)
 
     -- Show Seconds Checkbox
-    local ss = CreateFrame("CheckButton","TimeShowSecCB",p,"UICheckButtonTemplate")
-    ss:SetPoint("TOPLEFT",20,-190)
-    ss.text:SetText("Show Seconds")
-    ss:SetChecked(TimeDB.showSeconds)
-    ss:SetScript("OnClick",function(self)
+    local ss = CreateCheckbox(p, "TimeShowSecCB", "Show Seconds", 20, -190, TimeDB.showSeconds, function(self)
       TimeDB.showSeconds = self:GetChecked()
       frame:ApplySettings()
     end)
@@ -661,37 +664,27 @@ function frame:CreateSettingsFrame()
     local spacing = 25
 
     -- Move Clock Checkbox
-    local mv = CreateFrame("CheckButton","TimeAllowMoveCB",p,"UICheckButtonTemplate")
-    mv:SetPoint("TOPLEFT", 20, startY)
-    mv.text:SetText("Tick to move clock")
-    mv:SetChecked(TimeDB.allowMove)
-    mv:SetScript("OnClick",function(self)
-      TimeDB.allowMove = self:GetChecked()
-      frame:ApplyMoveSettings()
-    end)
-    mv:SetScript("OnEnter",function(self)
-      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-      GameTooltip:AddLine("Tick to enable dragging; untick for click-through", 1,1,1)
-      GameTooltip:Show()
-    end)
-    mv:SetScript("OnLeave",function(self) GameTooltip:Hide() end)
+    local mv = CreateCheckbox(p, "TimeAllowMoveCB", "Tick to move clock", 20, startY, TimeDB.allowMove,
+      function(self)
+        TimeDB.allowMove = self:GetChecked()
+        frame:ApplyMoveSettings()
+      end,
+      function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Tick to enable dragging; untick for click-through", 1,1,1)
+        GameTooltip:Show()
+      end,
+      function() GameTooltip:Hide() end
+    )
 
     -- Hide Clock Checkbox
-    local hc = CreateFrame("CheckButton","TimeHideClockCB",p,"UICheckButtonTemplate")
-    hc:SetPoint("TOPLEFT", 20, startY - spacing)
-    hc.text:SetText("Tick to hide clock")
-    hc:SetChecked(TimeDB.hideClock)
-    hc:SetScript("OnClick",function(self)
+    local hc = CreateCheckbox(p, "TimeHideClockCB", "Tick to hide clock", 20, startY - spacing, TimeDB.hideClock, function(self)
       TimeDB.hideClock = self:GetChecked()
       frame:ApplySettings()
     end)
 
     -- Hide Icon Checkbox
-    local hi = CreateFrame("CheckButton","TimeHideIconCB",p,"UICheckButtonTemplate")
-    hi:SetPoint("TOPLEFT", 20, startY - 2*spacing)
-    hi.text:SetText("Tick to hide icon")
-    hi:SetChecked(TimeDB.hideIcon)
-    hi:SetScript("OnClick",function(self)
+    local hi = CreateCheckbox(p, "TimeHideIconCB", "Tick to hide icon", 20, startY - 2*spacing, TimeDB.hideIcon, function(self)
       TimeDB.hideIcon = self:GetChecked()
       frame:ApplySettings()
     end)
@@ -879,11 +872,7 @@ function frame:CreateSettingsFrame()
   -- Quality of Life Panel
   do
     local p = panels[3]
-    local ht = CreateFrame("CheckButton","TimeHideTrackerCB",p,"UICheckButtonTemplate")
-    ht:SetPoint("TOPLEFT",20,-110)
-    ht.text:SetText("Hide Objective Tracker")
-    ht:SetChecked(TimePerCharDB.hideTracker)
-    ht:SetScript("OnClick",function(self)
+    local ht = CreateCheckbox(p, "TimeHideTrackerCB", "Hide Objective Tracker", 20, -110, TimePerCharDB.hideTracker, function(self)
       TimePerCharDB.hideTracker = self:GetChecked()
       if self:GetChecked() then ObjectiveTrackerFrame:Hide() else ObjectiveTrackerFrame:Show() end
     end)
@@ -916,11 +905,7 @@ function frame:CreateSettingsFrame()
     local spacing = 30
 
     for i, opt in ipairs(trackingOptions) do
-      local cb = CreateFrame("CheckButton", addonName.."Track"..opt.key.."CB", p, "UICheckButtonTemplate")
-      cb:SetPoint("TOPLEFT", 20, startY - spacing * (i - 1))
-      cb.text:SetText(opt.label)
-      cb:SetChecked(TimeDB[opt.key] or false)
-      cb:SetScript("OnClick", function(self)
+      local cb = CreateCheckbox(p, addonName.."Track"..opt.key.."CB", opt.label, 20, startY - spacing * (i - 1), TimeDB[opt.key] or false, function(self)
         TimeDB[opt.key] = self:GetChecked()
       end)
 
@@ -948,11 +933,7 @@ function frame:CreateSettingsFrame()
       end
     end
 
-    local tooltipCB = CreateFrame("CheckButton", addonName.."TrackTooltipCB", p, "UICheckButtonTemplate")
-    tooltipCB:SetPoint("TOPLEFT", 20, startY - spacing * #trackingOptions - 10)
-    tooltipCB.text:SetText("Show tracking info as tooltip on icon hover")
-    tooltipCB:SetChecked(TimeDB.trackTooltip or false)
-    tooltipCB:SetScript("OnClick", function(self)
+    local tooltipCB = CreateCheckbox(p, addonName.."TrackTooltipCB", "Show tracking info as tooltip on icon hover", 20, startY - spacing * #trackingOptions - 10, TimeDB.trackTooltip or false, function(self)
       TimeDB.trackTooltip = self:GetChecked()
     end)
   end
@@ -1081,14 +1062,10 @@ function frame:CreateSettingsFrame()
       {k="periodicDamage", l="Show Periodic Damage", c="floatingCombatTextPeriodicDamage"},
     }
     for i,opt in ipairs(combatOpts) do
-      local cb = CreateFrame("CheckButton","TimeCombat"..opt.k.."CB",p,"UICheckButtonTemplate")
-      cb:SetPoint("TOPLEFT", sizeSlider, "BOTTOMLEFT", 0, -30 * i)
-      cb.text:SetText(opt.l)
-      cb:SetChecked(TimePerCharDB[opt.k])
-      cb:SetScript("OnClick",function(self)
+      CreateCheckbox(p, "TimeCombat"..opt.k.."CB", opt.l, 0, -30 * i, TimePerCharDB[opt.k], function(self)
         TimePerCharDB[opt.k] = self:GetChecked()
         SetCVar(opt.c, self:GetChecked() and 1 or 0)
-      end)
+      end, nil, nil, sizeSlider, "BOTTOMLEFT")
     end
   end
 
