@@ -71,6 +71,10 @@ local DEFAULTS = {
   hideIcon            = false,
   alarmTime           = "",    -- Added default alarm time
   alarmReminder       = "",    -- Added default reminder text
+  -- BEGIN FEATURE: server time and hourly chime defaults
+  useServerTime       = false,
+  hourlyChime         = false,
+  -- END FEATURE
   -- BEGIN TRACKING DEFAULTS
   trackSession        = false,
   trackDay            = false,
@@ -121,6 +125,16 @@ function frame:FormatSeconds(sec)
   return string.format("%dh %dm", h, m)
 end
 
+-- BEGIN FEATURE: helper for server/local time
+local function GetTimeValue(fmt)
+  if TimeDB.useServerTime and GetServerTime then
+    return date(fmt, GetServerTime())
+  else
+    return date(fmt)
+  end
+end
+-- END FEATURE
+
 -- Small utility to create a checkbutton with sane defaults
 local function CreateCheckbox(parent, name, label, x, y, checked, onClick, onEnter, onLeave, relativeTo, relativePoint, point)
   local cb = CreateFrame("CheckButton", name, parent, "UICheckButtonTemplate")
@@ -146,22 +160,22 @@ end
 function frame:UpdateTime()
   local parts = {}
   if TimeDB.showDate then
-    tinsert(parts, date("%a"))
-    tinsert(parts, date("%b"))
-    tinsert(parts, tostring(tonumber(date("%e"))))
+    tinsert(parts, GetTimeValue("%a"))
+    tinsert(parts, GetTimeValue("%b"))
+    tinsert(parts, tostring(tonumber(GetTimeValue("%e"))))
   end
 
-  local hr  = TimeDB.is24h and date("%H") or date("%I"):gsub("^0","")
-  local min = date("%M")
+  local hr  = TimeDB.is24h and GetTimeValue("%H") or GetTimeValue("%I"):gsub("^0","")
+  local min = GetTimeValue("%M")
 
   if TimeDB.showSeconds then
-    tinsert(parts, ("%s:%s:%s"):format(hr, min, date("%S")))
+    tinsert(parts, ("%s:%s:%s"):format(hr, min, GetTimeValue("%S")))
   else
     tinsert(parts, ("%s:%s"):format(hr, min))
   end
 
   if not TimeDB.is24h then
-    tinsert(parts, date("%p"))
+    tinsert(parts, GetTimeValue("%p"))
   end
 
   self.fs:SetText(table.concat(parts, " "))
@@ -478,10 +492,23 @@ end
 
 -- ─── Alarm Polling ────────────────────────────────────────────────────────────
 function frame:CheckAlarm()
+  -- BEGIN FEATURE: hourly chime support
+  if TimeDB.hourlyChime then
+    local minute = GetTimeValue("%M")
+    if minute == "00" then
+      local hour = GetTimeValue("%H")
+      if self.lastChimeHour ~= hour then
+        PlaySound(SOUNDKIT.ALARM_CLOCK_WARNING_3 or SOUNDKIT.RAID_WARNING, "Master")
+        self.lastChimeHour = hour
+      end
+    end
+  end
+  -- END FEATURE
+
   if not TimeDB.alarmTime or TimeDB.alarmTime == "" or self.alarmPlaying then
     return
   end
-  local t = date("%H:%M")
+  local t = GetTimeValue("%H:%M")
   if t == TimeDB.alarmTime then
     self:StartAlarm()
   end
@@ -597,6 +624,17 @@ function frame:CreateSettingsFrame()
       TimeDB.showSeconds = self:GetChecked()
       frame:ApplySettings()
     end)
+
+    -- BEGIN FEATURE: server time & hourly chime checkboxes
+    local ust = CreateCheckbox(p, "TimeUseServerCB", "Use Server Time", 20, -210, TimeDB.useServerTime, function(self)
+      TimeDB.useServerTime = self:GetChecked()
+      frame:UpdateTime()
+    end)
+
+    local chime = CreateCheckbox(p, "TimeChimeCB", "Hourly Chime", 160, -210, TimeDB.hourlyChime, function(self)
+      TimeDB.hourlyChime = self:GetChecked()
+    end)
+    -- END FEATURE
 
     -- Color Picker Button
     local cb = CreateFrame("Button","TimeColorButton",p,"UIPanelButtonTemplate")
@@ -725,6 +763,8 @@ function frame:CreateSettingsFrame()
       sd:SetChecked(TimeDB.showDate)
       h24:SetChecked(TimeDB.is24h)
       ss:SetChecked(TimeDB.showSeconds)
+      ust:SetChecked(TimeDB.useServerTime)
+      chime:SetChecked(TimeDB.hourlyChime)
       UIDropDownMenu_SetSelectedValue(fontDropdown, TimeDB.fontName)
       UIDropDownMenu_SetText(fontDropdown, TimeDB.fontName)
       mv:SetChecked(TimeDB.allowMove)
@@ -936,6 +976,22 @@ function frame:CreateSettingsFrame()
     local tooltipCB = CreateCheckbox(p, addonName.."TrackTooltipCB", "Show tracking info as tooltip on icon hover", 20, startY - spacing * #trackingOptions - 10, TimeDB.trackTooltip or false, function(self)
       TimeDB.trackTooltip = self:GetChecked()
     end)
+
+    -- BEGIN FEATURE: reset tracking data
+    local resetBtn = CreateFrame("Button", addonName.."TrackResetBtn", p, "UIPanelButtonTemplate")
+    resetBtn:SetSize(120,22)
+    resetBtn:SetPoint("TOPLEFT", tooltipCB, "BOTTOMLEFT", 0, -20)
+    resetBtn:SetText("Reset Data")
+    resetBtn:SetScript("OnClick", function()
+      TimeDB.daySeconds   = 0
+      TimeDB.weekSeconds  = 0
+      TimeDB.monthSeconds = 0
+      TimeDB.yearSeconds  = 0
+      frame.sessionStart = time()
+      frame:UpdateTracking()
+      print(addonName..": Tracking data reset.")
+    end)
+    -- END FEATURE
   end
 
   -- Combat Panel
