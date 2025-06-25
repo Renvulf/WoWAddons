@@ -1804,12 +1804,15 @@ function frame:CreateSettingsFrame()
             local fontObj   = fontData.font
             local relative  = fontData.relative
             local dispCopy  = display
+            -- capture path separately so closures don't all reference the final
+            -- loop iteration's value
+            local pathCopy  = fontData.path
             info.func = function()
               -- clear other dropdown texts
               for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
               TimePerCharDB.combatFont = relative
               UIDropDownMenu_SetText(dd, dispCopy)
-              SetCombatPreviewFont(fontObj, fontData.path)
+              SetCombatPreviewFont(fontObj, pathCopy)
               preview:SetText(editBox:GetText())
             end
             info.checked = (TimePerCharDB.combatFont == fontData.relative)
