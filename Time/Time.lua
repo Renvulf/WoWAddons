@@ -1857,6 +1857,12 @@ function frame:CreateSettingsFrame()
       To make previewing reliable we try both the file path and the font object
       itself, falling back gracefully if either method fails.
     --]]
+    --[[
+      Robustly apply a combat font to the preview field. Some systems may fail
+      to load fonts unless provided an explicit file path. We therefore attempt
+      to load the font via its path using a protected call and fall back to the
+      provided FontObject if that fails.
+    --]]
     SetCombatPreviewFont = function(fontObj, path)
       if not fontObj then return end
 
@@ -1868,23 +1874,28 @@ function frame:CreateSettingsFrame()
 
       -- Retrieve font attributes so we can scale them up for the preview
       local fPath, size, flags = fontObj:GetFont()
-      path   = path or fPath
-      size   = size  or 20
-      flags  = flags or ""
+      path   = path   or fPath
+      size   = size   or 20
+      flags  = flags  or ""
       local scaled = size * 2
 
-      -- Try applying by absolute path first; use the object as fallback
-      local ok = false
-      if path then ok = preview:SetFont(path, scaled, flags) end
-      if not ok then
-        preview:SetFontObject(fontObj)
-        _, scaled = preview:GetFont()
-        scaled = scaled or size * 2
+      -- Try loading the font file safely. SetFont does not return a status so
+      -- we use pcall to detect any error when applying by path.
+      local loadedOK = false
+      if path then
+        loadedOK = pcall(preview.SetFont, preview, path, scaled, flags)
       end
 
-      -- Pad the preview height so tall fonts are not clipped
-      local pad = math.ceil(scaled * 0.4)
-      preview:SetHeight(scaled + pad * 2)
+      -- If loading by path failed, fall back to using the FontObject directly
+      if not loadedOK then
+        preview:SetFontObject(fontObj)
+      end
+
+      -- Adjust height so tall glyphs are not clipped
+      local _, appliedSize = preview:GetFont()
+      appliedSize = appliedSize or scaled
+      local pad = math.ceil(appliedSize * 0.4)
+      preview:SetHeight(appliedSize + pad * 2)
     end
 
     -- Apply default font at double size on initialization
