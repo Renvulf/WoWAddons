@@ -1813,7 +1813,13 @@ function frame:CreateSettingsFrame()
               TimePerCharDB.combatFont = relative
               UIDropDownMenu_SetText(dd, dispCopy)
               SetCombatPreviewFont(fontObj, pathCopy)
-              preview:SetText(editBox:GetText())
+              -- BEGIN FIX: force preview to redraw when font stays the same
+              -- WoW's UI may skip layout if text hasn't changed; clearing then
+              -- resetting ensures the new font actually renders.
+              local txt = editBox:GetText()
+              preview:SetText("")
+              preview:SetText(txt)
+              -- END FIX
             end
             info.checked = (TimePerCharDB.combatFont == fontData.relative)
             UIDropDownMenu_AddButton(info)
