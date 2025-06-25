@@ -62,9 +62,10 @@ local DEFAULTS = {
   showSeconds         = false,
   fontName            = "SF-Pro-Regular",
   fontColor           = {1,1,1,1},
-  -- RGB animation & glow defaults
+  -- RGB animation default
   rgbClock           = false,
-  fontGlow           = false,
+  -- Bounce animation default
+  bounceClock        = false,
   minimapAnchorPoint  = "TOPLEFT",
   minimapRelativePoint= "TOPLEFT",
   minimapX            = 0,
@@ -224,6 +225,11 @@ function frame:StartRGBTicker()
         s:SetTextColor(r, g, b, alpha * 0.3)
       end
     end
+    if self.bounceStrings then
+      for _, bs in ipairs(self.bounceStrings) do
+        bs:SetTextColor(r, g, b, alpha)
+      end
+    end
   end)
 end
 
@@ -232,6 +238,31 @@ function frame:StopRGBTicker()
   if self.rgbTicker then
     self.rgbTicker:Cancel()
     self.rgbTicker = nil
+  end
+end
+
+-- Start per-digit bounce animation
+function frame:StartBounceTicker()
+  if self.bounceTicker then self.bounceTicker:Cancel() end
+  local amp   = math.max(2, math.floor(TimeDB.fontSize * 0.2))
+  local angle = 0
+  local phase = 0.4
+  self.bounceTicker = C_Timer.NewTicker(0.05, function()
+    angle = angle + 0.2
+    if self.bounceStrings then
+      for i, bs in ipairs(self.bounceStrings) do
+        local offset = math.sin(angle + i * phase) * amp
+        bs:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", bs.baseX, bs.baseY + offset)
+      end
+    end
+  end)
+end
+
+-- Stop bounce animation
+function frame:StopBounceTicker()
+  if self.bounceTicker then
+    self.bounceTicker:Cancel()
+    self.bounceTicker = nil
   end
 end
 
@@ -284,11 +315,53 @@ function frame:UpdateTime()
       s:SetText(text)
     end
   end
+  -- Handle bounce display
+  if TimeDB.bounceClock and not TimeDB.hideClock then
+    self:UpdateBounceStrings(text)
+    self.fs:Hide()
+  else
+    if self.bounceStrings then
+      for _, bs in ipairs(self.bounceStrings) do bs:Hide() end
+    end
+    if not TimeDB.hideClock then self.fs:Show() end
+  end
   -- BEGIN FEATURE: update LDB feed
   if self.dataObject then
     self.dataObject.text = text
   end
   -- END FEATURE
+end
+
+-- Update or create per-character font strings for bounce effect
+function frame:UpdateBounceStrings(text)
+  self.bounceStrings = self.bounceStrings or {}
+  local fontFile = FONT_FOLDER .. (TimeDB.fontName or DEFAULTS.fontName) .. ".ttf"
+  local c = TimeDB.fontColor or {1,1,1,1}
+
+  local iconSize = TimeDB.fontSize * 2
+  local gap      = -10
+  local startX   = iconSize + gap
+  local x = startX
+  for i = 1, #text do
+    local ch = text:sub(i,i)
+    local fs = self.bounceStrings[i]
+    if not fs then
+      fs = frame:CreateFontString(nil, "OVERLAY")
+      self.bounceStrings[i] = fs
+    end
+    fs:SetFont(fontFile, TimeDB.fontSize, "")
+    fs:SetTextColor(unpack(c))
+    fs:SetText(ch)
+    fs:Show()
+    fs:ClearAllPoints()
+    fs:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", x, 0)
+    fs.baseX = x
+    fs.baseY = 0
+    x = x + fs:GetStringWidth()
+  end
+  for j = #text + 1, #self.bounceStrings do
+    self.bounceStrings[j]:Hide()
+  end
 end
 
 function frame:ApplySettings()
@@ -317,14 +390,15 @@ function frame:ApplySettings()
   self.fs:SetShadowColor(0, 0, 0, 0)
   self.fs:SetShadowOffset(0, 0)
 
-  -- Update shadow font strings to match current font/color
+  -- Update shadow font strings (used previously for glow effect)
   if self.shadows then
     for _, s in ipairs(self.shadows) do
       pcall(s.SetFont, s, fontFile, TimeDB.fontSize, "")
       s:SetShadowColor(0, 0, 0, 0)
       s:SetShadowOffset(0, 0)
       s:SetTextColor(c[1], c[2], c[3], 0.3)
-      if TimeDB.fontGlow then s:Show() else s:Hide() end
+      -- Glow feature removed – always hide the shadow strings
+      s:Hide()
     end
   end
 
@@ -355,6 +429,12 @@ function frame:ApplySettings()
 
   self:RestartTicker()
   self:UpdateTime()
+
+  -- Manage bounce ticker based on setting
+  self:StopBounceTicker()
+  if TimeDB.bounceClock and not TimeDB.hideClock then
+    self:StartBounceTicker()
+  end
 end
 
 -- ─── Draggable / Click-Through Logic ──────────────────────────────────────────
@@ -970,9 +1050,9 @@ function frame:CreateSettingsFrame()
       frame:ApplySettings()
     end)
 
-    -- Glow Checkbox
-    local glow = CreateCheckbox(p, "TimeGlowCB", "Glow", 160, startY - 3*spacing, TimeDB.fontGlow, function(self)
-      TimeDB.fontGlow = self:GetChecked()
+    -- Bounce Checkbox
+    local bc = CreateCheckbox(p, "TimeBounceCB", "Bounce", 160, startY - 3*spacing, TimeDB.bounceClock, function(self)
+      TimeDB.bounceClock = self:GetChecked()
       frame:ApplySettings()
     end)
 
@@ -1040,7 +1120,7 @@ function frame:CreateSettingsFrame()
       hc:SetChecked(TimeDB.hideClock)
       hi:SetChecked(TimeDB.hideIcon)
       rgb:SetChecked(TimeDB.rgbClock)
-      glow:SetChecked(TimeDB.fontGlow)
+      bc:SetChecked(TimeDB.bounceClock)
 
       frame:ApplySettings()
       frame:ApplyMoveSettings()
@@ -1499,6 +1579,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
     if self.trackTicker then self.trackTicker:Cancel(); self.trackTicker = nil end
     if self.alarmChecker then self.alarmChecker:Cancel(); self.alarmChecker = nil end
     self:StopRGBTicker()
+    self:StopBounceTicker()
     -- END TRACKING ENHANCEMENT
 
   else
