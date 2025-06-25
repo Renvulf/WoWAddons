@@ -1,0 +1,8 @@
+## Interface: 110105
+## Title: FPS Monitor
+## Notes: (Enter addon notes here)
+## Author: Renvulf
+## SavedVariables: FPSMonitorDB
+## SavedVariablesPerCharacter: FPSPerCharDB
+## IconTexture: Interface\AddOns\Time\FPS1.tga
+FPSMonitor.lua
