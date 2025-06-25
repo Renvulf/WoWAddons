@@ -1797,12 +1797,16 @@ function frame:CreateSettingsFrame()
             local display = fname:gsub("%.otf$",""):gsub("%.ttf$","")
             info.text = display
             info.value = fname
+            -- Capture per-item values so the correct font is applied
+            local fontRef   = fontData.font
+            local relative  = fontData.relative
+            local dispCopy  = display
             info.func = function()
               -- clear other dropdowns' text
               for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
-              TimePerCharDB.combatFont = fontData.relative
-              UIDropDownMenu_SetText(dd, display)
-              SetCombatPreviewFont(fontData.font)
+              TimePerCharDB.combatFont = relative
+              UIDropDownMenu_SetText(dd, dispCopy)
+              SetCombatPreviewFont(fontRef)
               preview:SetText(editBox:GetText())
             end
             info.checked = (TimePerCharDB.combatFont == fontData.relative)
