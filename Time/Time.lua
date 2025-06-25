@@ -1456,6 +1456,14 @@ function frame:CreateSettingsFrame()
     durSlider:SetObeyStepOnDrag(true)
     durSlider:SetWidth(300)
     durSlider:SetValue(TimeDB.alarmDuration or DEFAULTS.alarmDuration)
+    -- Position the slider's value text to the right to avoid overlap with
+    -- the "Alarm Duration (sec)" label above.
+    local durText = _G[durSlider:GetName() .. "Text"]
+    if durText then
+      durText:ClearAllPoints()
+      durText:SetPoint("LEFT", durSlider, "RIGHT", 10, 0)
+      durText:SetJustifyH("LEFT")
+    end
     durSlider:SetScript("OnValueChanged", function(self, v)
       v = math.floor(v + 0.5)
       TimeDB.alarmDuration = v
