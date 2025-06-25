@@ -22,25 +22,74 @@ TimeDB = TimeDB or {}                -- global settings across characters
 TimePerCharDB = TimePerCharDB or {}  -- per-character settings
 
 -- ─── Combat Fonts Detection ──────────────────────────────────────────────────
-local COMBAT_FONT_PATH = "Interface\\AddOns\\Time\\CombatFonts\\"
-local MAX_COMBAT_FONTS  = 26
+-- Font groups with their respective font files. These correspond to the folders
+-- inside the addon directory.
+local COMBAT_FONT_GROUPS = {
+  ["Fun"] = {
+    path  = "Interface\\AddOns\\Time\\Fun\\",
+    fonts = {
+      "04b.ttf", "Barriecito.ttf", "Green Fuz.otf", "Guroes.ttf",
+      "Melted.ttf", "Munsteria.ttf", "Runic.ttf", "Skullphabet.ttf",
+      "WhoAsksSatan.ttf", "Wickedmouse.ttf", "edkies.ttf", "graff.ttf",
+    },
+  },
+  ["Future"] = {
+    path  = "Interface\\AddOns\\Time\\Future\\",
+    fonts = {
+      "914Solid.ttf", "ChopSic.ttf", "Digital.ttf", "FastHand.ttf",
+      "Orbitron.ttf", "Pepsi.ttf", "RaceSpace.ttf", "RushDriver.ttf",
+    },
+  },
+  ["Movie/Game"] = {
+    path  = "Interface\\AddOns\\Time\\Movie:Game\\",
+    fonts = {
+      "Deltarune.ttf", "Halo.ttf", "HarryP.ttf", "Pokemon.ttf",
+      "Spongebob.ttf", "Terminator.ttf", "modernwarfare.ttf",
+    },
+  },
+  ["Easy-to-Read"] = {
+    path  = "Interface\\AddOns\\Time\\Easy-to-Read\\",
+    fonts = {
+      "AlteHaasGroteskBold.ttf", "Expressway.ttf", "NotoSans_Condensed-Bold.ttf",
+      "PTSansNarrow-Bold.ttf", "Prototype.ttf", "Roboto-Bold.ttf",
+      "SF-Pro.ttf", "accidentalpres.ttf", "bignoodletitling.ttf",
+      "continuum.ttf", "pf_tempesta_seven.ttf",
+    },
+  },
+  ["Custom"] = {
+    -- Folder for user provided fonts. We support up to twenty numbered fonts
+    -- named 1.ttf through 20.ttf.  Users may place their own files here.
+    path  = "Interface\\AddOns\\Time\\Custom(1-20)\\",
+    fonts = {},
+  },
+}
+
+-- Populate custom font list with numbered file names
+for i = 1, 20 do
+  table.insert(COMBAT_FONT_GROUPS["Custom"].fonts, i .. ".ttf")
+end
 
 -- Store Blizzard’s original combat-text fonts so we can restore them
 local ORIGINAL_DAMAGE_TEXT_FONT = _G["DAMAGE_TEXT_FONT"]
 local ORIGINAL_COMBAT_TEXT_FONT = _G["COMBAT_TEXT_FONT"]
 
-local combatFontCache   = {}
-local combatFontExists  = {}
-for i = 1, MAX_COMBAT_FONTS do
-  local path = COMBAT_FONT_PATH .. i .. ".ttf"
-  local f    = CreateFont(addonName .. "CombatFontCache" .. i)
-  f:SetFont(path, 20, "")
-  local loaded = f:GetFont()
-  if loaded and loaded:lower():find(i .. ".ttf", 1, true) then
-    combatFontExists[i] = true
-    combatFontCache[i]  = f
-  else
-    combatFontExists[i] = false
+-- Cache fonts so they can be previewed in the options panel
+local combatFontCache  = {}
+local combatFontExists = {}
+for group, data in pairs(COMBAT_FONT_GROUPS) do
+  combatFontCache[group]  = {}
+  combatFontExists[group] = {}
+  for _, fname in ipairs(data.fonts) do
+    local path = data.path .. fname
+    local f    = CreateFont(addonName .. "CombatFont" .. group .. fname)
+    f:SetFont(path, 20, "")
+    local loaded = f:GetFont()
+    if loaded and loaded:lower():find(fname:lower(), 1, true) then
+      combatFontExists[group][fname] = true
+      combatFontCache[group][fname]  = f
+    else
+      combatFontExists[group][fname] = false
+    end
   end
 end
 
@@ -706,7 +755,7 @@ function frame:ApplyCombatSettings()
     end
   end
   if TimePerCharDB.combatFont then
-    local fontFile = COMBAT_FONT_PATH .. TimePerCharDB.combatFont
+    local fontFile = "Interface\\AddOns\\Time\\" .. TimePerCharDB.combatFont
     _G["DAMAGE_TEXT_FONT"] = fontFile
     _G["COMBAT_TEXT_FONT"]  = fontFile
   end
@@ -1355,10 +1404,10 @@ function frame:CreateSettingsFrame()
       local csValue = _G[addonName.."CombatScaleValue"]
       if csValue then csValue:SetText("1.0") end
 
-      local cfd = _G[addonName.."CombatFontDropdown"]
-      if cfd then
-        UIDropDownMenu_SetSelectedValue(cfd, nil)
-        UIDropDownMenu_SetText(cfd, "Select Font")
+      local groups = {"Fun","Future","Movie/Game","Easy-to-Read","Custom"}
+      for _,g in ipairs(groups) do
+        local dd = _G[addonName .. g:gsub("[^%w]","") .. "Dropdown"]
+        if dd then UIDropDownMenu_SetText(dd, "Select Font") end
       end
     end)
   end
@@ -1636,12 +1685,58 @@ function frame:CreateSettingsFrame()
     fontLabel:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -110)
     fontLabel:SetText("Combat Text Font:")
 
-    local dropdown = CreateFrame("Frame", addonName .. "CombatFontDropdown", p, "UIDropDownMenuTemplate")
-    dropdown:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", 0, -6)
-    UIDropDownMenu_SetWidth(dropdown, 180)
+    -- Create one dropdown per font group
+    local dropdowns = {}
+    local lastDD
+    local order = {"Fun","Future","Movie/Game","Easy-to-Read","Custom"}
+    for _,grp in ipairs(order) do
+      local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]","") .. "Dropdown", p, "UIDropDownMenuTemplate")
+      if not lastDD then
+        dd:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", 0, -6)
+      else
+        dd:SetPoint("TOPLEFT", lastDD, "BOTTOMLEFT", 0, -10)
+      end
+      UIDropDownMenu_SetWidth(dd, 180)
+      local lbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+      lbl:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 16, 3)
+      lbl:SetText(grp)
+      dropdowns[grp] = dd
+      lastDD = dd
+
+      UIDropDownMenu_Initialize(dd, function(self)
+        for _,fname in ipairs(COMBAT_FONT_GROUPS[grp].fonts) do
+          if combatFontExists[grp][fname] then
+            local info = UIDropDownMenu_CreateInfo()
+            local display = fname:gsub("%.otf$",""):gsub("%.ttf$","")
+            info.text = display
+            info.value = fname
+            info.func = function()
+              -- clear other dropdowns' text
+              for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
+              TimePerCharDB.combatFont = grp .. "/" .. fname
+              UIDropDownMenu_SetText(dd, display)
+              SetCombatPreviewFont(combatFontCache[grp][fname])
+              preview:SetText(editBox:GetText())
+            end
+            info.checked = (TimePerCharDB.combatFont == grp .. "/" .. fname)
+            UIDropDownMenu_AddButton(info)
+          end
+        end
+      end)
+    end
+
+    -- Set initial dropdown text and preview based on saved font
+    for _,dd in pairs(dropdowns) do UIDropDownMenu_SetText(dd, "Select Font") end
+    if TimePerCharDB.combatFont then
+      local g,f = TimePerCharDB.combatFont:match("^([^/]+)/(.+)$")
+      if g and f and dropdowns[g] and combatFontExists[g][f] then
+        UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$","") )
+        SetCombatPreviewFont(combatFontCache[g][f])
+      end
+    end
 
     local note = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    note:SetPoint("TOPLEFT", dropdown, "BOTTOMLEFT", 0, -4)
+    note:SetPoint("TOPLEFT", lastDD, "BOTTOMLEFT", 0, -4)
     note:SetText("Requires full game restart once applied to change font")
 
     local preview = p:CreateFontString(addonName.."CombatPreviewFS","OVERLAY","GameFontNormalLarge")
@@ -1680,38 +1775,6 @@ function frame:CreateSettingsFrame()
       end
     end)
 
-    UIDropDownMenu_Initialize(dropdown, function(self, level)
-      for i = 1, MAX_COMBAT_FONTS do
-        if combatFontExists[i] then
-          local info = UIDropDownMenu_CreateInfo()
-          local fname = i .. ".ttf"
-          info.text  = fname
-          info.value = i
-          info.func  = function(self)
-            TimePerCharDB.combatFont = fname
-            UIDropDownMenu_SetSelectedValue(dropdown, self.value)
-            UIDropDownMenu_SetText(dropdown, fname)
-            SetCombatPreviewFont(combatFontCache[self.value])
-            preview:SetText(editBox:GetText())
-          end
-          info.checked = (TimePerCharDB.combatFont == fname)
-          UIDropDownMenu_AddButton(info)
-        end
-      end
-    end)
-
-    if TimePerCharDB.combatFont then
-      local idx = tonumber(TimePerCharDB.combatFont:match("^(%d+)"))
-      if idx and combatFontExists[idx] then
-        UIDropDownMenu_SetSelectedValue(dropdown, idx)
-        UIDropDownMenu_SetText(dropdown, TimePerCharDB.combatFont)
-        SetCombatPreviewFont(combatFontCache[idx])
-      else
-        UIDropDownMenu_SetText(dropdown, TimePerCharDB.combatFont)
-      end
-    else
-      UIDropDownMenu_SetText(dropdown, "Select Font")
-    end
 
     -- Combat Text Size Slider
     local sizeLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
