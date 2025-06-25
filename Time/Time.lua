@@ -1617,6 +1617,41 @@ SlashCmdList["TIME"] = function(msg)
     return
   end
 
+  -- Check for an alarm command in the format "alarm HH:MM [AM/PM] [reminder]"
+  local h, m, ap, reminder = cmd:match("^alarm%s+(%d?%d):(%d%d)%s*(%a%a)?%s*(.*)$")
+  if h then
+    local hour = tonumber(h)
+    local min  = tonumber(m)
+    ap = ap and ap:upper() or nil
+    -- validate minutes
+    if min < 0 or min > 59 then
+      print(addonName..": Invalid minutes. Must be 00-59.")
+      return
+    end
+    -- handle 12h or 24h input
+    if ap == "AM" or ap == "PM" then
+      if hour < 1 or hour > 12 then
+        print(addonName..": Invalid hour for 12h format. Use 1-12.")
+        return
+      end
+      if ap == "PM" and hour < 12 then hour = hour + 12 end
+      if ap == "AM" and hour == 12 then hour = 0 end
+    else
+      if hour < 0 or hour > 23 then
+        print(addonName..": Invalid hour for 24h format. Use 0-23.")
+        return
+      end
+    end
+
+    TimeDB.alarmTime = string.format("%02d:%02d", hour, min)
+    TimeDB.alarmReminder = strtrim(reminder or "")
+    print(addonName..": Alarm time set to "..TimeDB.alarmTime)
+    if TimeDB.alarmReminder ~= "" then
+      print(addonName..": Reminder text set to '"..TimeDB.alarmReminder.."'.")
+    end
+    return
+  end
+
   print(addonName..": unknown command")
 end
 
