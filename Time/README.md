@@ -19,10 +19,8 @@ Install the addon in your `Interface/AddOns` directory and type `/time` in game 
 Use these chat commands for quick actions:
 
 * `/time` – toggle the configuration window.
-* `/time alarm HH:MM [AM|PM] [message]` – set an alarm with an optional reminder message. Accepts both 24‑hour and 12‑hour formats.
-  * Examples:
-    * `/time alarm 07:30 Wake up!`
-    * `/time alarm 7:30 AM Morning dungeon`
+* `/alarm <minutes> [message]` – set an alarm that triggers after the specified number of minutes with optional reminder text.
+  * Example: `/alarm 10 Brew coffee`
 * `/time remind me in <number>[s|m|h|d] <message>` – show a toast reminder after the specified delay.
   * Example: `/time remind me in 5m Check the auction house`
 
