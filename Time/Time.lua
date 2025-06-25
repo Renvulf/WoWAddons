@@ -791,6 +791,62 @@ function frame:CheckAlarm()
   end
 end
 
+-- ─── Chat Reminder Scheduling ────────────────────────────────────────────────
+function frame:AddToastReminder(delay, text)
+  self.reminders = self.reminders or {}
+  local when = (GetServerTime and GetServerTime() or time()) + delay
+  table.insert(self.reminders, {time = when, text = text})
+end
+
+function frame:ShowToast(text)
+  if not self.toastFrame then
+    local f = CreateFrame("Frame", addonName.."Toast", UIParent, "BackdropTemplate")
+    f:SetSize(200, 40)
+    f:SetBackdrop({bgFile = "Interface/Tooltips/UI-Tooltip-Background", edgeFile = "Interface/Tooltips/UI-Tooltip-Border", tile = true, tileSize = 16, edgeSize = 16, insets = {left=4,right=4,top=4,bottom=4}})
+    f:SetBackdropColor(0,0,0,0.9)
+    f:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -20, -20)
+    local fs = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    fs:SetPoint("CENTER")
+    f.text = fs
+    self.toastFrame = f
+  end
+  local f = self.toastFrame
+  f.text:SetText(text)
+  f:Show()
+  C_Timer.After(5, function() f:Hide() end)
+end
+
+function frame:CheckReminders()
+  if not self.reminders then return end
+  local now = GetServerTime and GetServerTime() or time()
+  for i = #self.reminders, 1, -1 do
+    local r = self.reminders[i]
+    if now >= r.time then
+      self:ShowToast(r.text)
+      table.remove(self.reminders, i)
+    end
+  end
+end
+
+function frame:HandleCalendarAlarm(...)
+  local title
+  if C_Calendar and C_Calendar.GetEventIndex then
+    local idx = C_Calendar.GetEventIndex()
+    if idx then
+      local info = C_Calendar.GetEventInfo(idx)
+      if info and info.title then title = info.title end
+    end
+  elseif CalendarGetEventIndex then
+    local month, day, eventIndex = CalendarGetEventIndex()
+    if month and day and eventIndex then
+      CalendarGetDayEvent(month, day, eventIndex)
+      if CalendarEventGetTitle then title = CalendarEventGetTitle() end
+    end
+  end
+  TimeDB.alarmReminder = title or "Calendar Event"
+  self:StartAlarm()
+end
+
 -- ─── Settings Panel & Tabs ──────────────────────────────────────────────────
 function frame:ToggleSettings()
   if not self.settingsFrame then self:CreateSettingsFrame() end
@@ -1059,9 +1115,8 @@ function frame:CreateSettingsFrame()
       frame:ApplySettings()
     end)
 
-    -- Wave Checkbox (renamed from "Bounce")
-    -- Shifted slightly upwards to avoid overlapping the Default button
-    local bc = CreateCheckbox(p, "TimeWaveCB", "Wave", 160, startY - 4*spacing + 20, TimeDB.waveClock, function(self)
+    -- Wave Checkbox (renamed from "Bounce") aligned with other options
+    local bc = CreateCheckbox(p, "TimeWaveCB", "Wave", 160, startY - 4*spacing, TimeDB.waveClock, function(self)
       TimeDB.waveClock = self:GetChecked()
       frame:ApplySettings()
     end)
@@ -1496,12 +1551,33 @@ end
 
 -- ─── Slash Command ───────────────────────────────────────────────────────────
 SLASH_TIME1 = "/time"
-SlashCmdList["TIME"] = function() frame:ToggleSettings() end
+SlashCmdList["TIME"] = function(msg)
+  local cmd = msg and strtrim(msg) or ""
+  if cmd == "" then
+    frame:ToggleSettings()
+    return
+  end
+
+  local num, unit, text = cmd:lower():match("^remind%s+me%s+in%s+(%d+)([smhd])%s+(.+)$")
+  if num then
+    local secs = tonumber(num)
+    if unit == "m" then secs = secs * 60
+    elseif unit == "h" then secs = secs * 3600
+    elseif unit == "d" then secs = secs * 86400
+    end
+    frame:AddToastReminder(secs, text)
+    print(addonName..": reminder set in "..num..unit)
+    return
+  end
+
+  print(addonName..": unknown command")
+end
 
 -- ─── Initialization & Events ─────────────────────────────────────────────────
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("PLAYER_LOGOUT")
+frame:RegisterEvent("CALENDAR_EVENT_ALARM")
 
 frame:SetScript("OnEvent", function(self, event, ...)
   if event == "PLAYER_LOGIN" then
@@ -1575,7 +1651,10 @@ frame:SetScript("OnEvent", function(self, event, ...)
     self.trackTicker = C_Timer.NewTicker(1, function() self:UpdateTracking() end)
     -- END TRACKING ENHANCEMENT
 
-    self.alarmChecker = C_Timer.NewTicker(1, function() self:CheckAlarm() end)
+    self.alarmChecker = C_Timer.NewTicker(1, function()
+      self:CheckAlarm()
+      self:CheckReminders()
+    end)
     self:UnregisterEvent("PLAYER_LOGIN")
 
   elseif event == "PLAYER_LOGOUT" then
@@ -1591,6 +1670,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
     self:StopRGBTicker()
     self:StopWaveTicker()
     -- END TRACKING ENHANCEMENT
+
+  elseif event == "CALENDAR_EVENT_ALARM" then
+    self:HandleCalendarAlarm(...)
 
   else
     return self[event] and self[event](self, event, ...)
