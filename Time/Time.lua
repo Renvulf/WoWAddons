@@ -156,21 +156,34 @@ function frame:FormatSeconds(sec)
 end
 
 -- Helper to play sounds across API versions
+--
+-- Play a sound file and return its handle if available. WoW's sound API has
+-- changed signatures over time, so we defensively check each return value and
+-- only propagate a numeric sound handle.
+--
 local function SafePlaySound(path)
+  local h1, h2
+
   if C_Sound and C_Sound.PlaySoundFile then
-    return C_Sound.PlaySoundFile(path, "Master")
+    h1, h2 = C_Sound.PlaySoundFile(path, "Master")
   elseif PlaySoundFile then
-    local ok, handle = pcall(PlaySoundFile, path, "Master")
-    return ok and handle or nil
+    local ok; ok, h1, h2 = pcall(PlaySoundFile, path, "Master")
+    if not ok then h1, h2 = nil, nil end
   elseif PlaySound then
     pcall(PlaySound, SOUNDKIT.RAID_WARNING, "Master")
     return nil
   end
+
+  -- Prefer the second return (Retail), otherwise the first if numeric
+  if type(h2) == "number" then return h2 end
+  if type(h1) == "number" then return h1 end
+  return nil
 end
 
 -- Helper to stop sounds started with SafePlaySound
 local function SafeStopSound(handle)
-  if not handle then return end
+  if type(handle) ~= "number" then return end
+
   if C_Sound and C_Sound.StopSoundFile then
     C_Sound.StopSoundFile(handle)
   elseif C_Sound and C_Sound.StopSound then
