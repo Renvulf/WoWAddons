@@ -1688,8 +1688,11 @@ function frame:CreateSettingsFrame()
     -- Create one dropdown per font group arranged in two columns
     local dropdowns = {}
     local lastDD
-    -- forward declare helper so dropdown callbacks can reference it
+    -- forward declare helpers and preview/edit controls so callbacks
+    -- defined below capture the proper local variables
     local SetCombatPreviewFont
+    local preview
+    local editBox
     local order = {"Fun","Future","Movie/Game","Easy-to-Read","Custom"}
     local colWidth  = 150      -- width of each dropdown
     local colOffset = 160      -- spacing between columns
@@ -1698,7 +1701,8 @@ function frame:CreateSettingsFrame()
       local row = math.floor((idx-1)/2)
       local col = (idx-1) % 2
       -- extra spacing below the main label so text doesn't overlap
-      dd:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", col*colOffset, -20 - row*40)
+      -- add more vertical spacing between rows to avoid overlap
+      dd:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", col*colOffset, -20 - row*45)
       UIDropDownMenu_SetWidth(dd, colWidth)
       local lbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
       lbl:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 16, 3)
@@ -1731,12 +1735,14 @@ function frame:CreateSettingsFrame()
     end
 
     local note = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    note:SetPoint("TOPLEFT", lastDD, "BOTTOMLEFT", 0, -4)
+    -- slightly larger gap below the dropdown row
+    note:SetPoint("TOPLEFT", lastDD, "BOTTOMLEFT", 0, -10)
     note:SetText("Requires full game restart once applied to change font")
 
     local preview = p:CreateFontString(addonName.."CombatPreviewFS","OVERLAY","GameFontNormalLarge")
     preview:SetJustifyH("LEFT"); preview:SetJustifyV("MIDDLE")
-    preview:SetPoint("TOPLEFT", note, "BOTTOMLEFT", 0, -12)
+    -- roomier gap below the note for the preview text
+    preview:SetPoint("TOPLEFT", note, "BOTTOMLEFT", 0, -16)
     preview:SetWidth(300)
     preview:SetText("12345")
     preview:SetTextColor(1,1,1,1)
@@ -1760,7 +1766,8 @@ function frame:CreateSettingsFrame()
 
     local editBox = CreateFrame("EditBox", addonName.."CombatPreviewEdit", p, "InputBoxTemplate")
     editBox:SetSize(300, 24)
-    editBox:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -8)
+    -- extra spacing beneath preview to keep the edit box clear
+    editBox:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -10)
     editBox:SetAutoFocus(false)
     editBox:SetText("12345")
     editBox:SetScript("OnTextChanged", function(self)
@@ -1769,7 +1776,8 @@ function frame:CreateSettingsFrame()
 
     local applyBtn = CreateFrame("Button", addonName.."CombatApplyButton", p, "UIPanelButtonTemplate")
     applyBtn:SetSize(80,22)
-    applyBtn:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", 0, -8)
+    -- keep apply button neatly spaced below the text box
+    applyBtn:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", 0, -10)
     applyBtn:SetText("Apply")
     applyBtn:SetScript("OnClick", function()
       if TimePerCharDB.combatFont then
@@ -1783,12 +1791,14 @@ function frame:CreateSettingsFrame()
 
     -- Combat Text Size Slider
     local sizeLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    sizeLabel:SetPoint("TOPLEFT", applyBtn, "BOTTOMLEFT", 0, -20)
+    -- slightly larger gap before the size slider section
+    sizeLabel:SetPoint("TOPLEFT", applyBtn, "BOTTOMLEFT", 0, -24)
     sizeLabel:SetText("Combat Text Size:")
 
     local sizeSlider = CreateFrame("Slider", addonName.."CombatScaleSlider", p, "OptionsSliderTemplate")
     sizeSlider:SetSize(300, 16)
-    sizeSlider:SetPoint("TOPLEFT", sizeLabel, "BOTTOMLEFT", 0, -8)
+    -- drop the slider slightly lower for clarity
+    sizeSlider:SetPoint("TOPLEFT", sizeLabel, "BOTTOMLEFT", 0, -12)
     sizeSlider:SetMinMaxValues(0.5, 5.0)
     sizeSlider:SetValueStep(0.1)
     sizeSlider:SetObeyStepOnDrag(true)
@@ -1825,7 +1835,8 @@ function frame:CreateSettingsFrame()
       local col = (i-1) % 2
       local row = math.floor((i-1) / 2)
       local x = col * 160
-      local y = -30 * (row + 1)
+      -- wider spacing for readability
+      local y = -35 * (row + 1)
       CreateCheckbox(p, "TimeCombat"..opt.k.."CB", opt.l, x, y, TimePerCharDB[opt.k], function(self)
         TimePerCharDB[opt.k] = self:GetChecked()
         SetCVar(opt.c, self:GetChecked() and 1 or 0)
