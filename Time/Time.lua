@@ -76,6 +76,7 @@ local DEFAULTS = {
   hideIcon            = false,
   alarmTime           = "",    -- Added default alarm time
   alarmReminder       = "",    -- Added default reminder text
+  alarmTimestamp      = 0,     -- epoch when relative alarm should trigger
   -- BEGIN FEATURE: server time and hourly chime defaults
   useServerTime       = false,
   hourlyChime         = false,
@@ -800,6 +801,7 @@ function frame:StopAlarm()
   if self.alarmText  then self.alarmText:Hide() end
   if self.alarmFrame then self.alarmFrame:Hide() end
   TimeDB.alarmTime = ""
+  TimeDB.alarmTimestamp = 0
 end
 
 -- ─── Alarm Polling ────────────────────────────────────────────────────────────
@@ -821,6 +823,17 @@ function frame:CheckAlarm()
     end
   end
   -- END FEATURE
+
+  -- Check for relative alarm timestamp first
+  if TimeDB.alarmTimestamp and TimeDB.alarmTimestamp > 0 and not self.alarmPlaying then
+    local now = GetServerTime and GetServerTime() or time()
+    if now >= TimeDB.alarmTimestamp then
+      TimeDB.alarmTimestamp = 0
+      TimeDB.alarmTime = ""
+      self:StartAlarm()
+      return
+    end
+  end
 
   if not TimeDB.alarmTime or TimeDB.alarmTime == "" or self.alarmPlaying then
     return
@@ -1653,6 +1666,33 @@ SlashCmdList["TIME"] = function(msg)
   end
 
   print(addonName..": unknown command")
+end
+
+-- ─── Relative Alarm Slash Command (/alarm) ───────────────────────────────────
+SLASH_ALARM1 = "/alarm"
+SlashCmdList["ALARM"] = function(msg)
+  local input = msg and strtrim(msg) or ""
+  if input == "" then
+    print(addonName..": usage: /alarm <minutes> [message]")
+    return
+  end
+
+  local mins, text = input:match("^(%d+)%s*(.*)$")
+  mins = tonumber(mins)
+  if not mins or mins <= 0 then
+    print(addonName..": invalid minutes. Usage: /alarm <minutes> [message]")
+    return
+  end
+
+  local now = GetServerTime and GetServerTime() or time()
+  TimeDB.alarmTimestamp = now + mins * 60
+  TimeDB.alarmTime = ""
+  TimeDB.alarmReminder = strtrim(text or "")
+
+  print(string.format("%s: Alarm set for %d minute(s) from now.", addonName, mins))
+  if TimeDB.alarmReminder ~= "" then
+    print(addonName..": Reminder text set to '"..TimeDB.alarmReminder.."'.")
+  end
 end
 
 -- ─── Initialization & Events ─────────────────────────────────────────────────
