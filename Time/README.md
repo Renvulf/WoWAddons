@@ -15,5 +15,18 @@ Time is a lightweight World of Warcraft addon that provides a customizable clock
 ## Usage
 Install the addon in your `Interface/AddOns` directory and type `/time` in game to open the settings window. Hover the minimap icon or the LDB entry to view tracked play time. Drag the clock or minimap icon while "Tick to move" is enabled.
 
+## Commands
+Use these chat commands for quick actions:
+
+* `/time` – toggle the configuration window.
+* `/time alarm HH:MM [AM|PM] [message]` – set an alarm with an optional reminder message. Accepts both 24‑hour and 12‑hour formats.
+  * Examples:
+    * `/time alarm 07:30 Wake up!`
+    * `/time alarm 7:30 AM Morning dungeon`
+* `/time remind me in <number>[s|m|h|d] <message>` – show a toast reminder after the specified delay.
+  * Example: `/time remind me in 5m Check the auction house`
+
+If an alarm triggers, a fullscreen overlay with your reminder text and an alarm sound will appear. Reminders created with the `remind me in` command appear as small toasts near the top‑right of the screen.
+
 ## License
 This project is released under the MIT License. See `LICENSE` for details.
