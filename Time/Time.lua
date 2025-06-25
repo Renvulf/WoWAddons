@@ -1809,7 +1809,7 @@ function frame:CreateSettingsFrame()
               for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
               TimePerCharDB.combatFont = relative
               UIDropDownMenu_SetText(dd, dispCopy)
-              SetCombatPreviewFont(fontObj)
+              SetCombatPreviewFont(fontObj, fontData.path)
               preview:SetText(editBox:GetText())
             end
             info.checked = (TimePerCharDB.combatFont == fontData.relative)
@@ -1847,21 +1847,39 @@ function frame:CreateSettingsFrame()
     preview:SetText("12345")
     preview:SetTextColor(1,1,1,1)
 
-    SetCombatPreviewFont = function(fontObj)
+    --[[
+      Apply a combat font to the preview field.
+
+      Some systems fail to load fonts unless provided an explicit file path.
+      To make previewing reliable we try both the file path and the font object
+      itself, falling back gracefully if either method fails.
+    --]]
+    SetCombatPreviewFont = function(fontObj, path)
       if not fontObj then return end
-      -- Retrieve the font path from the object and apply it at double size
-      local path, size, flags = fontObj:GetFont()
-      size  = size or 20
-      flags = flags or ""
+
+      -- When called with a cached font table, extract its fields
+      if type(fontObj) == "table" and fontObj.font then
+        path    = fontObj.path
+        fontObj = fontObj.font
+      end
+
+      -- Retrieve font attributes so we can scale them up for the preview
+      local fPath, size, flags = fontObj:GetFont()
+      path   = path or fPath
+      size   = size  or 20
+      flags  = flags or ""
       local scaled = size * 2
-      local ok = preview:SetFont(path, scaled, flags)
-      -- If applying by path fails, fall back to the font object itself
+
+      -- Try applying by absolute path first; use the object as fallback
+      local ok = false
+      if path then ok = preview:SetFont(path, scaled, flags) end
       if not ok then
         preview:SetFontObject(fontObj)
         _, scaled = preview:GetFont()
         scaled = scaled or size * 2
       end
-      -- Pad to avoid clipping with tall fonts
+
+      -- Pad the preview height so tall fonts are not clipped
       local pad = math.ceil(scaled * 0.4)
       preview:SetHeight(scaled + pad * 2)
     end
@@ -1876,7 +1894,7 @@ function frame:CreateSettingsFrame()
       if g and f and dropdowns[g] and combatFontExists[g][f] then
         UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$","") )
         local fd = combatFontCache[g][f]
-        if fd then SetCombatPreviewFont(fd.font) end
+        if fd then SetCombatPreviewFont(fd.font, fd.path) end
       end
     end
 
