@@ -1055,7 +1055,7 @@ end
 
 function frame:CreateSettingsFrame()
   local f = CreateFrame("Frame","TimeSettingsFrame",UIParent,"BackdropTemplate")
-  f:SetSize(360,500)
+  f:SetSize(360,540) -- slightly taller to fit combat options
   f:SetPoint("CENTER")
   f:SetMovable(true); f:EnableMouse(true)
   f:RegisterForDrag("LeftButton")
@@ -1702,10 +1702,15 @@ function frame:CreateSettingsFrame()
       local col = (idx-1) % 2
       -- extra spacing below the main label so text doesn't overlap
       -- add more vertical spacing between rows to avoid overlap
-      dd:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", col*colOffset, -20 - row*45)
+      local offsetX = col * colOffset
+      if grp == "Fun" or grp == "Movie/Game" or grp == "Custom" then
+        offsetX = offsetX - 20  -- nudge these groups slightly left
+      end
+      dd:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", offsetX, -20 - row*45)
       UIDropDownMenu_SetWidth(dd, colWidth)
       local lbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-      lbl:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 16, 3)
+      -- place label directly above dropdown to save horizontal space
+      lbl:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 0, 3)
       lbl:SetText(grp)
       dropdowns[grp] = dd
       if idx == #order then
@@ -1739,7 +1744,7 @@ function frame:CreateSettingsFrame()
     note:SetPoint("TOPLEFT", lastDD, "BOTTOMLEFT", 0, -10)
     note:SetText("Requires full game restart once applied to change font")
 
-    local preview = p:CreateFontString(addonName.."CombatPreviewFS","OVERLAY","GameFontNormalLarge")
+    preview = p:CreateFontString(addonName.."CombatPreviewFS","OVERLAY","GameFontNormalLarge")
     preview:SetJustifyH("LEFT"); preview:SetJustifyV("MIDDLE")
     -- roomier gap below the note for the preview text
     preview:SetPoint("TOPLEFT", note, "BOTTOMLEFT", 0, -16)
@@ -1764,7 +1769,7 @@ function frame:CreateSettingsFrame()
       end
     end
 
-    local editBox = CreateFrame("EditBox", addonName.."CombatPreviewEdit", p, "InputBoxTemplate")
+    editBox = CreateFrame("EditBox", addonName.."CombatPreviewEdit", p, "InputBoxTemplate")
     editBox:SetSize(300, 24)
     -- extra spacing beneath preview to keep the edit box clear
     editBox:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -10)
@@ -1835,8 +1840,8 @@ function frame:CreateSettingsFrame()
       local col = (i-1) % 2
       local row = math.floor((i-1) / 2)
       local x = col * 160
-      -- wider spacing for readability
-      local y = -35 * (row + 1)
+      -- tighter vertical spacing keeps checkboxes inside the panel
+      local y = -30 * (row + 1)
       CreateCheckbox(p, "TimeCombat"..opt.k.."CB", opt.l, x, y, TimePerCharDB[opt.k], function(self)
         TimePerCharDB[opt.k] = self:GetChecked()
         SetCVar(opt.c, self:GetChecked() and 1 or 0)
