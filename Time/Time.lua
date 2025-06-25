@@ -62,6 +62,9 @@ local DEFAULTS = {
   showSeconds         = false,
   fontName            = "SF-Pro-Regular",
   fontColor           = {1,1,1,1},
+  -- RGB animation & glow defaults
+  rgbClock           = false,
+  fontGlow           = false,
   minimapAnchorPoint  = "TOPLEFT",
   minimapRelativePoint= "TOPLEFT",
   minimapX            = 0,
@@ -204,6 +207,29 @@ function frame:RestartTicker()
   self.ticker = C_Timer.NewTicker(interval, function() self:UpdateTime() end)
 end
 
+-- Start color cycling for RGB clock
+function frame:StartRGBTicker()
+  if self.rgbTicker then self.rgbTicker:Cancel() end
+  local alpha = (TimeDB.fontColor and TimeDB.fontColor[4]) or 1
+  local angle = 0
+  self.rgbTicker = C_Timer.NewTicker(0.05, function()
+    angle = angle + math.pi * 0.05
+    local r = (math.sin(angle) + 1) / 2
+    local g = (math.sin(angle + 2 * math.pi / 3) + 1) / 2
+    local b = (math.sin(angle + 4 * math.pi / 3) + 1) / 2
+    self.fs:SetTextColor(r, g, b, alpha)
+    if self.icon then self.icon:SetVertexColor(r, g, b, alpha) end
+  end)
+end
+
+-- Stop RGB color cycling
+function frame:StopRGBTicker()
+  if self.rgbTicker then
+    self.rgbTicker:Cancel()
+    self.rgbTicker = nil
+  end
+end
+
 function frame:UpdateTime()
   local parts = {}
   if TimeDB.showDate then
@@ -262,7 +288,8 @@ function frame:ApplySettings()
 
   -- ── BEGIN FIX: Apply font and force redraw immediately ───────────────────
   -- Safely set the new font, then clear & re‐set the text to force the UI to redraw
-  pcall(self.fs.SetFont, self.fs, fontFile, TimeDB.fontSize, "")
+  local style = TimeDB.fontGlow and "OUTLINE" or ""
+  pcall(self.fs.SetFont, self.fs, fontFile, TimeDB.fontSize, style)
   local currentText = self.fs:GetText()
   self.fs:SetText("")                -- clear the text
   self.fs:SetText(currentText)       -- reset it, forcing an immediate redraw
@@ -270,8 +297,23 @@ function frame:ApplySettings()
 
   local c = TimeDB.fontColor
   if type(c)~="table" or #c<4 then c={1,1,1,1}; TimeDB.fontColor=c end
+  -- Stop any existing RGB ticker before applying color changes
+  self:StopRGBTicker()
+
   self.fs:SetTextColor(unpack(c))
   if self.icon then self.icon:SetVertexColor(unpack(c)) end
+
+  -- Apply glow via shadow color when enabled
+  if TimeDB.fontGlow then
+    self.fs:SetShadowColor(c[1], c[2], c[3], 0.8)
+    self.fs:SetShadowOffset(0, 0)
+  else
+    self.fs:SetShadowColor(0, 0, 0, 0)
+    self.fs:SetShadowOffset(0, 0)
+  end
+
+  -- Start RGB color cycling if requested
+  if TimeDB.rgbClock then self:StartRGBTicker() end
 
   local iconSize = TimeDB.fontSize * 2
   local gap      = -10
@@ -896,6 +938,18 @@ function frame:CreateSettingsFrame()
       frame:ApplySettings()
     end)
 
+    -- RGB Clock Checkbox
+    local rgb = CreateCheckbox(p, "TimeRGBClockCB", "RGB Clock", 20, startY - 3*spacing, TimeDB.rgbClock, function(self)
+      TimeDB.rgbClock = self:GetChecked()
+      frame:ApplySettings()
+    end)
+
+    -- Glow Checkbox
+    local glow = CreateCheckbox(p, "TimeGlowCB", "Glow", 160, startY - 3*spacing, TimeDB.fontGlow, function(self)
+      TimeDB.fontGlow = self:GetChecked()
+      frame:ApplySettings()
+    end)
+
     -- Reset Defaults Button
     local rb = CreateFrame("Button","TimeResetButton",p,"UIPanelButtonTemplate")
     rb:SetSize(120,22)
@@ -959,6 +1013,8 @@ function frame:CreateSettingsFrame()
       mv:SetChecked(TimeDB.allowMove)
       hc:SetChecked(TimeDB.hideClock)
       hi:SetChecked(TimeDB.hideIcon)
+      rgb:SetChecked(TimeDB.rgbClock)
+      glow:SetChecked(TimeDB.fontGlow)
 
       frame:ApplySettings()
       frame:ApplyMoveSettings()
@@ -1406,6 +1462,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
     TimeDB.yearSeconds  = (TimeDB.yearSeconds  or 0) + elapsed
     if self.trackTicker then self.trackTicker:Cancel(); self.trackTicker = nil end
     if self.alarmChecker then self.alarmChecker:Cancel(); self.alarmChecker = nil end
+    self:StopRGBTicker()
     -- END TRACKING ENHANCEMENT
 
   else
