@@ -1,8 +1,9 @@
 ## Interface: 110105
 ## Title: FPS Monitor
-## Notes: (Enter addon notes here)
+## Notes: Displays advanced FPS statistics
 ## Author: Renvulf
+## Version: 1.0
 ## SavedVariables: FPSMonitorDB
 ## SavedVariablesPerCharacter: FPSPerCharDB
-## IconTexture: Interface\AddOns\Time\FPS1.tga
+## IconTexture: Interface\AddOns\FPSMonitor\FPS1.tga
 FPSMonitor.lua
