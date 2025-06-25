@@ -1848,12 +1848,25 @@ function frame:CreateSettingsFrame()
 
     SetCombatPreviewFont = function(fontObj)
       if not fontObj then return end
-      preview:SetFontObject(fontObj)
-      local _, size = preview:GetFont()
-      size = size or 20
-      local pad = math.ceil(size * 0.4)
-      preview:SetHeight(size + pad*2)
+      -- Retrieve the font path from the object and apply it at double size
+      local path, size, flags = fontObj:GetFont()
+      size  = size or 20
+      flags = flags or ""
+      local scaled = size * 2
+      local ok = preview:SetFont(path, scaled, flags)
+      -- If applying by path fails, fall back to the font object itself
+      if not ok then
+        preview:SetFontObject(fontObj)
+        _, scaled = preview:GetFont()
+        scaled = scaled or size * 2
+      end
+      -- Pad to avoid clipping with tall fonts
+      local pad = math.ceil(scaled * 0.4)
+      preview:SetHeight(scaled + pad * 2)
     end
+
+    -- Apply default font at double size on initialization
+    SetCombatPreviewFont(preview:GetFontObject())
 
     -- Set initial dropdown text and preview based on saved font
     for _,dd in pairs(dropdowns) do UIDropDownMenu_SetText(dd, "Select Font") end
