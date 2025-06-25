@@ -119,24 +119,23 @@ for _, fname in ipairs(AVAILABLE_FONTS) do
   preloadFont:SetFont(path, TimeDB.fontSize, "")  -- empty-string flags
 end
 
--- Capture the difference between local and server time (in seconds). This
--- allows us to reliably shift the displayed time when "Use Server Time" is
--- enabled even if `GetServerTime` returns a value in a different time zone.
-local SERVER_TIME_DIFF = 0
-local function UpdateServerTimeDiff()
-  if GetServerTime then
-    local ok, st = pcall(GetServerTime)
-    if ok and type(st) == "number" then
-      SERVER_TIME_DIFF = st - time()
-    else
-      SERVER_TIME_DIFF = 0
-    end
+-- WoW already exposes the realm clock, so we no longer track a manual
+-- difference between local and server time. Instead we query the game for the
+-- current server hour/minute when needed.
+local function GetServerClock()
+  if C_DateAndTime and C_DateAndTime.GetCurrentCalendarTime then
+    local t = C_DateAndTime.GetCurrentCalendarTime()
+    local sec = GetServerTime and GetServerTime() or time()
+    return t.hour, t.minute, math.floor(sec % 60)
+  elseif GetGameTime then
+    local h, m = GetGameTime()
+    local sec = GetServerTime and GetServerTime() or time()
+    return h, m, math.floor(sec % 60)
   else
-    SERVER_TIME_DIFF = 0
+    -- Fallback: use local clock
+    return tonumber(date("%H")), tonumber(date("%M")), tonumber(date("%S"))
   end
 end
--- initialize diff at load time
-UpdateServerTimeDiff()
 
 -- ─── Helper: format seconds as "Xh Ym" ────────────────────────────────────────
 function frame:FormatSeconds(sec)
@@ -173,12 +172,9 @@ function frame:ShowTrackingTooltip(anchor)
   GameTooltip:Show()
 end
 
--- BEGIN FEATURE: helper for server/local time
-local function GetTimeValue(fmt)
+-- BEGIN FEATURE: helper for local time with optional timezone offset
+local function GetLocalTimeValue(fmt)
   local ts = time()
-  if TimeDB.useServerTime then
-    ts = ts + SERVER_TIME_DIFF
-  end
   if TimeDB.timezoneOffset and TimeDB.timezoneOffset ~= 0 then
     ts = ts + TimeDB.timezoneOffset * 3600
   end
@@ -211,22 +207,43 @@ end
 function frame:UpdateTime()
   local parts = {}
   if TimeDB.showDate then
-    tinsert(parts, GetTimeValue("%a"))
-    tinsert(parts, GetTimeValue("%b"))
-    tinsert(parts, tostring(tonumber(GetTimeValue("%e"))))
+    -- Date elements always use the local clock
+    tinsert(parts, date("%a"))
+    tinsert(parts, date("%b"))
+    tinsert(parts, tostring(tonumber(date("%e"))))
   end
 
-  local hr  = TimeDB.is24h and GetTimeValue("%H") or GetTimeValue("%I"):gsub("^0","")
-  local min = GetTimeValue("%M")
-
-  if TimeDB.showSeconds then
-    tinsert(parts, ("%s:%s:%s"):format(hr, min, GetTimeValue("%S")))
+  if TimeDB.useServerTime then
+    local h, m, s = GetServerClock()
+    local hr
+    if TimeDB.is24h then
+      hr = string.format("%02d", h)
+    else
+      local disp = h % 12
+      if disp == 0 then disp = 12 end
+      hr = tostring(disp)
+    end
+    local min = string.format("%02d", m)
+    if TimeDB.showSeconds then
+      local sec = string.format("%02d", s)
+      tinsert(parts, string.format("%s:%s:%s", hr, min, sec))
+    else
+      tinsert(parts, string.format("%s:%s", hr, min))
+    end
+    if not TimeDB.is24h then
+      tinsert(parts, h < 12 and "AM" or "PM")
+    end
   else
-    tinsert(parts, ("%s:%s"):format(hr, min))
-  end
-
-  if not TimeDB.is24h then
-    tinsert(parts, GetTimeValue("%p"))
+    local hr  = TimeDB.is24h and GetLocalTimeValue("%H") or GetLocalTimeValue("%I"):gsub("^0", "")
+    local min = GetLocalTimeValue("%M")
+    if TimeDB.showSeconds then
+      tinsert(parts, string.format("%s:%s:%s", hr, min, GetLocalTimeValue("%S")))
+    else
+      tinsert(parts, string.format("%s:%s", hr, min))
+    end
+    if not TimeDB.is24h then
+      tinsert(parts, GetLocalTimeValue("%p"))
+    end
   end
 
   local text = table.concat(parts, " ")
@@ -596,12 +613,17 @@ end
 function frame:CheckAlarm()
   -- BEGIN FEATURE: hourly chime support
   if TimeDB.hourlyChime then
-    local minute = GetTimeValue("%M")
-    if minute == "00" then
-      local hour = GetTimeValue("%H")
-      if self.lastChimeHour ~= hour then
+    local h, m = nil, nil
+    if TimeDB.useServerTime then
+      h, m = GetServerClock()
+    else
+      h = tonumber(GetLocalTimeValue("%H"))
+      m = tonumber(GetLocalTimeValue("%M"))
+    end
+    if m == 0 then
+      if self.lastChimeHour ~= h then
         PlaySound(SOUNDKIT.ALARM_CLOCK_WARNING_3 or SOUNDKIT.RAID_WARNING, "Master")
-        self.lastChimeHour = hour
+        self.lastChimeHour = h
       end
     end
   end
@@ -610,8 +632,14 @@ function frame:CheckAlarm()
   if not TimeDB.alarmTime or TimeDB.alarmTime == "" or self.alarmPlaying then
     return
   end
-  local t = GetTimeValue("%H:%M")
-  if t == TimeDB.alarmTime then
+  local current
+  if TimeDB.useServerTime then
+    local h, m = GetServerClock()
+    current = string.format("%02d:%02d", h, m)
+  else
+    current = GetLocalTimeValue("%H:%M")
+  end
+  if current == TimeDB.alarmTime then
     self:StartAlarm()
   end
 end
@@ -756,7 +784,6 @@ function frame:CreateSettingsFrame()
     ust:SetScript("OnClick", function(self)
       TimeDB.useServerTime = self:GetChecked()
       if self:GetChecked() then
-        UpdateServerTimeDiff()
         TimeDB.timezoneOffset = 0
         tz:SetValue(0)
         tz:Disable()
@@ -1306,8 +1333,6 @@ frame:RegisterEvent("PLAYER_LOGOUT")
 
 frame:SetScript("OnEvent", function(self, event, ...)
   if event == "PLAYER_LOGIN" then
-    -- Update server time difference now that server time is available
-    UpdateServerTimeDiff()
     if not self.fs then
       -- Create clock text
       self.fs  = frame:CreateFontString(addonName.."Font","OVERLAY")
