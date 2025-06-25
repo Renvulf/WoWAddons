@@ -1688,6 +1688,8 @@ function frame:CreateSettingsFrame()
     -- Create one dropdown per font group arranged in two columns
     local dropdowns = {}
     local lastDD
+    -- forward declare helper so dropdown callbacks can reference it
+    local SetCombatPreviewFont
     local order = {"Fun","Future","Movie/Game","Easy-to-Read","Custom"}
     local colWidth  = 150      -- width of each dropdown
     local colOffset = 160      -- spacing between columns
@@ -1728,16 +1730,6 @@ function frame:CreateSettingsFrame()
       end)
     end
 
-    -- Set initial dropdown text and preview based on saved font
-    for _,dd in pairs(dropdowns) do UIDropDownMenu_SetText(dd, "Select Font") end
-    if TimePerCharDB.combatFont then
-      local g,f = TimePerCharDB.combatFont:match("^([^/]+)/(.+)$")
-      if g and f and dropdowns[g] and combatFontExists[g][f] then
-        UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$","") )
-        SetCombatPreviewFont(combatFontCache[g][f])
-      end
-    end
-
     local note = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     note:SetPoint("TOPLEFT", lastDD, "BOTTOMLEFT", 0, -4)
     note:SetText("Requires full game restart once applied to change font")
@@ -1749,11 +1741,21 @@ function frame:CreateSettingsFrame()
     preview:SetText("12345")
     preview:SetTextColor(1,1,1,1)
 
-    local function SetCombatPreviewFont(fontObj)
+    SetCombatPreviewFont = function(fontObj)
       preview:SetFontObject(fontObj)
       local _, size = preview:GetFont()
       local pad = math.ceil(size * 0.2)
       preview:SetHeight(size + pad*2)
+    end
+
+    -- Set initial dropdown text and preview based on saved font
+    for _,dd in pairs(dropdowns) do UIDropDownMenu_SetText(dd, "Select Font") end
+    if TimePerCharDB.combatFont then
+      local g,f = TimePerCharDB.combatFont:match("^([^/]+)/(.+)$")
+      if g and f and dropdowns[g] and combatFontExists[g][f] then
+        UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$","") )
+        SetCombatPreviewFont(combatFontCache[g][f])
+      end
     end
 
     local editBox = CreateFrame("EditBox", addonName.."CombatPreviewEdit", p, "InputBoxTemplate")
