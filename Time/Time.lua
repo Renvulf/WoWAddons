@@ -1681,6 +1681,7 @@ function frame:CreateSettingsFrame()
   -- Combat Panel
   do
     local p = panels[5]
+    -- Title for the font dropdown section
     local fontLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     fontLabel:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -110)
     fontLabel:SetText("Combat Text Font:")
@@ -1700,17 +1701,16 @@ function frame:CreateSettingsFrame()
       local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]","") .. "Dropdown", p, "UIDropDownMenuTemplate")
       local row = math.floor((idx-1)/2)
       local col = (idx-1) % 2
-      -- extra spacing below the main label so text doesn't overlap
-      -- add more vertical spacing between rows to avoid overlap
+      -- space columns evenly and give a little breathing room beneath the title
       local offsetX = col * colOffset
       if grp == "Fun" or grp == "Movie/Game" or grp == "Custom" then
-        offsetX = offsetX - 20  -- nudge these groups slightly left
+        offsetX = offsetX - 20  -- nudge these groups slightly left so text fits
       end
-      dd:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", offsetX, -20 - row*45)
+      dd:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", offsetX, -20 - row*50)
       UIDropDownMenu_SetWidth(dd, colWidth)
       local lbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-      -- place label directly above dropdown to save horizontal space
-      lbl:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 0, 3)
+      -- Slight indent to line up with dropdown text area
+      lbl:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 16, 3)
       lbl:SetText(grp)
       dropdowns[grp] = dd
       if idx == #order then
@@ -1739,16 +1739,16 @@ function frame:CreateSettingsFrame()
       end)
     end
 
+    -- Informational note
     local note = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    -- slightly larger gap below the dropdown row
-    note:SetPoint("TOPLEFT", lastDD, "BOTTOMLEFT", 0, -10)
+    note:SetPoint("TOPLEFT", lastDD, "BOTTOMLEFT", 0, -14)
     note:SetText("Requires full game restart once applied to change font")
 
+    -- Font preview field
     preview = p:CreateFontString(addonName.."CombatPreviewFS","OVERLAY","GameFontNormalLarge")
     preview:SetJustifyH("LEFT"); preview:SetJustifyV("MIDDLE")
-    -- roomier gap below the note for the preview text
     preview:SetPoint("TOPLEFT", note, "BOTTOMLEFT", 0, -16)
-    preview:SetWidth(300)
+    preview:SetWidth(320)
     preview:SetText("12345")
     preview:SetTextColor(1,1,1,1)
 
@@ -1769,10 +1769,10 @@ function frame:CreateSettingsFrame()
       end
     end
 
+    -- Edit box for preview text
     editBox = CreateFrame("EditBox", addonName.."CombatPreviewEdit", p, "InputBoxTemplate")
-    editBox:SetSize(300, 24)
-    -- extra spacing beneath preview to keep the edit box clear
-    editBox:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -10)
+    editBox:SetSize(320, 24)
+    editBox:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -8)
     editBox:SetAutoFocus(false)
     editBox:SetText("12345")
     editBox:SetScript("OnTextChanged", function(self)
@@ -1781,8 +1781,8 @@ function frame:CreateSettingsFrame()
 
     local applyBtn = CreateFrame("Button", addonName.."CombatApplyButton", p, "UIPanelButtonTemplate")
     applyBtn:SetSize(80,22)
-    -- keep apply button neatly spaced below the text box
-    applyBtn:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", 0, -10)
+    -- Keep apply button neatly below the edit box
+    applyBtn:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", 0, -8)
     applyBtn:SetText("Apply")
     applyBtn:SetScript("OnClick", function()
       if TimePerCharDB.combatFont then
@@ -1795,14 +1795,14 @@ function frame:CreateSettingsFrame()
 
 
     -- Combat Text Size Slider
+    -- --- Combat Text Size Slider -------------------------------------------------
     local sizeLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    -- slightly larger gap before the size slider section
     sizeLabel:SetPoint("TOPLEFT", applyBtn, "BOTTOMLEFT", 0, -24)
     sizeLabel:SetText("Combat Text Size:")
 
     local sizeSlider = CreateFrame("Slider", addonName.."CombatScaleSlider", p, "OptionsSliderTemplate")
-    sizeSlider:SetSize(300, 16)
-    -- drop the slider slightly lower for clarity
+    sizeSlider:SetSize(260, 16)
+    -- Drop the slider slightly lower for clarity
     sizeSlider:SetPoint("TOPLEFT", sizeLabel, "BOTTOMLEFT", 0, -12)
     sizeSlider:SetMinMaxValues(0.5, 5.0)
     sizeSlider:SetValueStep(0.1)
