@@ -1790,30 +1790,45 @@ function frame:CreateSettingsFrame()
       end
 
       UIDropDownMenu_Initialize(dd, function(self)
+        local added = false
         for _,fname in ipairs(COMBAT_FONT_GROUPS[grp].fonts) do
           if combatFontExists[grp][fname] then
+            added = true
             local fontData = combatFontCache[grp][fname]
             local info = UIDropDownMenu_CreateInfo()
             local display = fname:gsub("%.otf$",""):gsub("%.ttf$","")
             info.text = display
             info.value = fname
             -- Capture per-item values so the correct font is applied
-            local fontPath  = fontData.path
+            local fontObj   = fontData.font
             local relative  = fontData.relative
             local dispCopy  = display
             info.func = function()
-              -- clear other dropdowns' text
+              -- clear other dropdown texts
               for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
               TimePerCharDB.combatFont = relative
               UIDropDownMenu_SetText(dd, dispCopy)
-              SetCombatPreviewFont(fontPath)
+              SetCombatPreviewFont(fontObj)
               preview:SetText(editBox:GetText())
             end
             info.checked = (TimePerCharDB.combatFont == fontData.relative)
             UIDropDownMenu_AddButton(info)
           end
         end
+        if not added then
+          local info = UIDropDownMenu_CreateInfo()
+          info.text = "No font detected"
+          info.disabled = true
+          UIDropDownMenu_AddButton(info)
+        end
       end)
+      local hasFonts = false
+      for _,fname in ipairs(COMBAT_FONT_GROUPS[grp].fonts) do
+        if combatFontExists[grp][fname] then hasFonts = true; break end
+      end
+      if not hasFonts then
+        UIDropDownMenu_SetText(dd, "No font detected")
+      end
     end
 
     -- Informational note
@@ -1831,12 +1846,13 @@ function frame:CreateSettingsFrame()
     preview:SetText("12345")
     preview:SetTextColor(1,1,1,1)
 
-    SetCombatPreviewFont = function(fontPath)
-      if not fontPath then return end
-      local size = 20
-      preview:SetFont(fontPath, size * 2, "")
+    SetCombatPreviewFont = function(fontObj)
+      if not fontObj then return end
+      preview:SetFontObject(fontObj)
+      local _, size = preview:GetFont()
+      size = size or 20
       local pad = math.ceil(size * 0.4)
-      preview:SetHeight(size * 2 + pad*2)
+      preview:SetHeight(size + pad*2)
     end
 
     -- Set initial dropdown text and preview based on saved font
@@ -1846,7 +1862,7 @@ function frame:CreateSettingsFrame()
       if g and f and dropdowns[g] and combatFontExists[g][f] then
         UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$","") )
         local fd = combatFontCache[g][f]
-        if fd then SetCombatPreviewFont(fd.path) end
+        if fd then SetCombatPreviewFont(fd.font) end
       end
     end
 
