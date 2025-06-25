@@ -1055,7 +1055,8 @@ end
 
 function frame:CreateSettingsFrame()
   local f = CreateFrame("Frame","TimeSettingsFrame",UIParent,"BackdropTemplate")
-  f:SetSize(360,540) -- slightly taller to fit combat options
+  -- Enlarged to provide additional padding for the combat options panel
+  f:SetSize(420,600)
   f:SetPoint("CENTER")
   f:SetMovable(true); f:EnableMouse(true)
   f:RegisterForDrag("LeftButton")
@@ -1695,17 +1696,16 @@ function frame:CreateSettingsFrame()
     local preview
     local editBox
     local order = {"Fun","Future","Movie/Game","Easy-to-Read","Custom"}
-    local colWidth  = 150      -- width of each dropdown
-    local colOffset = 160      -- spacing between columns
+    -- Provide wider dropdowns and spacing so text and arrows stay inside the
+    -- settings frame even with longer font names.
+    local colWidth  = 160
+    local colOffset = 180
     for idx, grp in ipairs(order) do
       local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]","") .. "Dropdown", p, "UIDropDownMenuTemplate")
       local row = math.floor((idx-1)/2)
       local col = (idx-1) % 2
-      -- space columns evenly and give a little breathing room beneath the title
-      local offsetX = col * colOffset
-      if grp == "Fun" or grp == "Movie/Game" or grp == "Custom" then
-        offsetX = offsetX - 20  -- nudge these groups slightly left so text fits
-      end
+      -- Start columns with a small left margin so they do not touch the frame edge
+      local offsetX = col * colOffset + 10
       dd:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", offsetX, -20 - row*50)
       UIDropDownMenu_SetWidth(dd, colWidth)
       local lbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1741,6 +1741,7 @@ function frame:CreateSettingsFrame()
 
     -- Informational note
     local note = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    -- Anchor with a margin so the text does not hug the frame border
     note:SetPoint("TOPLEFT", lastDD, "BOTTOMLEFT", 0, -14)
     note:SetText("Requires full game restart once applied to change font")
 
@@ -1748,7 +1749,8 @@ function frame:CreateSettingsFrame()
     preview = p:CreateFontString(addonName.."CombatPreviewFS","OVERLAY","GameFontNormalLarge")
     preview:SetJustifyH("LEFT"); preview:SetJustifyV("MIDDLE")
     preview:SetPoint("TOPLEFT", note, "BOTTOMLEFT", 0, -16)
-    preview:SetWidth(320)
+    -- Wider preview box for readability
+    preview:SetWidth(360)
     preview:SetText("12345")
     preview:SetTextColor(1,1,1,1)
 
@@ -1771,7 +1773,7 @@ function frame:CreateSettingsFrame()
 
     -- Edit box for preview text
     editBox = CreateFrame("EditBox", addonName.."CombatPreviewEdit", p, "InputBoxTemplate")
-    editBox:SetSize(320, 24)
+    editBox:SetSize(360, 24)
     editBox:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -8)
     editBox:SetAutoFocus(false)
     editBox:SetText("12345")
@@ -1801,7 +1803,8 @@ function frame:CreateSettingsFrame()
     sizeLabel:SetText("Combat Text Size:")
 
     local sizeSlider = CreateFrame("Slider", addonName.."CombatScaleSlider", p, "OptionsSliderTemplate")
-    sizeSlider:SetSize(260, 16)
+    -- Slightly wider slider for readability
+    sizeSlider:SetSize(300, 16)
     -- Drop the slider slightly lower for clarity
     sizeSlider:SetPoint("TOPLEFT", sizeLabel, "BOTTOMLEFT", 0, -12)
     sizeSlider:SetMinMaxValues(0.5, 5.0)
