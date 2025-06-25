@@ -1082,6 +1082,15 @@ function frame:CreateSettingsFrame()
   title:SetPoint("TOP",0,-12)
   title:SetText("Settings")
 
+  -- Shared layout constants for all panels
+  -- left/right margins keep widgets away from the frame edges
+  local LAYOUT = {
+    left  = 20,
+    top   = -110,
+  }
+  -- compute second column starting X so content is centered
+  LAYOUT.col2 = LAYOUT.left + (f:GetWidth() - LAYOUT.left * 2) / 2
+
   local panels = {}
   for i=1,5 do
     local p = CreateFrame("Frame",f:GetName().."Panel"..i,f)
@@ -1098,13 +1107,12 @@ function frame:CreateSettingsFrame()
     {text="Combat",         panel=panels[5]},
   }
 
+  -- Create tabs and store references for layout
+  local tabs = {}
   for i,info in ipairs(tabInfo) do
     local tab = CreateFrame("Button",f:GetName().."Tab"..i,f,"UIPanelButtonTemplate")
     tab:SetSize(110,25)
     tab:SetText(info.text)
-    local row = math.floor((i-1)/3)
-    local col = (i-1)%3
-    tab:SetPoint("TOPLEFT", f, "TOPLEFT", 10 + col*115, -40 - row*30)
     tab:SetScript("OnClick", function()
       for _,p in ipairs(panels) do p:Hide() end
       info.panel:Show()
@@ -1113,7 +1121,30 @@ function frame:CreateSettingsFrame()
         if j==i then other:LockHighlight() else other:UnlockHighlight() end
       end
     end)
+    tabs[i] = tab
   end
+
+  -- Helper to layout tabs centered in two rows
+  local function LayoutTabs()
+    local tabWidth, tabHeight = 110, 25
+    local gap       = 10
+    local rows      = { {1,2,3}, {4,5} }
+    for r,row in ipairs(rows) do
+      local count = #row
+      local rowWidth = tabWidth * count + gap * (count-1)
+      local startX = (f:GetWidth() - rowWidth) / 2
+      for i,colIndex in ipairs(row) do
+        local tab = tabs[colIndex]
+        if tab then
+          tab:ClearAllPoints()
+          tab:SetPoint("TOPLEFT", f, "TOPLEFT",
+                        startX + (i-1)*(tabWidth+gap), -40 - (r-1)*30)
+        end
+      end
+    end
+  end
+
+  LayoutTabs()
 
   panels[1]:Show()
   _G[f:GetName().."Tab1"]:LockHighlight()
@@ -1123,7 +1154,7 @@ function frame:CreateSettingsFrame()
     local p = panels[1]
     -- Font Size Slider
     local fs = CreateFrame("Slider","TimeFontSizeSlider",p,"OptionsSliderTemplate")
-    fs:SetPoint("TOPLEFT",20,-110)
+    fs:SetPoint("TOPLEFT", LAYOUT.left, LAYOUT.top)
     fs:SetMinMaxValues(15,48); fs:SetValueStep(1); fs:SetWidth(300)
     fs:SetValue(TimeDB.fontSize)
     fs:SetScript("OnValueChanged", function(self, v)
@@ -1137,34 +1168,34 @@ function frame:CreateSettingsFrame()
     _G["TimeFontSizeSliderText"]:SetText("Font Size: "..TimeDB.fontSize)
 
     -- Show Date Checkbox
-    local sd = CreateCheckbox(p, "TimeShowDateCB", "Show Date", 20, -160, TimeDB.showDate, function(self)
+    local sd = CreateCheckbox(p, "TimeShowDateCB", "Show Date", LAYOUT.left, LAYOUT.top - 50, TimeDB.showDate, function(self)
       TimeDB.showDate = self:GetChecked()
       frame:ApplySettings()
     end)
 
     -- 24h Format Checkbox
-    local h24 = CreateCheckbox(p, "Time24hCB", "24h Format", 160, -160, TimeDB.is24h, function(self)
+    local h24 = CreateCheckbox(p, "Time24hCB", "24h Format", LAYOUT.col2, LAYOUT.top - 50, TimeDB.is24h, function(self)
       TimeDB.is24h = self:GetChecked()
       frame:ApplySettings()
     end)
 
     -- Show Seconds Checkbox
-    local ss = CreateCheckbox(p, "TimeShowSecCB", "Show Seconds", 20, -190, TimeDB.showSeconds, function(self)
+    local ss = CreateCheckbox(p, "TimeShowSecCB", "Show Seconds", LAYOUT.left, LAYOUT.top - 80, TimeDB.showSeconds, function(self)
       TimeDB.showSeconds = self:GetChecked()
       frame:ApplySettings()
     end)
 
     -- BEGIN FEATURE: server time & hourly chime checkboxes
-    local ust = CreateCheckbox(p, "TimeUseServerCB", "Use Server Time", 20, -220, TimeDB.useServerTime)
+    local ust = CreateCheckbox(p, "TimeUseServerCB", "Use Server Time", LAYOUT.left, LAYOUT.top - 110, TimeDB.useServerTime)
 
-    local chime = CreateCheckbox(p, "TimeChimeCB", "Hourly Chime", 160, -220, TimeDB.hourlyChime, function(self)
+    local chime = CreateCheckbox(p, "TimeChimeCB", "Hourly Chime", LAYOUT.col2, LAYOUT.top - 110, TimeDB.hourlyChime, function(self)
       TimeDB.hourlyChime = self:GetChecked()
     end)
     -- END FEATURE
 
     -- Time Zone Offset Slider
     local tz = CreateFrame("Slider", "TimeTZSlider", p, "OptionsSliderTemplate")
-    tz:SetPoint("TOPLEFT", 20, -270)
+    tz:SetPoint("TOPLEFT", LAYOUT.left, LAYOUT.top - 160)
     tz:SetMinMaxValues(-12, 14)
     tz:SetValueStep(1)
     tz:SetObeyStepOnDrag(true)
@@ -1206,7 +1237,7 @@ function frame:CreateSettingsFrame()
     -- Color Picker Button
     local cb = CreateFrame("Button","TimeColorButton",p,"UIPanelButtonTemplate")
     cb:SetSize(100,22)
-    cb:SetPoint("TOPLEFT",160,-190)
+    cb:SetPoint("TOPLEFT", LAYOUT.col2, LAYOUT.top - 80)
     cb:SetText("Font Color")
     cb:SetScript("OnClick",function()
       if LoadAddOn then LoadAddOn("Blizzard_ColorPicker") end
@@ -1243,7 +1274,7 @@ function frame:CreateSettingsFrame()
 
     -- Clock Font Dropdown
     local fontDropdown = CreateFrame("Frame", "TimeFontDropdown", p, "UIDropDownMenuTemplate")
-    fontDropdown:SetPoint("TOPLEFT", 20, -330)
+    fontDropdown:SetPoint("TOPLEFT", LAYOUT.left, LAYOUT.top - 220)
     UIDropDownMenu_SetWidth(fontDropdown, 150)
     UIDropDownMenu_Initialize(fontDropdown, function(self, level)
       for _, fname in ipairs(AVAILABLE_FONTS) do
@@ -1275,11 +1306,11 @@ function frame:CreateSettingsFrame()
       end
     end)
 
-    local startY = -360
+    local startY = LAYOUT.top - 250
     local spacing = 25
 
     -- Move Clock Checkbox
-    local mv = CreateCheckbox(p, "TimeAllowMoveCB", "Tick to move clock", 20, startY, TimeDB.allowMove,
+    local mv = CreateCheckbox(p, "TimeAllowMoveCB", "Tick to move clock", LAYOUT.left, startY, TimeDB.allowMove,
       function(self)
         TimeDB.allowMove = self:GetChecked()
         frame:ApplyMoveSettings()
@@ -1293,26 +1324,26 @@ function frame:CreateSettingsFrame()
     )
 
     -- Hide Clock Checkbox
-    local hc = CreateCheckbox(p, "TimeHideClockCB", "Tick to hide clock", 20, startY - spacing, TimeDB.hideClock, function(self)
+    local hc = CreateCheckbox(p, "TimeHideClockCB", "Tick to hide clock", LAYOUT.left, startY - spacing, TimeDB.hideClock, function(self)
       TimeDB.hideClock = self:GetChecked()
       frame:ApplySettings()
     end)
 
     -- Hide Icon Checkbox
-    local hi = CreateCheckbox(p, "TimeHideIconCB", "Tick to hide icon", 20, startY - 2*spacing, TimeDB.hideIcon, function(self)
+    local hi = CreateCheckbox(p, "TimeHideIconCB", "Tick to hide icon", LAYOUT.left, startY - 2*spacing, TimeDB.hideIcon, function(self)
       TimeDB.hideIcon = self:GetChecked()
       frame:ApplySettings()
     end)
 
     -- RGB Clock Checkbox
-    local rgb = CreateCheckbox(p, "TimeRGBClockCB", "RGB Clock", 20, startY - 3*spacing, TimeDB.rgbClock, function(self)
+    local rgb = CreateCheckbox(p, "TimeRGBClockCB", "RGB Clock", LAYOUT.left, startY - 3*spacing, TimeDB.rgbClock, function(self)
       TimeDB.rgbClock = self:GetChecked()
       frame:ApplySettings()
     end)
 
     -- Wave Checkbox (renamed from "Bounce") aligned with other options
     -- Moved up to avoid overlapping the Default button
-    local bc = CreateCheckbox(p, "TimeWaveCB", "Wave", 160, startY - 3*spacing, TimeDB.waveClock, function(self)
+    local bc = CreateCheckbox(p, "TimeWaveCB", "Wave", LAYOUT.col2, startY - 3*spacing, TimeDB.waveClock, function(self)
       TimeDB.waveClock = self:GetChecked()
       frame:ApplySettings()
     end)
@@ -1417,7 +1448,7 @@ function frame:CreateSettingsFrame()
   do
     local p = panels[2]
     local timeLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    timeLabel:SetPoint("TOPLEFT", 20, -110)
+    timeLabel:SetPoint("TOPLEFT", LAYOUT.left, LAYOUT.top)
     timeLabel:SetText("Alarm Time (HH:MM):")
 
     local timeEdit = CreateFrame("EditBox", addonName.."AlarmTimeBox", p, "InputBoxTemplate")
@@ -1593,7 +1624,7 @@ function frame:CreateSettingsFrame()
   -- Quality of Life Panel
   do
     local p = panels[3]
-    local ht = CreateCheckbox(p, "TimeHideTrackerCB", "Hide Objective Tracker", 20, -110, TimePerCharDB.hideTracker, function(self)
+    local ht = CreateCheckbox(p, "TimeHideTrackerCB", "Hide Objective Tracker", LAYOUT.left, LAYOUT.top, TimePerCharDB.hideTracker, function(self)
       TimePerCharDB.hideTracker = self:GetChecked()
       if self:GetChecked() then ObjectiveTrackerFrame:Hide() else ObjectiveTrackerFrame:Show() end
     end)
@@ -1622,11 +1653,11 @@ function frame:CreateSettingsFrame()
       { key = "trackMonth",   label = "Time played this month" },
       { key = "trackYear",    label = "Time played this year" },
     }
-    local startY = -110
+    local startY = LAYOUT.top
     local spacing = 30
 
     for i, opt in ipairs(trackingOptions) do
-      local cb = CreateCheckbox(p, addonName.."Track"..opt.key.."CB", opt.label, 20, startY - spacing * (i - 1), TimeDB[opt.key] or false, function(self)
+      local cb = CreateCheckbox(p, addonName.."Track"..opt.key.."CB", opt.label, LAYOUT.left, startY - spacing * (i - 1), TimeDB[opt.key] or false, function(self)
         TimeDB[opt.key] = self:GetChecked()
       end)
 
@@ -1654,7 +1685,7 @@ function frame:CreateSettingsFrame()
       end
     end
 
-    local tooltipCB = CreateCheckbox(p, addonName.."TrackTooltipCB", "Show tracking info as tooltip on icon hover", 20, startY - spacing * #trackingOptions - 10, TimeDB.trackTooltip or false, function(self)
+    local tooltipCB = CreateCheckbox(p, addonName.."TrackTooltipCB", "Show tracking info as tooltip on icon hover", LAYOUT.left, startY - spacing * #trackingOptions - 10, TimeDB.trackTooltip or false, function(self)
       TimeDB.trackTooltip = self:GetChecked()
     end)
 
@@ -1684,7 +1715,7 @@ function frame:CreateSettingsFrame()
     local p = panels[5]
     -- Title for the font dropdown section
     local fontLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    fontLabel:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -110)
+    fontLabel:SetPoint("TOPLEFT", p, "TOPLEFT", LAYOUT.left, LAYOUT.top)
     fontLabel:SetText("Combat Text Font:")
 
     -- Create one dropdown per font group arranged in two columns
