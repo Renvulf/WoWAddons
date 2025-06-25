@@ -1685,23 +1685,28 @@ function frame:CreateSettingsFrame()
     fontLabel:SetPoint("TOPLEFT", p, "TOPLEFT", 20, -110)
     fontLabel:SetText("Combat Text Font:")
 
-    -- Create one dropdown per font group
+    -- Create one dropdown per font group arranged in two columns
     local dropdowns = {}
     local lastDD
+    -- forward declare helper so dropdown callbacks can reference it
+    local SetCombatPreviewFont
     local order = {"Fun","Future","Movie/Game","Easy-to-Read","Custom"}
-    for _,grp in ipairs(order) do
+    local colWidth  = 150      -- width of each dropdown
+    local colOffset = 160      -- spacing between columns
+    for idx, grp in ipairs(order) do
       local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]","") .. "Dropdown", p, "UIDropDownMenuTemplate")
-      if not lastDD then
-        dd:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", 0, -6)
-      else
-        dd:SetPoint("TOPLEFT", lastDD, "BOTTOMLEFT", 0, -10)
-      end
-      UIDropDownMenu_SetWidth(dd, 180)
+      local row = math.floor((idx-1)/2)
+      local col = (idx-1) % 2
+      -- extra spacing below the main label so text doesn't overlap
+      dd:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", col*colOffset, -20 - row*40)
+      UIDropDownMenu_SetWidth(dd, colWidth)
       local lbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
       lbl:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 16, 3)
       lbl:SetText(grp)
       dropdowns[grp] = dd
-      lastDD = dd
+      if idx == #order then
+        lastDD = dd
+      end
 
       UIDropDownMenu_Initialize(dd, function(self)
         for _,fname in ipairs(COMBAT_FONT_GROUPS[grp].fonts) do
@@ -1725,16 +1730,6 @@ function frame:CreateSettingsFrame()
       end)
     end
 
-    -- Set initial dropdown text and preview based on saved font
-    for _,dd in pairs(dropdowns) do UIDropDownMenu_SetText(dd, "Select Font") end
-    if TimePerCharDB.combatFont then
-      local g,f = TimePerCharDB.combatFont:match("^([^/]+)/(.+)$")
-      if g and f and dropdowns[g] and combatFontExists[g][f] then
-        UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$","") )
-        SetCombatPreviewFont(combatFontCache[g][f])
-      end
-    end
-
     local note = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     note:SetPoint("TOPLEFT", lastDD, "BOTTOMLEFT", 0, -4)
     note:SetText("Requires full game restart once applied to change font")
@@ -1746,11 +1741,21 @@ function frame:CreateSettingsFrame()
     preview:SetText("12345")
     preview:SetTextColor(1,1,1,1)
 
-    local function SetCombatPreviewFont(fontObj)
+    SetCombatPreviewFont = function(fontObj)
       preview:SetFontObject(fontObj)
       local _, size = preview:GetFont()
       local pad = math.ceil(size * 0.2)
       preview:SetHeight(size + pad*2)
+    end
+
+    -- Set initial dropdown text and preview based on saved font
+    for _,dd in pairs(dropdowns) do UIDropDownMenu_SetText(dd, "Select Font") end
+    if TimePerCharDB.combatFont then
+      local g,f = TimePerCharDB.combatFont:match("^([^/]+)/(.+)$")
+      if g and f and dropdowns[g] and combatFontExists[g][f] then
+        UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$","") )
+        SetCombatPreviewFont(combatFontCache[g][f])
+      end
     end
 
     local editBox = CreateFrame("EditBox", addonName.."CombatPreviewEdit", p, "InputBoxTemplate")
@@ -1815,8 +1820,13 @@ function frame:CreateSettingsFrame()
       {k="petDamage",      l="Show Pet Damage",      c="floatingCombatTextPetMeleeDamage"},
       {k="periodicDamage", l="Show Periodic Damage", c="floatingCombatTextPeriodicDamage"},
     }
-    for i,opt in ipairs(combatOpts) do
-      CreateCheckbox(p, "TimeCombat"..opt.k.."CB", opt.l, 0, -30 * i, TimePerCharDB[opt.k], function(self)
+    -- Arrange checkboxes in two columns under the size slider
+    for i, opt in ipairs(combatOpts) do
+      local col = (i-1) % 2
+      local row = math.floor((i-1) / 2)
+      local x = col * 160
+      local y = -30 * (row + 1)
+      CreateCheckbox(p, "TimeCombat"..opt.k.."CB", opt.l, x, y, TimePerCharDB[opt.k], function(self)
         TimePerCharDB[opt.k] = self:GetChecked()
         SetCVar(opt.c, self:GetChecked() and 1 or 0)
       end, nil, nil, sizeSlider, "BOTTOMLEFT")
