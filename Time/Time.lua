@@ -58,8 +58,16 @@ local COMBAT_FONT_GROUPS = {
   },
   ["Custom"] = {
     -- Folder for user provided fonts. We support up to twenty numbered fonts
-    -- named 1.ttf through 20.ttf.  Users may place their own files here.
-    path  = "Interface\\AddOns\\Time\\Custom(1-20)\\",
+    -- named 1.ttf through 20.ttf. Users may place their own files here. Some
+    -- earlier versions of the addon referred to this directory as
+    -- "Custom(1-20)" while the repository also ships a "CombatFonts" folder.
+    -- To cover all cases we attempt to load numbered fonts from any of these
+    -- locations.
+    paths = {
+      "Interface\\AddOns\\Time\\Custom\\",
+      "Interface\\AddOns\\Time\\CombatFonts\\",
+      "Interface\\AddOns\\Time\\Custom(1-20)\\",
+    },
     fonts = {},
   },
 }
@@ -79,14 +87,31 @@ local combatFontExists = {}
 for group, data in pairs(COMBAT_FONT_GROUPS) do
   combatFontCache[group]  = {}
   combatFontExists[group] = {}
+  local basePaths = data.paths or {data.path}
   for _, fname in ipairs(data.fonts) do
-    local path = data.path .. fname
-    local f    = CreateFont(addonName .. "CombatFont" .. group .. fname)
-    f:SetFont(path, 20, "")
-    local loaded = f:GetFont()
-    if loaded and loaded:lower():find(fname:lower(), 1, true) then
+    local fontObj, relPath, absPath
+    for _, base in ipairs(basePaths) do
+      local path = base .. fname
+      local f    = CreateFont(addonName .. "CombatFont" .. group .. fname)
+      f:SetFont(path, 20, "")
+      local loaded = f:GetFont()
+      if loaded and loaded:lower():find(fname:lower(), 1, true) then
+        fontObj = f
+        if group == "Custom" then
+          -- Always save using the virtual Custom/ prefix so dropdown logic
+          -- remains stable regardless of the actual folder used.
+          relPath = "Custom/" .. fname
+        else
+          relPath = path:match("Interface\\AddOns\\Time\\(.+)$") or (group .. "/" .. fname)
+          relPath = relPath:gsub("\\", "/")
+        end
+        absPath = path
+        break
+      end
+    end
+    if fontObj then
       combatFontExists[group][fname] = true
-      combatFontCache[group][fname]  = f
+      combatFontCache[group][fname]  = {font=fontObj, relative=relPath, path=absPath}
     else
       combatFontExists[group][fname] = false
     end
@@ -755,7 +780,23 @@ function frame:ApplyCombatSettings()
     end
   end
   if TimePerCharDB.combatFont then
-    local fontFile = "Interface\\AddOns\\Time\\" .. TimePerCharDB.combatFont
+    local fontFile
+    if TimePerCharDB.combatFont:match("^Custom/") then
+      local fname = TimePerCharDB.combatFont:match("^Custom/(.+)$")
+      for _, base in ipairs(COMBAT_FONT_GROUPS["Custom"].paths) do
+        local candidate = base .. fname
+        local f = CreateFont(addonName.."TempApplyFont")
+        f:SetFont(candidate, 20, "")
+        local loaded = f:GetFont()
+        if loaded and loaded:lower():find(fname:lower(), 1, true) then
+          fontFile = candidate
+          break
+        end
+      end
+    end
+    if not fontFile then
+      fontFile = "Interface\\AddOns\\Time\\" .. TimePerCharDB.combatFont
+    end
     _G["DAMAGE_TEXT_FONT"] = fontFile
     _G["COMBAT_TEXT_FONT"]  = fontFile
   end
@@ -1751,6 +1792,7 @@ function frame:CreateSettingsFrame()
       UIDropDownMenu_Initialize(dd, function(self)
         for _,fname in ipairs(COMBAT_FONT_GROUPS[grp].fonts) do
           if combatFontExists[grp][fname] then
+            local fontData = combatFontCache[grp][fname]
             local info = UIDropDownMenu_CreateInfo()
             local display = fname:gsub("%.otf$",""):gsub("%.ttf$","")
             info.text = display
@@ -1758,12 +1800,12 @@ function frame:CreateSettingsFrame()
             info.func = function()
               -- clear other dropdowns' text
               for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
-              TimePerCharDB.combatFont = grp .. "/" .. fname
+              TimePerCharDB.combatFont = fontData.relative
               UIDropDownMenu_SetText(dd, display)
-              SetCombatPreviewFont(combatFontCache[grp][fname])
+              SetCombatPreviewFont(fontData.font)
               preview:SetText(editBox:GetText())
             end
-            info.checked = (TimePerCharDB.combatFont == grp .. "/" .. fname)
+            info.checked = (TimePerCharDB.combatFont == fontData.relative)
             UIDropDownMenu_AddButton(info)
           end
         end
@@ -1786,10 +1828,12 @@ function frame:CreateSettingsFrame()
     preview:SetTextColor(1,1,1,1)
 
     SetCombatPreviewFont = function(fontObj)
-      preview:SetFontObject(fontObj)
-      local _, size = preview:GetFont()
-      local pad = math.ceil(size * 0.2)
-      preview:SetHeight(size + pad*2)
+      if not fontObj then return end
+      local path, size, flags = fontObj:GetFont()
+      size = size or 20
+      preview:SetFont(path, size * 2, flags)
+      local pad = math.ceil(size * 0.4)
+      preview:SetHeight(size * 2 + pad*2)
     end
 
     -- Set initial dropdown text and preview based on saved font
@@ -1798,7 +1842,8 @@ function frame:CreateSettingsFrame()
       local g,f = TimePerCharDB.combatFont:match("^([^/]+)/(.+)$")
       if g and f and dropdowns[g] and combatFontExists[g][f] then
         UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$","") )
-        SetCombatPreviewFont(combatFontCache[g][f])
+        local fd = combatFontCache[g][f]
+        if fd then SetCombatPreviewFont(fd.font) end
       end
     end
 
