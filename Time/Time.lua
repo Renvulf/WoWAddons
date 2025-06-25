@@ -123,12 +123,20 @@ end
 -- allows us to reliably shift the displayed time when "Use Server Time" is
 -- enabled even if `GetServerTime` returns a value in a different time zone.
 local SERVER_TIME_DIFF = 0
-if GetServerTime then
-  local ok, st = pcall(GetServerTime)
-  if ok and type(st) == "number" then
-    SERVER_TIME_DIFF = st - time()
+local function UpdateServerTimeDiff()
+  if GetServerTime then
+    local ok, st = pcall(GetServerTime)
+    if ok and type(st) == "number" then
+      SERVER_TIME_DIFF = st - time()
+    else
+      SERVER_TIME_DIFF = 0
+    end
+  else
+    SERVER_TIME_DIFF = 0
   end
 end
+-- initialize diff at load time
+UpdateServerTimeDiff()
 
 -- ─── Helper: format seconds as "Xh Ym" ────────────────────────────────────────
 function frame:FormatSeconds(sec)
@@ -748,6 +756,7 @@ function frame:CreateSettingsFrame()
     ust:SetScript("OnClick", function(self)
       TimeDB.useServerTime = self:GetChecked()
       if self:GetChecked() then
+        UpdateServerTimeDiff()
         TimeDB.timezoneOffset = 0
         tz:SetValue(0)
         tz:Disable()
@@ -1297,6 +1306,8 @@ frame:RegisterEvent("PLAYER_LOGOUT")
 
 frame:SetScript("OnEvent", function(self, event, ...)
   if event == "PLAYER_LOGIN" then
+    -- Update server time difference now that server time is available
+    UpdateServerTimeDiff()
     if not self.fs then
       -- Create clock text
       self.fs  = frame:CreateFontString(addonName.."Font","OVERLAY")
