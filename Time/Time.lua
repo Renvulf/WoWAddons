@@ -16,7 +16,8 @@
     All changes should be additive and clearly marked.
 --]]
 
-local addonName, addonTable = ...    -- standard boilerplate
+-- Retrieve our addon name; the second return (addonTable) is unused
+local addonName = ...
 TimeDB = TimeDB or {}                -- global settings across characters
 TimePerCharDB = TimePerCharDB or {}  -- per-character settings
 
@@ -152,6 +153,46 @@ function frame:FormatSeconds(sec)
   local h = math.floor(sec / 3600)
   local m = math.floor((sec % 3600) / 60)
   return string.format("%dh %dm", h, m)
+end
+
+-- Helper to play sounds across API versions
+--
+-- Play a sound file and return its handle if available. WoW's sound API has
+-- changed signatures over time, so we defensively check each return value and
+-- only propagate a numeric sound handle.
+--
+local function SafePlaySound(path)
+  local h1, h2
+
+  if C_Sound and C_Sound.PlaySoundFile then
+    h1, h2 = C_Sound.PlaySoundFile(path, "Master")
+  elseif PlaySoundFile then
+    local ok; ok, h1, h2 = pcall(PlaySoundFile, path, "Master")
+    if not ok then h1, h2 = nil, nil end
+  elseif PlaySound then
+    pcall(PlaySound, SOUNDKIT.RAID_WARNING, "Master")
+    return nil
+  end
+
+  -- Prefer the second return (Retail), otherwise the first if numeric
+  if type(h2) == "number" then return h2 end
+  if type(h1) == "number" then return h1 end
+  return nil
+end
+
+-- Helper to stop sounds started with SafePlaySound
+local function SafeStopSound(handle)
+  if type(handle) ~= "number" then return end
+
+  if C_Sound and C_Sound.StopSoundFile then
+    C_Sound.StopSoundFile(handle)
+  elseif C_Sound and C_Sound.StopSound then
+    C_Sound.StopSound(handle)
+  elseif StopSoundFile then
+    StopSoundFile(handle)
+  elseif StopSound then
+    StopSound(handle)
+  end
 end
 
 -- Utility: show tracking tooltip anchored to a frame
@@ -374,6 +415,8 @@ function frame:UpdateWaveStrings(text)
 end
 
 function frame:ApplySettings()
+  -- The frame components may not exist during very early loading
+  if not self.fs then return end
   if TimeDB.fontSize < 15 then TimeDB.fontSize = 15 end
 
   local fontFile = FONT_FOLDER .. (TimeDB.fontName or DEFAULTS.fontName) .. ".ttf"
@@ -608,7 +651,12 @@ end
 
 -- ─── QoL Settings ───────────────────────────────────────────────────────────
 function frame:ApplyQoLSettings()
-  if TimePerCharDB.hideTracker then ObjectiveTrackerFrame:Hide() else ObjectiveTrackerFrame:Show() end
+  if not ObjectiveTrackerFrame then return end
+  if TimePerCharDB.hideTracker then
+    ObjectiveTrackerFrame:Hide()
+  else
+    ObjectiveTrackerFrame:Show()
+  end
   ObjectiveTrackerFrame:SetScale(TimePerCharDB.trackerScale or 1)
 end
 
@@ -621,7 +669,7 @@ function frame:ApplyCombatSettings()
     {key="periodicDamage", cvar="floatingCombatTextPeriodicDamage"},
   }
   for _,o in ipairs(opts) do
-    if TimePerCharDB[o.key] ~= nil then
+    if TimePerCharDB[o.key] ~= nil and SetCVar then
       SetCVar(o.cvar, TimePerCharDB[o.key] and 1 or 0)
     end
   end
@@ -652,17 +700,9 @@ function frame:StartAlarm()
     self.prevMusicEnabled = nil
   end
 
-  -- Play alarm sound
+  -- Play alarm sound using the most compatible API
   local path = "Interface\\AddOns\\Time\\Alarm\\1.ogg"
-  local handle
-  if C_Sound and C_Sound.PlaySoundFile then
-    handle = C_Sound.PlaySoundFile(path, "Master")
-  elseif PlaySoundFile then
-    local _, soundHandle = PlaySoundFile(path, "Master")
-    handle = soundHandle
-  else
-    handle = PlaySound(SOUNDKIT.RAID_WARNING, "Master")
-  end
+  local handle = SafePlaySound(path)
 
   self.alarmSound   = handle
   self.alarmPlaying = true
@@ -726,15 +766,7 @@ end
 function frame:StopAlarm()
   -- Stop the sound
   if self.alarmSound then
-    if C_Sound and C_Sound.StopSoundFile then
-      C_Sound.StopSoundFile(self.alarmSound)
-    elseif C_Sound and C_Sound.StopSound then
-      C_Sound.StopSound(self.alarmSound)
-    elseif StopSoundFile then
-      StopSoundFile(self.alarmSound)
-    elseif StopSound then
-      StopSound(self.alarmSound)
-    end
+    SafeStopSound(self.alarmSound)
     self.alarmSound = nil
   end
 
