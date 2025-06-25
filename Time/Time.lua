@@ -934,6 +934,7 @@ end
 function frame:RefreshAlarmList()
   if not self.alarmListEntries then return end
   local now = GetServerTime and GetServerTime() or time()
+  TimeDB.alarms = TimeDB.alarms or {}
   -- Sort alarms by next trigger time
   table.sort(TimeDB.alarms, function(a, b)
     local at = a.timestamp or (a.hour * 60 + a.min)
