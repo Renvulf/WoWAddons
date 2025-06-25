@@ -1456,12 +1456,14 @@ function frame:CreateSettingsFrame()
     durSlider:SetObeyStepOnDrag(true)
     durSlider:SetWidth(300)
     durSlider:SetValue(TimeDB.alarmDuration or DEFAULTS.alarmDuration)
-    -- Position the slider's value text to the right to avoid overlap with
-    -- the "Alarm Duration (sec)" label above.
+    -- Position the slider's value text below the slider so it doesn't
+    -- extend past the settings frame border.
     local durText = _G[durSlider:GetName() .. "Text"]
     if durText then
       durText:ClearAllPoints()
-      durText:SetPoint("LEFT", durSlider, "RIGHT", 10, 0)
+      -- Place the text slightly below the slider and left aligned
+      -- to avoid overlapping the Low/High labels.
+      durText:SetPoint("TOPLEFT", durSlider, "BOTTOMLEFT", 0, -18)
       durText:SetJustifyH("LEFT")
     end
     durSlider:SetScript("OnValueChanged", function(self, v)
@@ -1475,7 +1477,13 @@ function frame:CreateSettingsFrame()
 
     local setBtn = CreateFrame("Button", addonName.."AlarmSetBtn", p, "UIPanelButtonTemplate")
     setBtn:SetSize(80, 22)
-    setBtn:SetPoint("TOPLEFT", durSlider, "BOTTOMLEFT", 0, -12)
+    -- Anchor the button below the duration text so everything shifts down
+    -- when the value text moves.
+    if durText then
+      setBtn:SetPoint("TOPLEFT", durText, "BOTTOMLEFT", 0, -12)
+    else
+      setBtn:SetPoint("TOPLEFT", durSlider, "BOTTOMLEFT", 0, -12)
+    end
     setBtn:SetText("Add Alarm")
     setBtn:SetScript("OnClick", function()
       local h, m = parseAlarmInput()
