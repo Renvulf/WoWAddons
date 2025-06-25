@@ -1848,23 +1848,21 @@ function frame:CreateSettingsFrame()
 
     SetCombatPreviewFont = function(fontObj)
       if not fontObj then return end
-      -- Attempt to retrieve the font path/size from the object so we can
-      -- explicitly set the preview font at double the normal size.
-      local fontPath, size, flags = fontObj:GetFont()
+      -- Retrieve the font path from the object and apply it at double size
+      local path, size, flags = fontObj:GetFont()
       size  = size or 20
       flags = flags or ""
-      -- SetFont returns a boolean; fall back to SetFontObject if it fails.
-      local ok = preview:SetFont(fontPath, size * 2, flags)
+      local scaled = size * 2
+      local ok = preview:SetFont(path, scaled, flags)
+      -- If applying by path fails, fall back to the font object itself
       if not ok then
         preview:SetFontObject(fontObj)
-        _, size = preview:GetFont()
-        size = size or 20
-      else
-        size = size * 2
+        _, scaled = preview:GetFont()
+        scaled = scaled or size * 2
       end
-      -- Add padding so taller fonts do not clip vertically.
-      local pad = math.ceil(size * 0.4)
-      preview:SetHeight(size + pad * 2)
+      -- Pad to avoid clipping with tall fonts
+      local pad = math.ceil(scaled * 0.4)
+      preview:SetHeight(scaled + pad * 2)
     end
 
     -- Apply default font at double size on initialization
