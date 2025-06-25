@@ -19,12 +19,12 @@ Install the addon in your `Interface/AddOns` directory and type `/time` in game 
 Use these chat commands for quick actions:
 
 * `/time` – toggle the configuration window.
-* `/alarm <minutes> [message]` – set an alarm that triggers after the specified number of minutes with optional reminder text.
+* `/alarm <minutes> [message]` – set an alarm that triggers after the specified number of minutes with optional reminder text. Multiple alarms can be queued.
   * Example: `/alarm 10 Brew coffee`
 * `/time remind me in <number>[s|m|h|d] <message>` – show a toast reminder after the specified delay.
   * Example: `/time remind me in 5m Check the auction house`
 
-If an alarm triggers, a fullscreen overlay with your reminder text and an alarm sound will appear. Reminders created with the `remind me in` command appear as small toasts near the top‑right of the screen.
+If an alarm triggers, a fullscreen overlay with your reminder text and an alarm sound will appear. Reminders created with the `remind me in` command appear as small toasts near the top‑right of the screen. Any alarms you create are listed under **Upcoming Alarms** in the settings window; click an entry there to cancel it.
 
 ## License
 This project is released under the MIT License. See `LICENSE` for details.

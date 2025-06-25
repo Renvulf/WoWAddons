@@ -77,6 +77,7 @@ local DEFAULTS = {
   alarmTime           = "",    -- Added default alarm time
   alarmReminder       = "",    -- Added default reminder text
   alarmTimestamp      = 0,     -- epoch when relative alarm should trigger
+  alarms             = {},    -- table of pending alarms
   -- BEGIN FEATURE: server time and hourly chime defaults
   useServerTime       = false,
   hourlyChime         = false,
@@ -101,6 +102,21 @@ local DEFAULTS = {
 }
 for k, v in pairs(DEFAULTS) do
   if TimeDB[k] == nil then TimeDB[k] = v end
+end
+
+-- Migrate legacy single alarm fields to new alarm table
+if TimeDB.alarms == nil then TimeDB.alarms = {} end
+do
+  local h, m = (TimeDB.alarmTime or ""):match("^(%d?%d):(%d%d)$")
+  if h and m then
+    table.insert(TimeDB.alarms, {hour = tonumber(h), min = tonumber(m), text = TimeDB.alarmReminder or ""})
+  end
+  if TimeDB.alarmTimestamp and TimeDB.alarmTimestamp > 0 then
+    table.insert(TimeDB.alarms, {timestamp = TimeDB.alarmTimestamp, text = TimeDB.alarmReminder or ""})
+  end
+  TimeDB.alarmTime = ""
+  TimeDB.alarmTimestamp = 0
+  TimeDB.alarmReminder = ""
 end
 
 -- Backward compatibility: migrate old bounceClock setting to waveClock
@@ -824,29 +840,34 @@ function frame:CheckAlarm()
   end
   -- END FEATURE
 
-  -- Check for relative alarm timestamp first
-  if TimeDB.alarmTimestamp and TimeDB.alarmTimestamp > 0 and not self.alarmPlaying then
-    local now = GetServerTime and GetServerTime() or time()
-    if now >= TimeDB.alarmTimestamp then
-      TimeDB.alarmTimestamp = 0
-      TimeDB.alarmTime = ""
-      self:StartAlarm()
-      return
-    end
-  end
-
-  if not TimeDB.alarmTime or TimeDB.alarmTime == "" or self.alarmPlaying then
-    return
-  end
-  local current
+  if not TimeDB.alarms then return end
+  local now = GetServerTime and GetServerTime() or time()
+  local h, m
   if TimeDB.useServerTime then
-    local h, m = GetServerClock()
-    current = string.format("%02d:%02d", h, m)
+    h, m = GetServerClock()
   else
-    current = GetLocalTimeValue("%H:%M")
+    h = tonumber(GetLocalTimeValue("%H"))
+    m = tonumber(GetLocalTimeValue("%M"))
   end
-  if current == TimeDB.alarmTime then
-    self:StartAlarm()
+  for i = #TimeDB.alarms, 1, -1 do
+    local a = TimeDB.alarms[i]
+    if a.timestamp then
+      if now >= a.timestamp and not self.alarmPlaying then
+        TimeDB.alarmReminder = a.text or ""
+        table.remove(TimeDB.alarms, i)
+        self:StartAlarm()
+        if self.RefreshAlarmList then self:RefreshAlarmList() end
+        break
+      end
+    else
+      if h == a.hour and m == a.min and not self.alarmPlaying then
+        TimeDB.alarmReminder = a.text or ""
+        table.remove(TimeDB.alarms, i)
+        self:StartAlarm()
+        if self.RefreshAlarmList then self:RefreshAlarmList() end
+        break
+      end
+    end
   end
 end
 
@@ -883,6 +904,57 @@ function frame:CheckReminders()
     if now >= r.time then
       self:ShowToast(r.text)
       table.remove(self.reminders, i)
+    end
+  end
+end
+
+-- Add an absolute alarm (hour/minute) to the queue
+function frame:AddAbsoluteAlarm(h, m, text)
+  TimeDB.alarms = TimeDB.alarms or {}
+  table.insert(TimeDB.alarms, {hour = h, min = m, text = text or ""})
+  if self.RefreshAlarmList then self:RefreshAlarmList() end
+end
+
+-- Add a relative alarm in minutes to the queue
+function frame:AddRelativeAlarm(minutes, text)
+  TimeDB.alarms = TimeDB.alarms or {}
+  local now = GetServerTime and GetServerTime() or time()
+  table.insert(TimeDB.alarms, {timestamp = now + minutes * 60, text = text or ""})
+  if self.RefreshAlarmList then self:RefreshAlarmList() end
+end
+
+-- Remove an alarm by index
+function frame:RemoveAlarm(idx)
+  if not TimeDB.alarms then return end
+  table.remove(TimeDB.alarms, idx)
+  if self.RefreshAlarmList then self:RefreshAlarmList() end
+end
+
+-- Refresh the upcoming alarm list in the settings UI
+function frame:RefreshAlarmList()
+  if not self.alarmListEntries then return end
+  local now = GetServerTime and GetServerTime() or time()
+  -- Sort alarms by next trigger time
+  table.sort(TimeDB.alarms, function(a, b)
+    local at = a.timestamp or (a.hour * 60 + a.min)
+    local bt = b.timestamp or (b.hour * 60 + b.min)
+    return at < bt
+  end)
+  for i, btn in ipairs(self.alarmListEntries) do
+    local a = TimeDB.alarms[i]
+    if a then
+      btn.alarmIndex = i
+      local display
+      if a.timestamp then
+        display = date("%H:%M", a.timestamp) .. " - " .. (a.text or "")
+      else
+        display = string.format("%02d:%02d - %s", a.hour, a.min, a.text or "")
+      end
+      btn.text:SetText(display)
+      btn:Show()
+    else
+      btn:Hide()
+      btn.alarmIndex = nil
     end
   end
 end
@@ -1283,7 +1355,7 @@ function frame:CreateSettingsFrame()
     timeEdit:SetSize(100, 24)
     timeEdit:SetPoint("TOPLEFT", timeLabel, "BOTTOMLEFT", 0, -4)
     timeEdit:SetAutoFocus(false)
-    timeEdit:SetText(TimeDB.alarmTime or "")
+    timeEdit:SetText("")
 
     local ampmDropdown = CreateFrame("Frame", addonName.."AlarmAMPMDropdown", p, "UIDropDownMenuTemplate")
     ampmDropdown:SetPoint("LEFT", timeEdit, "RIGHT", 10, 0)
@@ -1306,23 +1378,23 @@ function frame:CreateSettingsFrame()
     UIDropDownMenu_SetSelectedValue(ampmDropdown, nil)
     UIDropDownMenu_SetText(ampmDropdown, "")
 
-    local function validateAndSetAlarm()
+    local function parseAlarmInput()
       local val = timeEdit:GetText()
       local h, m = val:match("^(%d?%d):(%d%d)$")
       if not h then
         print(addonName..": Invalid time format. Use HH:MM.")
-        return
+        return nil
       end
       h = tonumber(h); m = tonumber(m)
       if m < 0 or m > 59 then
         print(addonName..": Invalid minutes. Must be 00-59.")
-        return
+        return nil
       end
       local sel = UIDropDownMenu_GetSelectedValue(ampmDropdown)
       if sel then
         if h < 1 or h > 12 then
           print(addonName..": Invalid hour for 12h format. Use 1-12.")
-          return
+          return nil
         end
         if sel == "AM" then
           if h == 12 then h = 0 end
@@ -1332,15 +1404,13 @@ function frame:CreateSettingsFrame()
       else
         if h < 0 or h > 23 then
           print(addonName..": Invalid hour for 24h format. Use 0-23.")
-          return
+          return nil
         end
       end
-      TimeDB.alarmTime = string.format("%02d:%02d", h, m)
-      print(addonName..": Alarm time set to "..TimeDB.alarmTime)
+      return h, m
     end
 
     timeEdit:SetScript("OnEnterPressed", function(self)
-      validateAndSetAlarm()
       self:ClearFocus()
     end)
     timeEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
@@ -1352,37 +1422,67 @@ function frame:CreateSettingsFrame()
     remEdit:SetSize(300, 24)
     remEdit:SetPoint("TOPLEFT", remLabel, "BOTTOMLEFT", 0, -4)
     remEdit:SetAutoFocus(false)
-    remEdit:SetText(TimeDB.alarmReminder or "")
-    remEdit:SetScript("OnEnterPressed", function(self)
-      TimeDB.alarmReminder = self:GetText()
-      print(addonName..": Reminder text set.")
-      self:ClearFocus()
-    end)
+    remEdit:SetText("")
+    remEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     remEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
     local setBtn = CreateFrame("Button", addonName.."AlarmSetBtn", p, "UIPanelButtonTemplate")
     setBtn:SetSize(80, 22)
     setBtn:SetPoint("TOPLEFT", remEdit, "BOTTOMLEFT", 0, -12)
-    setBtn:SetText("Set Alarm")
+    setBtn:SetText("Add Alarm")
     setBtn:SetScript("OnClick", function()
-      validateAndSetAlarm()
-      TimeDB.alarmReminder = remEdit:GetText()
-      print(addonName..": Reminder text set to '"..TimeDB.alarmReminder.."'.")
+      local h, m = parseAlarmInput()
+      if not h then return end
+      local text = remEdit:GetText()
+      frame:AddAbsoluteAlarm(h, m, text)
+      print(addonName..": Alarm time set to "..string.format("%02d:%02d", h, m))
+      if text and strtrim(text) ~= "" then
+        print(addonName..": Reminder text set to '"..strtrim(text).."'.")
+      end
+      timeEdit:SetText("")
+      remEdit:SetText("")
+      UIDropDownMenu_SetSelectedValue(ampmDropdown, nil)
+      UIDropDownMenu_SetText(ampmDropdown, "")
     end)
 
     local clearBtn = CreateFrame("Button", addonName.."AlarmClearBtn", p, "UIPanelButtonTemplate")
     clearBtn:SetSize(80, 22)
     clearBtn:SetPoint("LEFT", setBtn, "RIGHT", 10, 0)
-    clearBtn:SetText("Clear Alarm")
+    clearBtn:SetText("Clear All")
     clearBtn:SetScript("OnClick", function()
-      TimeDB.alarmTime = ""
-      TimeDB.alarmReminder = ""
-      timeEdit:SetText("")
-      remEdit:SetText("")
-      UIDropDownMenu_SetSelectedValue(ampmDropdown, nil)
-      UIDropDownMenu_SetText(ampmDropdown, "")
-      print(addonName..": Alarm cleared.")
+      TimeDB.alarms = {}
+      frame:RefreshAlarmList()
+      print(addonName..": all alarms cleared.")
     end)
+
+    local upLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    upLabel:SetPoint("TOPLEFT", setBtn, "BOTTOMLEFT", 0, -16)
+    upLabel:SetText("Upcoming Alarms:")
+
+    p.alarmEntries = {}
+    frame.alarmListEntries = p.alarmEntries
+    for i = 1, 5 do
+      local btn = CreateFrame("Button", addonName.."AlarmEntry"..i, p)
+      btn:SetSize(300, 20)
+      if i == 1 then
+        btn:SetPoint("TOPLEFT", upLabel, "BOTTOMLEFT", 0, -2)
+      else
+        btn:SetPoint("TOPLEFT", p.alarmEntries[i-1], "BOTTOMLEFT", 0, 0)
+      end
+      btn:SetHighlightTexture("Interface/QuestFrame/UI-QuestTitleHighlight")
+      local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+      fs:SetAllPoints(btn)
+      fs:SetJustifyH("LEFT")
+      btn.text = fs
+      btn:SetScript("OnClick", function(self)
+        if self.alarmIndex then
+          frame:RemoveAlarm(self.alarmIndex)
+          print(addonName..": alarm cancelled.")
+        end
+      end)
+      p.alarmEntries[i] = btn
+    end
+    p:HookScript("OnShow", function() frame:RefreshAlarmList() end)
   end
 
   -- Quality of Life Panel
@@ -1607,6 +1707,7 @@ function frame:CreateSettingsFrame()
 
   self.settingsFrame   = f
   self.settingsOverlay = overlay
+  if self.RefreshAlarmList then self:RefreshAlarmList() end
 end
 
 -- ─── Slash Command ───────────────────────────────────────────────────────────
@@ -1656,11 +1757,10 @@ SlashCmdList["TIME"] = function(msg)
       end
     end
 
-    TimeDB.alarmTime = string.format("%02d:%02d", hour, min)
-    TimeDB.alarmReminder = strtrim(reminder or "")
-    print(addonName..": Alarm time set to "..TimeDB.alarmTime)
-    if TimeDB.alarmReminder ~= "" then
-      print(addonName..": Reminder text set to '"..TimeDB.alarmReminder.."'.")
+    frame:AddAbsoluteAlarm(hour, min, strtrim(reminder or ""))
+    print(addonName..": Alarm time set to "..string.format("%02d:%02d", hour, min))
+    if reminder and strtrim(reminder) ~= "" then
+      print(addonName..": Reminder text set to '"..strtrim(reminder).."'.")
     end
     return
   end
@@ -1684,14 +1784,10 @@ SlashCmdList["ALARM"] = function(msg)
     return
   end
 
-  local now = GetServerTime and GetServerTime() or time()
-  TimeDB.alarmTimestamp = now + mins * 60
-  TimeDB.alarmTime = ""
-  TimeDB.alarmReminder = strtrim(text or "")
-
+  frame:AddRelativeAlarm(mins, strtrim(text or ""))
   print(string.format("%s: Alarm set for %d minute(s) from now.", addonName, mins))
-  if TimeDB.alarmReminder ~= "" then
-    print(addonName..": Reminder text set to '"..TimeDB.alarmReminder.."'.")
+  if text and strtrim(text) ~= "" then
+    print(addonName..": Reminder text set to '"..strtrim(text).."'.")
   end
 end
 
