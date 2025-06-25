@@ -41,7 +41,8 @@ local COMBAT_FONT_GROUPS = {
     },
   },
   ["Movie/Game"] = {
-    path  = "Interface\\AddOns\\Time\\Movie:Game\\",
+    -- Directory renamed from Movie:Game to avoid the colon
+    path  = "Interface\\AddOns\\Time\\MovieGame\\",
     fonts = {
       "Deltarune.ttf", "Halo.ttf", "HarryP.ttf", "Pokemon.ttf",
       "Spongebob.ttf", "Terminator.ttf", "modernwarfare.ttf",
