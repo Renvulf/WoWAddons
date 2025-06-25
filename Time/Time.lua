@@ -219,6 +219,11 @@ function frame:StartRGBTicker()
     local b = (math.sin(angle + 4 * math.pi / 3) + 1) / 2
     self.fs:SetTextColor(r, g, b, alpha)
     if self.icon then self.icon:SetVertexColor(r, g, b, alpha) end
+    if self.shadows then
+      for _, s in ipairs(self.shadows) do
+        s:SetTextColor(r, g, b, alpha * 0.3)
+      end
+    end
   end)
 end
 
@@ -274,6 +279,11 @@ function frame:UpdateTime()
 
   local text = table.concat(parts, " ")
   self.fs:SetText(text)
+  if self.shadows then
+    for _, s in ipairs(self.shadows) do
+      s:SetText(text)
+    end
+  end
   -- BEGIN FEATURE: update LDB feed
   if self.dataObject then
     self.dataObject.text = text
@@ -288,7 +298,7 @@ function frame:ApplySettings()
 
   -- ── BEGIN FIX: Apply font and force redraw immediately ───────────────────
   -- Safely set the new font, then clear & re‐set the text to force the UI to redraw
-  local style = TimeDB.fontGlow and "OUTLINE" or ""
+  local style = ""
   pcall(self.fs.SetFont, self.fs, fontFile, TimeDB.fontSize, style)
   local currentText = self.fs:GetText()
   self.fs:SetText("")                -- clear the text
@@ -303,13 +313,19 @@ function frame:ApplySettings()
   self.fs:SetTextColor(unpack(c))
   if self.icon then self.icon:SetVertexColor(unpack(c)) end
 
-  -- Apply glow via shadow color when enabled
-  if TimeDB.fontGlow then
-    self.fs:SetShadowColor(c[1], c[2], c[3], 0.8)
-    self.fs:SetShadowOffset(0, 0)
-  else
-    self.fs:SetShadowColor(0, 0, 0, 0)
-    self.fs:SetShadowOffset(0, 0)
+  -- Disable Blizzard shadow; halo handled via extra FontStrings
+  self.fs:SetShadowColor(0, 0, 0, 0)
+  self.fs:SetShadowOffset(0, 0)
+
+  -- Update shadow font strings to match current font/color
+  if self.shadows then
+    for _, s in ipairs(self.shadows) do
+      pcall(s.SetFont, s, fontFile, TimeDB.fontSize, "")
+      s:SetShadowColor(0, 0, 0, 0)
+      s:SetShadowOffset(0, 0)
+      s:SetTextColor(c[1], c[2], c[3], 0.3)
+      if TimeDB.fontGlow then s:Show() else s:Hide() end
+    end
   end
 
   -- Start RGB color cycling if requested
@@ -860,11 +876,21 @@ function frame:CreateSettingsFrame()
         TimeDB.fontColor = {r,g,b,oA}
         frame.fs:SetTextColor(r,g,b,oA)
         if frame.icon then frame.icon:SetVertexColor(r,g,b,oA) end
+        if frame.shadows then
+          for _, s in ipairs(frame.shadows) do
+            s:SetTextColor(r,g,b,0.3)
+          end
+        end
       end
       local function cancel()
         TimeDB.fontColor = {oR,oG,oB,oA}
         frame.fs:SetTextColor(oR,oG,oB,oA)
         if frame.icon then frame.icon:SetVertexColor(oR,oG,oB,oA) end
+        if frame.shadows then
+          for _, s in ipairs(frame.shadows) do
+            s:SetTextColor(oR,oG,oB,0.3)
+          end
+        end
       end
       ColorPickerFrame.func        = live
       ColorPickerFrame.swatchFunc  = live
@@ -1407,6 +1433,16 @@ frame:SetScript("OnEvent", function(self, event, ...)
       self.iconButton:SetScript("OnLeave", GameTooltip_Hide)
       self.iconButton:EnableMouse(true)
       -- ────────────────────────────────────────────────────────────────
+
+      -- Create halo shadow FontStrings for soft glow
+      self.shadows = {}
+      local offsets = {{1,0},{-1,0},{0,1},{0,-1}}
+      for i, off in ipairs(offsets) do
+        local fs = frame:CreateFontString(nil, "BACKGROUND", "GameFontNormal")
+        fs:SetPoint("CENTER", self.fs, "CENTER", off[1], off[2])
+        fs:SetTextColor(1,1,1,0.3)
+        self.shadows[i] = fs
+      end
     end
 
     self:ApplySettings()
