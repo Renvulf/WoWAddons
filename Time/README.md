@@ -5,7 +5,7 @@ Time is a lightweight World of Warcraft addon that provides a customizable clock
 ## Features
 - Movable clock display with configurable font, color and size
 - Optional date, seconds, server time and hourly chime
-- Alarm with custom reminder text and fullscreen notification
+- Alarm with custom reminder text, adjustable duration and fullscreen notification
 - Playtime tracking (session/day/week/month/year) shown in tooltips
 - Quality of life options for the Objective Tracker
 - Combat text configuration including font overrides

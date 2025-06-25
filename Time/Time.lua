@@ -78,6 +78,7 @@ local DEFAULTS = {
   alarmReminder       = "",    -- Added default reminder text
   alarmTimestamp      = 0,     -- epoch when relative alarm should trigger
   alarms             = {},    -- table of pending alarms
+  alarmDuration      = 20,    -- seconds alarm stays active
   -- BEGIN FEATURE: server time and hourly chime defaults
   useServerTime       = false,
   hourlyChime         = false,
@@ -737,6 +738,13 @@ function frame:StartAlarm()
 
   self.alarmSound   = handle
   self.alarmPlaying = true
+  -- Auto-stop timer
+  if self.alarmTimer then
+    self.alarmTimer:Cancel()
+    self.alarmTimer = nil
+  end
+  local dur = TimeDB.alarmDuration or DEFAULTS.alarmDuration
+  self.alarmTimer = C_Timer.NewTimer(dur, function() frame:StopAlarm() end)
 
   -- Create or show full-screen overlay
   if not self.alarmFrame then
@@ -799,6 +807,11 @@ function frame:StopAlarm()
   if self.alarmSound then
     SafeStopSound(self.alarmSound)
     self.alarmSound = nil
+  end
+
+  if self.alarmTimer then
+    self.alarmTimer:Cancel()
+    self.alarmTimer = nil
   end
 
   -- Stop animation ticker
@@ -1319,6 +1332,11 @@ function frame:CreateSettingsFrame()
       hi:SetChecked(TimeDB.hideIcon)
       rgb:SetChecked(TimeDB.rgbClock)
       bc:SetChecked(TimeDB.waveClock)
+      local adSlider = _G[addonName.."AlarmDurSlider"]
+      if adSlider then
+        adSlider:SetValue(TimeDB.alarmDuration or DEFAULTS.alarmDuration)
+        _G[adSlider:GetName() .. "Text"]:SetText("Alarm Duration: " .. (TimeDB.alarmDuration or DEFAULTS.alarmDuration) .. "s")
+      end
 
       frame:ApplySettings()
       frame:ApplyMoveSettings()
@@ -1380,7 +1398,7 @@ function frame:CreateSettingsFrame()
     UIDropDownMenu_SetText(ampmDropdown, "")
 
     local function parseAlarmInput()
-      local val = timeEdit:GetText()
+      local val = strtrim(timeEdit:GetText() or "")
       local h, m = val:match("^(%d?%d):(%d%d)$")
       if not h then
         print(addonName..": Invalid time format. Use HH:MM.")
@@ -1427,9 +1445,29 @@ function frame:CreateSettingsFrame()
     remEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     remEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
 
+    local durLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    durLabel:SetPoint("TOPLEFT", remEdit, "BOTTOMLEFT", 0, -12)
+    durLabel:SetText("Alarm Duration (sec):")
+
+    local durSlider = CreateFrame("Slider", addonName.."AlarmDurSlider", p, "OptionsSliderTemplate")
+    durSlider:SetPoint("TOPLEFT", durLabel, "BOTTOMLEFT", 0, -4)
+    durSlider:SetMinMaxValues(5, 60)
+    durSlider:SetValueStep(5)
+    durSlider:SetObeyStepOnDrag(true)
+    durSlider:SetWidth(300)
+    durSlider:SetValue(TimeDB.alarmDuration or DEFAULTS.alarmDuration)
+    durSlider:SetScript("OnValueChanged", function(self, v)
+      v = math.floor(v + 0.5)
+      TimeDB.alarmDuration = v
+      _G[self:GetName() .. "Text"]:SetText("Alarm Duration: " .. v .. "s")
+    end)
+    _G[durSlider:GetName() .. "Low"]:SetText("5")
+    _G[durSlider:GetName() .. "High"]:SetText("60")
+    _G[durSlider:GetName() .. "Text"]:SetText("Alarm Duration: " .. (TimeDB.alarmDuration or DEFAULTS.alarmDuration) .. "s")
+
     local setBtn = CreateFrame("Button", addonName.."AlarmSetBtn", p, "UIPanelButtonTemplate")
     setBtn:SetSize(80, 22)
-    setBtn:SetPoint("TOPLEFT", remEdit, "BOTTOMLEFT", 0, -12)
+    setBtn:SetPoint("TOPLEFT", durSlider, "BOTTOMLEFT", 0, -12)
     setBtn:SetText("Add Alarm")
     setBtn:SetScript("OnClick", function()
       local h, m = parseAlarmInput()
