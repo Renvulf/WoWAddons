@@ -259,12 +259,12 @@ end
 function frame:StartRGBTicker()
   if self.rgbTicker then self.rgbTicker:Cancel() end
   local alpha = (TimeDB.fontColor and TimeDB.fontColor[4]) or 1
-  local angle = 0
-  self.rgbTicker = C_Timer.NewTicker(0.05, function()
-    angle = angle + math.pi * 0.05
+  self.rgbAngle = 0                               -- track angle for new strings
+  local function applyColor(angle)
     local r = (math.sin(angle) + 1) / 2
     local g = (math.sin(angle + 2 * math.pi / 3) + 1) / 2
     local b = (math.sin(angle + 4 * math.pi / 3) + 1) / 2
+    self.rgbColor = {r, g, b, alpha}              -- store current color for wave strings
     self.fs:SetTextColor(r, g, b, alpha)
     if self.icon then self.icon:SetVertexColor(r, g, b, alpha) end
     if self.shadows then
@@ -277,6 +277,14 @@ function frame:StartRGBTicker()
         ws:SetTextColor(r, g, b, alpha)
       end
     end
+  end
+
+  -- Apply the initial color immediately to avoid flashes
+  applyColor(self.rgbAngle)
+
+  self.rgbTicker = C_Timer.NewTicker(0.05, function()
+    self.rgbAngle = (self.rgbAngle or 0) + math.pi * 0.05
+    applyColor(self.rgbAngle)
   end)
 end
 
@@ -285,6 +293,8 @@ function frame:StopRGBTicker()
   if self.rgbTicker then
     self.rgbTicker:Cancel()
     self.rgbTicker = nil
+    self.rgbAngle = nil
+    self.rgbColor = nil
   end
 end
 
@@ -385,6 +395,10 @@ function frame:UpdateWaveStrings(text)
   self.waveStrings = self.waveStrings or {}
   local fontFile = FONT_FOLDER .. (TimeDB.fontName or DEFAULTS.fontName) .. ".ttf"
   local c = TimeDB.fontColor or {1,1,1,1}
+  -- When RGB mode is active, use the current RGB color for new strings
+  if TimeDB.rgbClock and type(self.rgbColor) == "table" then
+    c = self.rgbColor
+  end
 
   local iconSize = TimeDB.fontSize * 2
   local gap      = -10
@@ -400,7 +414,7 @@ function frame:UpdateWaveStrings(text)
       fs.currentOffset = 0
     end
     fs:SetFont(fontFile, TimeDB.fontSize, "")
-    fs:SetTextColor(unpack(c))
+    fs:SetTextColor(unpack(c)) -- color already adjusted above
     fs:SetText(ch)
     fs:Show()
     fs:ClearAllPoints()
