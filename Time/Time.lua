@@ -1116,7 +1116,8 @@ function frame:CreateSettingsFrame()
     end)
 
     -- Wave Checkbox (renamed from "Bounce") aligned with other options
-    local bc = CreateCheckbox(p, "TimeWaveCB", "Wave", 160, startY - 4*spacing, TimeDB.waveClock, function(self)
+    -- Moved up to avoid overlapping the Default button
+    local bc = CreateCheckbox(p, "TimeWaveCB", "Wave", 160, startY - 3*spacing, TimeDB.waveClock, function(self)
       TimeDB.waveClock = self:GetChecked()
       frame:ApplySettings()
     end)
