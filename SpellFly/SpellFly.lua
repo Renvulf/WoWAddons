@@ -88,6 +88,23 @@ local fallbackButtonPatterns = {
   "MultiBar8Button%d",
 }
 
+-- Utility to scan all UI frames for action buttons. This helps support
+-- third-party action bar addons which may not register their buttons with the
+-- default ActionBarButtonEventsFrame.
+local function EnumerateUnknownActionButtons()
+  if not EnumerateFrames then
+    return
+  end
+
+  local frame = EnumerateFrames()
+  while frame do
+    if frame.action and frame.GetName and frame:IsObjectType("CheckButton") then
+      AddButtonToMap(frame)
+    end
+    frame = EnumerateFrames(frame)
+  end
+end
+
 local lastOriginInfo -- table with pre-calculated x, y, w, h
 
 -- Forward declare for use in CaptureButtonInfo.
@@ -98,6 +115,9 @@ local GetOriginInfo
 -- an "attempt to call global 'CaptureButtonInfo'" error when the button is
 -- pressed.
 local CaptureButtonInfo
+-- Forward declare AddButtonToMap so EnumerateUnknownActionButtons can call it
+-- before the actual implementation is defined later in the file.
+local AddButtonToMap
 
 -- Utility that attempts to find an action button frame for a given action slot.
 -- This relies on the default UI's ActionBarButtonEventsFrame which keeps a list
@@ -200,6 +220,11 @@ local function HookActionButtons()
       AddButtonToMap(btn)
     end
   end
+
+  -- Additional scan for buttons created by other addons. This call is
+  -- relatively heavy so we restrict it to situations where buttons have
+  -- potentially changed (PLAYER_LOGIN or ACTIONBAR_SLOT_CHANGED).
+  EnumerateUnknownActionButtons()
 end
 
 -- Acquire a frame from the pool or create a new one when needed.
@@ -377,9 +402,18 @@ SpellFly:SetScript("OnEvent", function(_, event, ...)
 
   -- Determine whether any origins are enabled. If none are checked we skip
   -- playing animations entirely.
-  local doBar = SpellFlyDB.offActionBar and lastOriginInfo
+  local doBarRequested = SpellFlyDB.offActionBar
   local doCenter = SpellFlyDB.fromCenter
+
+  -- If the user only enabled action bar animations but we failed to capture a
+  -- valid button (for example a keybind from a hidden bar), fall back to the
+  -- screen centre so an icon still displays.
+  local doBar = doBarRequested and lastOriginInfo
   if not doBar and not doCenter then
+    if doBarRequested then
+      -- Fallback when action bar origin is unavailable
+      PlaySpellAnimation(spellID, nil)
+    end
     lastOriginInfo = nil
     return
   end
