@@ -4,4 +4,7 @@
 ## Author: PantherField
 ## Version: 2.0
 
+## IconTexture: magifly.tga
+## SavedVariables: SpellFlyDB
+
 SpellFly.lua
