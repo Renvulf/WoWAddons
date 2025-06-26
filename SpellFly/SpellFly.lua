@@ -20,6 +20,7 @@ local optionsFrame
 -- UNIT_SPELLCAST_SUCCEEDED gives us reliable information about spells cast by
 -- the player without needing to parse the combat log.
 SpellFly:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+SpellFly:RegisterEvent("PLAYER_LOGIN")
 
 -- Frame pool used to recycle icon frames for better performance and to avoid
 -- creating excessive UI widgets on repeated casts.
@@ -59,6 +60,22 @@ if UseAction then
   end)
 end
 
+-- Hook action buttons directly so we capture the exact frame the user clicked.
+local function HookActionButtons()
+  if not ActionBarButtonEventsFrame or not ActionBarButtonEventsFrame.frames then
+    return
+  end
+
+  for _, button in pairs(ActionBarButtonEventsFrame.frames) do
+    if button and not button.SpellFlyHooked then
+      button:HookScript("OnMouseDown", function(self)
+        lastUsedButton = self
+      end)
+      button.SpellFlyHooked = true
+    end
+  end
+end
+
 -- Acquire a frame from the pool or create a new one when needed.
 local function AcquireIconFrame()
   local frame = table.remove(iconPool)
@@ -89,6 +106,31 @@ local function ReleaseIconFrame(frame)
   table.insert(iconPool, frame)
 end
 
+-- Attempt to retrieve the centre point and size of an action button's icon.
+-- Falls back to the button itself when no icon texture is found.
+local function GetOriginInfo(origin)
+  if not origin or not origin:IsVisible() then
+    return nil
+  end
+
+  local icon = origin.icon or origin.Icon or origin.IconTexture or origin.iconTexture
+  if icon and icon:IsVisible() then
+    local x, y = icon:GetCenter()
+    local w, h = icon:GetSize()
+    if x and y then
+      return x, y, w, h
+    end
+  end
+
+  local x, y = origin:GetCenter()
+  local w, h = origin:GetSize()
+  if x and y then
+    return x, y, w, h
+  end
+
+  return nil
+end
+
 -- Create and play the flying animation for the provided spellID.
 -- If `origin` is a valid frame the animation begins from that frame's centre.
 -- When `origin` is nil or not visible it will start from the screen centre.
@@ -114,14 +156,13 @@ local function PlaySpellAnimation(spellID, origin)
   local iconFrame = AcquireIconFrame()
   iconFrame.texture:SetTexture(texture)
 
-  -- Determine the starting point.  If a valid frame was supplied start there,
-  -- otherwise fall back to the centre of the screen.
-  local startX, startY
-  if origin and origin:IsVisible() then
-    startX, startY = origin:GetCenter()
-  end
+  -- Determine the starting point and match the size of the button's icon when possible.
+  local startX, startY, w, h = GetOriginInfo(origin)
   if not startX then
     startX, startY = UIParent:GetCenter()
+  end
+  if w and h and w > 0 and h > 0 then
+    iconFrame:SetSize(w, h)
   end
   iconFrame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", startX, startY)
 
@@ -170,7 +211,13 @@ local function PlaySpellAnimation(spellID, origin)
 end
 
 -- Event handler for UNIT_SPELLCAST_SUCCEEDED. We only care about the player.
-SpellFly:SetScript("OnEvent", function(_, _, unit, _, spellID)
+SpellFly:SetScript("OnEvent", function(_, event, ...)
+  if event == "PLAYER_LOGIN" then
+    HookActionButtons()
+    return
+  end
+
+  local unit, _, spellID = ...
   if unit ~= "player" or not spellID then
     return
   end
