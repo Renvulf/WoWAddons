@@ -34,6 +34,9 @@ local iconPool = {}
 local lastUsedButton
 local lastOriginInfo -- table with pre-calculated x, y, w, h
 
+-- Forward declare for use in CaptureButtonInfo.
+local GetOriginInfo
+
 -- Utility that attempts to find an action button frame for a given action slot.
 -- This relies on the default UI's ActionBarButtonEventsFrame which keeps a list
 -- of all action buttons.
@@ -123,9 +126,8 @@ local function ReleaseIconFrame(frame)
   table.insert(iconPool, frame)
 end
 
--- Attempt to retrieve the centre point and size of an action button's icon.
--- Falls back to the button itself when no icon texture is found.
-local function GetOriginInfo(origin)
+-- Implementation assigned after forward declaration above.
+GetOriginInfo = function(origin)
   if type(origin) == "table" then
     return origin.x, origin.y, origin.w, origin.h
   end
