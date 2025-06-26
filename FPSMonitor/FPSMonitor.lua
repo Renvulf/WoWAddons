@@ -114,34 +114,43 @@ local function CalculateStats(currentFPS, currentDT)
         }
     end
 
-    local sumFPS, sumDT = 0, 0
-    local dtValues = {}
-    local fpsValues = {}
+    local sumFPS, sumDT, sumDTSquared = 0, 0, 0
+    -- Keep small sorted tables of the lowest 1% and 0.1% FPS values to avoid
+    -- allocating large tables every update. This drastically reduces memory
+    -- churn compared to sorting the full history each time.
+    local low1List, low01List = {}, {}
+    local low1Size = math.max(1, math.floor(count * 0.01 + 0.5))
+    local low01Size = math.max(1, math.floor(count * 0.001 + 0.5))
+
+    local function InsertSorted(list, value, maxSize)
+        local i = #list
+        while i > 0 and value < list[i] do
+            list[i + 1] = list[i]
+            i = i - 1
+        end
+        list[i + 1] = value
+        if #list > maxSize then
+            list[#list] = nil
+        end
+    end
+
     for i = historyStart, historyStart + historyCount - 1 do
         local sample = frameHistory[i]
         sumFPS = sumFPS + sample.fps
         sumDT = sumDT + sample.dt
-        table.insert(dtValues, sample.dt)
-        table.insert(fpsValues, sample.fps)
+        sumDTSquared = sumDTSquared + sample.dt * sample.dt
+
+        InsertSorted(low1List, sample.fps, low1Size)
+        InsertSorted(low01List, sample.fps, low01Size)
     end
+
     local avgFPS = sumFPS / count
-    table.sort(fpsValues)
-    table.sort(dtValues)
-    local function percentile(values, p)
-        local index = math.max(1, math.floor(#values * p + 0.5))
-        return values[index]
-    end
-    local low1 = percentile(fpsValues, 0.01)
-    local low01 = percentile(fpsValues, 0.001)
+    local low1 = low1List[low1Size] or low1List[#low1List]
+    local low01 = low01List[low01Size] or low01List[#low01List]
 
     -- calculate jitter as standard deviation of frame times
     local meanDT = sumDT / count
-    local variance = 0
-    for _, dt in ipairs(dtValues) do
-        local diff = dt - meanDT
-        variance = variance + diff * diff
-    end
-    variance = variance / count
+    local variance = (sumDTSquared / count) - meanDT * meanDT
 
     return {
         current = currentFPS,
@@ -184,7 +193,8 @@ end
 -- Create movable display frame
 local function CreateDisplayFrame()
     if displayFrame then return end
-    displayFrame = CreateFrame("Frame", "FPSMonitorDisplay", UIParent)
+    -- Use BackdropTemplate for compatibility with modern client versions
+    displayFrame = CreateFrame("Frame", "FPSMonitorDisplay", UIParent, BackdropTemplateMixin and "BackdropTemplate")
     displayFrame:SetSize(220, 140)
     -- Position is restored from the saved configuration
     local pos = FPSMonitorDB.pos or defaultConfig.pos
@@ -225,7 +235,10 @@ local function CreateMinimapButton()
             local px, py = GetCursorPosition()
             local scale = Minimap:GetEffectiveScale()
             px, py = px / scale, py / scale
-            local angle = math.atan2(py - my, px - mx)
+            -- Some WoW versions expose math.atan rather than math.atan2. The two
+            -- argument form of atan behaves like atan2, so fall back to that
+            -- when atan2 isn't available.
+            local angle = math.atan2 and math.atan2(py - my, px - mx) or math.atan(py - my, px - mx)
             FPSMonitorDB.minimap.angle = angle
             UpdateMinimapButtonPosition(angle)
         end)
