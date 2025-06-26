@@ -53,6 +53,7 @@ local defaultConfig = {
     },
     updateInterval = 0.5,
     sampleInterval = 60,
+    memoryUpdateInterval = 5,
 }
 
 -- Default font used for the display. If the custom font fails to load we fall
@@ -163,6 +164,9 @@ local function ValidateConfig()
     end
     if type(FPSMonitorDB.sampleInterval) ~= "number" or FPSMonitorDB.sampleInterval <= 0 then
         FPSMonitorDB.sampleInterval = defaultConfig.sampleInterval
+    end
+    if type(FPSMonitorDB.memoryUpdateInterval) ~= "number" or FPSMonitorDB.memoryUpdateInterval <= 0 then
+        FPSMonitorDB.memoryUpdateInterval = defaultConfig.memoryUpdateInterval
     end
 end
 
@@ -293,6 +297,18 @@ local function ColorizeFPS(fps)
     end
 end
 
+-- Colorize memory usage (kilobytes) for quick visual feedback
+local function ColorizeMemory(mem)
+    if not mem then return "N/A" end
+    if mem >= 51200 then -- 50 MB+
+        return string.format("|cffff0000%.2f MB|r", mem / 1024)
+    elseif mem >= 20480 then -- 20 MB+
+        return string.format("|cffffff00%.2f MB|r", mem / 1024)
+    else
+        return string.format("|cff00ff00%.2f MB|r", mem / 1024)
+    end
+end
+
 local function UpdateDisplay(stats, memory)
     if not displayFrame or not displayFrame:IsShown() then return end
 
@@ -305,7 +321,7 @@ local function UpdateDisplay(stats, memory)
         string.format("%.1f", stats.low01),
         string.format("%.2f ms", stats.frameTime),
         string.format("%.2f ms", stats.jitter),
-        memory and string.format("%.2f MB", memory / 1024) or "N/A",
+        ColorizeMemory(memory),
     }
 
     for i = 1, #values do
@@ -322,7 +338,7 @@ local function PrintStats(stats, memory)
         stats.current, stats.average, stats.min, stats.max, stats.low1,
         stats.low01, stats.frameTime, stats.jitter))
     if memory then
-        print(string.format("Memory: %.2f MB", memory / 1024))
+        print("Memory: " .. ColorizeMemory(memory))
     end
     if FPSPerCharDB.overall then
         print(string.format("Overall min %.1f  Overall max %.1f",
@@ -489,7 +505,7 @@ local function CreateMinimapButton()
         GameTooltip:AddLine(string.format("1%% Low: %.1f", stats.low1))
         GameTooltip:AddLine(string.format("0.1%% Low: %.1f", stats.low01))
         if updateFrame and updateFrame.currentMemory then
-            GameTooltip:AddLine(string.format("Memory: %.2f MB", updateFrame.currentMemory / 1024))
+            GameTooltip:AddLine("Memory: " .. ColorizeMemory(updateFrame.currentMemory))
         end
         GameTooltip:Show()
     end)
@@ -565,6 +581,27 @@ local function CreateOptionsPanel()
     end)
     sampleSlider:SetValue(sampleInterval)
     sampleSlider.text:SetText("Sample window: " .. sampleInterval .. "s")
+
+    local memorySlider = CreateFrame("Slider", nil, optionsPanel, "OptionsSliderTemplate")
+    memorySlider:SetPoint("TOPLEFT", sampleSlider, "BOTTOMLEFT", 0, -40)
+    memorySlider:SetMinMaxValues(1, 30)
+    memorySlider:SetValueStep(1)
+    memorySlider:SetObeyStepOnDrag(true)
+    memorySlider:SetWidth(200)
+    memorySlider:SetValue(memoryUpdateInterval)
+    _G[memorySlider:GetName() .. "Low"]:SetText("1")
+    _G[memorySlider:GetName() .. "High"]:SetText("30")
+    local memoryText = memorySlider:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    memoryText:SetPoint("TOP", memorySlider, "BOTTOM", 0, -2)
+    memorySlider.text = memoryText
+    memorySlider:SetScript("OnValueChanged", function(self, value)
+        value = math.floor(value + 0.5)
+        self.text:SetText("Memory update: " .. value .. "s")
+        FPSMonitorDB.memoryUpdateInterval = value
+        memoryUpdateInterval = value
+    end)
+    memorySlider:SetValue(memoryUpdateInterval)
+    memorySlider.text:SetText("Memory update: " .. memoryUpdateInterval .. "s")
 
     InterfaceOptions_AddCategory(optionsPanel)
 end
@@ -697,6 +734,7 @@ local function OnEvent(_, event, arg1)
         ValidateConfig()
         sampleInterval = FPSMonitorDB.sampleInterval or sampleInterval
         updateInterval = FPSMonitorDB.updateInterval or updateInterval
+        memoryUpdateInterval = FPSMonitorDB.memoryUpdateInterval or memoryUpdateInterval
         pcall(CreateOptionsPanel)
         updateFrame:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_LOGIN" then
