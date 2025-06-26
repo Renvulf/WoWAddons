@@ -404,28 +404,6 @@ local function CreateDisplayFrame()
         print("FPSMonitor: session statistics reset")
     end)
 
-    -- Button to open configuration panel
-    local config = CreateFrame("Button", nil, displayFrame, "UIPanelButtonTemplate")
-    config:SetSize(60, 20)
-    config:SetPoint("BOTTOMLEFT", displayFrame, "BOTTOMLEFT", 8, 8)
-    config:SetText("Options")
-    config:SetScript("OnClick", function()
-        -- Lazily create the options panel if it could not be created earlier.
-        if not optionsPanel then
-            local ok = pcall(CreateOptionsPanel)
-            if not ok then
-                print("FPSMonitor: failed to open options panel")
-                return
-            end
-        end
-        if OpenConfigPanel then
-            OpenConfigPanel()
-        end
-        -- Hide the display to avoid covering the settings window.
-        if displayFrame and displayFrame:IsShown() then
-            displayFrame:Hide()
-        end
-    end)
     if UISpecialFrames then
         table.insert(UISpecialFrames, "FPSMonitorDisplay")
     end
