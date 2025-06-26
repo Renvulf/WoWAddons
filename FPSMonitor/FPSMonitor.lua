@@ -6,8 +6,11 @@
 -- We only need the name for event filtering so discard the second value.
 local addonName = ...
 
+-- These runtime variables are loaded from the saved configuration in
+-- ValidateConfig().  Default values are defined in `defaultConfig` below.
 local sampleInterval = 60 -- seconds to keep frame history for average and percentiles
 local updateInterval = 0.5 -- seconds between display updates
+local memoryUpdateInterval = 5 -- seconds between memory usage checks
 local captureDelay = 5 -- seconds to wait after loading screens before collecting samples
 
 -- Local references to frequently used globals for slight performance gain
@@ -48,6 +51,8 @@ local defaultConfig = {
         hide = false,
         angle = 0, -- radians around the minimap for the button position
     },
+    updateInterval = 0.5,
+    sampleInterval = 60,
 }
 
 -- Default font used for the display. If the custom font fails to load we fall
@@ -81,6 +86,7 @@ local capturing = false
 local captureStartTime
 local displayFrame
 local minimapButton
+local optionsPanel
 
 -- Reposition minimap button around the minimap based on stored angle
 local function UpdateMinimapButtonPosition(angle)
@@ -150,6 +156,13 @@ local function ValidateConfig()
         else
             mm.angle = NormalizeAngle(mm.angle)
         end
+    end
+
+    if type(FPSMonitorDB.updateInterval) ~= "number" or FPSMonitorDB.updateInterval <= 0 then
+        FPSMonitorDB.updateInterval = defaultConfig.updateInterval
+    end
+    if type(FPSMonitorDB.sampleInterval) ~= "number" or FPSMonitorDB.sampleInterval <= 0 then
+        FPSMonitorDB.sampleInterval = defaultConfig.sampleInterval
     end
 end
 
@@ -280,7 +293,7 @@ local function ColorizeFPS(fps)
     end
 end
 
-local function UpdateDisplay(stats)
+local function UpdateDisplay(stats, memory)
     if not displayFrame or not displayFrame:IsShown() then return end
 
     local values = {
@@ -292,6 +305,7 @@ local function UpdateDisplay(stats)
         string.format("%.1f", stats.low01),
         string.format("%.2f ms", stats.frameTime),
         string.format("%.2f ms", stats.jitter),
+        memory and string.format("%.2f MB", memory / 1024) or "N/A",
     }
 
     for i = 1, #values do
@@ -302,11 +316,14 @@ local function UpdateDisplay(stats)
 end
 
 -- Print summarized statistics to the chat frame
-local function PrintStats(stats)
+local function PrintStats(stats, memory)
     print(string.format(
         "FPSMonitor: %.1f avg %.1f min %.1f max %.1f 1%% %.1f 0.1%% %.1f frame %.2f ms jitter %.2f ms",
         stats.current, stats.average, stats.min, stats.max, stats.low1,
         stats.low01, stats.frameTime, stats.jitter))
+    if memory then
+        print(string.format("Memory: %.2f MB", memory / 1024))
+    end
     if FPSPerCharDB.overall then
         print(string.format("Overall min %.1f  Overall max %.1f",
             FPSPerCharDB.overall.min, FPSPerCharDB.overall.max))
@@ -325,7 +342,7 @@ local function CreateDisplayFrame()
     if displayFrame then return end
     -- Use BackdropTemplate for compatibility with modern client versions
     displayFrame = CreateFrame("Frame", "FPSMonitorDisplay", UIParent, BackdropTemplateMixin and "BackdropTemplate")
-    displayFrame:SetSize(220, 170)
+    displayFrame:SetSize(220, 186)
     -- Position is restored from the saved configuration
     local pos = FPSMonitorDB.pos or defaultConfig.pos
     displayFrame:SetPoint(pos.point, UIParent, pos.relativePoint, pos.x, pos.y)
@@ -359,6 +376,7 @@ local function CreateDisplayFrame()
         "0.1% Low",
         "Frame Time",
         "Jitter",
+        "AddOn Memory",
     }
 
     local y = -30
@@ -430,6 +448,9 @@ local function CreateMinimapButton()
         GameTooltip:AddLine(string.format("Average: %.1f", stats.average))
         GameTooltip:AddLine(string.format("1%% Low: %.1f", stats.low1))
         GameTooltip:AddLine(string.format("0.1%% Low: %.1f", stats.low01))
+        if updateFrame and updateFrame.currentMemory then
+            GameTooltip:AddLine(string.format("Memory: %.2f MB", updateFrame.currentMemory / 1024))
+        end
         GameTooltip:Show()
     end)
     minimapButton:SetScript("OnLeave", GameTooltip_Hide)
@@ -437,6 +458,77 @@ local function CreateMinimapButton()
         minimapButton:Hide()
     end
 end
+
+-- Configuration options panel
+local function CreateOptionsPanel()
+    if optionsPanel then return end
+    optionsPanel = CreateFrame("Frame", "FPSMonitorOptions", InterfaceOptionsFramePanelContainer or UIParent)
+    optionsPanel.name = "FPS Monitor"
+
+    local title = optionsPanel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("FPS Monitor")
+
+    local minimapCheck = CreateFrame("CheckButton", nil, optionsPanel, "InterfaceOptionsCheckButtonTemplate")
+    minimapCheck:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
+    minimapCheck.Text:SetText("Show minimap button")
+    minimapCheck:SetChecked(not FPSMonitorDB.minimap.hide)
+    minimapCheck:SetScript("OnClick", function(self)
+        local show = self:GetChecked()
+        FPSMonitorDB.minimap.hide = not show
+        if show then
+            if not minimapButton then CreateMinimapButton() end
+            minimapButton:Show()
+        elseif minimapButton then
+            minimapButton:Hide()
+        end
+    end)
+
+    local updateSlider = CreateFrame("Slider", nil, optionsPanel, "OptionsSliderTemplate")
+    updateSlider:SetPoint("TOPLEFT", minimapCheck, "BOTTOMLEFT", 0, -30)
+    updateSlider:SetMinMaxValues(0.1, 2)
+    updateSlider:SetValueStep(0.1)
+    updateSlider:SetObeyStepOnDrag(true)
+    updateSlider:SetWidth(200)
+    updateSlider:SetValue(updateInterval)
+    _G[updateSlider:GetName() .. "Low"]:SetText("0.1")
+    _G[updateSlider:GetName() .. "High"]:SetText("2.0")
+    local updateText = updateSlider:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    updateText:SetPoint("TOP", updateSlider, "BOTTOM", 0, -2)
+    updateSlider.text = updateText
+    updateSlider:SetScript("OnValueChanged", function(self, value)
+        value = math.floor(value * 10 + 0.5) / 10
+        self.text:SetText("Update interval: " .. value .. "s")
+        FPSMonitorDB.updateInterval = value
+        updateInterval = value
+    end)
+    updateSlider:SetValue(updateInterval)
+    updateSlider.text:SetText("Update interval: " .. updateInterval .. "s")
+
+    local sampleSlider = CreateFrame("Slider", nil, optionsPanel, "OptionsSliderTemplate")
+    sampleSlider:SetPoint("TOPLEFT", updateSlider, "BOTTOMLEFT", 0, -40)
+    sampleSlider:SetMinMaxValues(10, 120)
+    sampleSlider:SetValueStep(10)
+    sampleSlider:SetObeyStepOnDrag(true)
+    sampleSlider:SetWidth(200)
+    sampleSlider:SetValue(sampleInterval)
+    _G[sampleSlider:GetName() .. "Low"]:SetText("10")
+    _G[sampleSlider:GetName() .. "High"]:SetText("120")
+    local sampleText = sampleSlider:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    sampleText:SetPoint("TOP", sampleSlider, "BOTTOM", 0, -2)
+    sampleSlider.text = sampleText
+    sampleSlider:SetScript("OnValueChanged", function(self, value)
+        value = math.floor(value + 0.5)
+        self.text:SetText("Sample window: " .. value .. "s")
+        FPSMonitorDB.sampleInterval = value
+        sampleInterval = value
+    end)
+    sampleSlider:SetValue(sampleInterval)
+    sampleSlider.text:SetText("Sample window: " .. sampleInterval .. "s")
+
+    InterfaceOptions_AddCategory(optionsPanel)
+end
+
 
 -- Slash command to toggle
 SLASH_FPSMON1 = "/fpsmon"
@@ -483,12 +575,19 @@ SlashCmdList["FPSMON"] = function(msg)
     elseif msg == "stats" then
         local fps = GetFramerate()
         local stats = CalculateStats(fps, fps > 0 and (1 / fps) or 0)
-        PrintStats(stats)
+        PrintStats(stats, updateFrame.currentMemory)
+        return
+    elseif msg == "config" then
+        if optionsPanel then
+            InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+            InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+        end
         return
     elseif msg == "help" then
         print("/fpsmon - toggle display")
         print("/fpsmon minimap - toggle minimap button")
         print("/fpsmon stats - print current statistics")
+        print("/fpsmon config - open configuration")
         print("/fpsmon reset - reset session statistics")
         print("/fpsmon resetall - reset all statistics")
         return
@@ -519,12 +618,21 @@ updateFrame:SetScript("OnUpdate", function(self, elapsed)
         AddSample(elapsed)
     end
 
+    self.memT = (self.memT or 0) + elapsed
+    if self.memT >= memoryUpdateInterval then
+        self.memT = 0
+        if UpdateAddOnMemoryUsage and GetAddOnMemoryUsage then
+            UpdateAddOnMemoryUsage()
+            self.currentMemory = GetAddOnMemoryUsage(addonName)
+        end
+    end
+
     self.t = (self.t or 0) + elapsed
     if self.t >= updateInterval then
         self.t = 0
         local currentFPS = GetFramerate()
         local stats = CalculateStats(currentFPS, elapsed)
-        UpdateDisplay(stats)
+        UpdateDisplay(stats, self.currentMemory)
     end
 end)
 
@@ -534,6 +642,9 @@ local function OnEvent(_, event, arg1)
         -- Validate saved variables on startup. This also merges any new
         -- defaults that may have been added between versions.
         ValidateConfig()
+        sampleInterval = FPSMonitorDB.sampleInterval or sampleInterval
+        updateInterval = FPSMonitorDB.updateInterval or updateInterval
+        pcall(CreateOptionsPanel)
         updateFrame:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_LOGIN" then
         if not FPSMonitorDB.minimap.hide then
