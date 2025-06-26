@@ -8,13 +8,15 @@ local SpellFly = CreateFrame("Frame")
 -- Cache often used globals locally for slight performance gains and
 -- to avoid accidental taint when other addons modify them.
 local pairs       = pairs
-local math_random = math.random
+local math_random     = math.random
 local math_randomseed = math.randomseed
-local math_abs    = math.abs
-local math_atan2  = math.atan2
-local tinsert     = table.insert
-local tremove     = table.remove
+local math_abs        = math.abs
+local math_atan2      = math.atan2
+local tinsert         = table.insert
+local tremove         = table.remove
+local wipe            = wipe
 
+local UIParent          = UIParent
 local GetCursorPosition = GetCursorPosition
 local GetSpellTexture   = GetSpellTexture
 local GetSpellInfo      = GetSpellInfo
@@ -37,10 +39,14 @@ local optionsFrame
 -- the player without needing to parse the combat log.
 SpellFly:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 SpellFly:RegisterEvent("PLAYER_LOGIN")
+SpellFly:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
 
 -- Frame pool used to recycle icon frames for better performance and to avoid
 -- creating excessive UI widgets on repeated casts.
 local iconPool = {}
+
+-- Map of action slot -> action button for quick lookup
+local slotButtonMap = {}
 
 local lastOriginInfo -- table with pre-calculated x, y, w, h
 
@@ -51,21 +57,30 @@ local GetOriginInfo
 -- This relies on the default UI's ActionBarButtonEventsFrame which keeps a list
 -- of all action buttons.
 local function GetButtonForAction(slot)
-  if not slot or not ActionBarButtonEventsFrame or not ActionBarButtonEventsFrame.frames then
+  if not slot then
     return nil
   end
 
-  -- ActionBarButtonEventsFrame.frames is a list of action button frames.  When
-  -- iterating with pairs the table keys are numeric indices, so we must use the
-  -- value rather than the key.  Otherwise we would end up with the index number
-  -- and attempt to access "button.action" on a number which causes errors.
-  for _, button in pairs(ActionBarButtonEventsFrame.frames) do
-    if button and button.action == slot then
-      return button
+  -- Use cached lookup when available for better performance.
+  local button = slotButtonMap[slot]
+  if button then
+    return button
+  end
+
+  -- Build the cache if it hasn't been created yet or if this slot was not found.
+  if ActionBarButtonEventsFrame and ActionBarButtonEventsFrame.frames then
+    wipe(slotButtonMap)
+    for _, b in pairs(ActionBarButtonEventsFrame.frames) do
+      if b and b.action then
+        slotButtonMap[b.action] = b
+        if b.action == slot then
+          button = b
+        end
+      end
     end
   end
 
-  return nil
+  return button
 end
 
 -- Hook UseAction so we know which button (if any) the player activated.  This
@@ -95,12 +110,20 @@ local function HookActionButtons()
     return
   end
 
+  -- Refresh the slot->button mapping each time we hook.
+  wipe(slotButtonMap)
+
   for _, button in pairs(ActionBarButtonEventsFrame.frames) do
-    if button and not button.SpellFlyHooked then
-      button:HookScript("OnMouseDown", function(self)
-        CaptureButtonInfo(self)
-      end)
-      button.SpellFlyHooked = true
+    if button then
+      if button.action then
+        slotButtonMap[button.action] = button
+      end
+      if not button.SpellFlyHooked then
+        button:HookScript("OnMouseDown", function(self)
+          CaptureButtonInfo(self)
+        end)
+        button.SpellFlyHooked = true
+      end
     end
   end
 end
@@ -111,7 +134,6 @@ local function AcquireIconFrame()
   if not frame then
     frame = CreateFrame("Frame", nil, UIParent)
     frame:SetSize(50, 50)
-    frame:SetFrameStrata("HIGH")
     frame:EnableMouse(false)
 
     frame.texture = frame:CreateTexture(nil, "OVERLAY")
@@ -120,7 +142,11 @@ local function AcquireIconFrame()
     frame:SetParent(UIParent)
   end
 
+  frame:SetFrameStrata("HIGH")
+
   frame:ClearAllPoints()
+  -- Ensure the frame starts fully transparent for the fade in
+  frame:SetAlpha(0)
   frame:Show()
   frame.animationGroup = nil
 
@@ -135,6 +161,7 @@ local function ReleaseIconFrame(frame)
   end
 
   frame:Hide()
+  frame:SetAlpha(0)
   frame.texture:SetTexture(nil)
   frame.animationGroup = nil
   tinsert(iconPool, frame)
@@ -254,6 +281,10 @@ SpellFly:SetScript("OnEvent", function(_, event, ...)
     if UpdateMinimapButtonPosition then
       UpdateMinimapButtonPosition()
     end
+    return
+  elseif event == "ACTIONBAR_SLOT_CHANGED" then
+    -- Re-hook buttons to account for newly created ones or changes.
+    HookActionButtons()
     return
   end
 
@@ -395,6 +426,7 @@ minimapButton:SetScript("OnDragStart", function(self)
 end)
 minimapButton:SetScript("OnDragStop", function(self)
   self:SetScript("OnUpdate", nil)
+  UpdateMinimapButtonPosition()
 end)
 minimapButton:SetScript("OnClick", function()
   SpellFly:ToggleOptions()
