@@ -8,8 +8,10 @@ local SpellFly = CreateFrame("Frame")
 -- Initialise saved variables with sensible defaults on first load. This table
 -- persists between sessions and is declared in the TOC via SavedVariables.
 SpellFlyDB = SpellFlyDB or {
-  offActionBar = true,  -- When true the spell icon flies from the action button
-  fromCenter = false,   -- When true the icon always starts from the screen centre
+  -- When true the spell icon also flies from the action button used
+  offActionBar = true,
+  -- When true the spell icon additionally flies from the screen centre
+  fromCenter = false,
 }
 
 -- Forward declaration for the options frame so helper functions can access it.
@@ -88,9 +90,8 @@ local function ReleaseIconFrame(frame)
 end
 
 -- Create and play the flying animation for the provided spellID.
--- Create and play the flying animation for the provided spellID.  If
--- `origin` is supplied and is a valid frame, the animation will begin from its
--- on-screen location; otherwise it starts from the center of the screen.
+-- If `origin` is a valid frame the animation begins from that frame's centre.
+-- When `origin` is nil or not visible it will start from the screen centre.
 local function PlaySpellAnimation(spellID, origin)
   -- Get the icon for this spell.  Some spells may not have a texture, in which
   -- case we simply abort the animation.
@@ -113,11 +114,10 @@ local function PlaySpellAnimation(spellID, origin)
   local iconFrame = AcquireIconFrame()
   iconFrame.texture:SetTexture(texture)
 
-  -- Position the icon frame. The user can choose whether the animation begins
-  -- from the action button that triggered the spell or always from the centre
-  -- of the screen. When both options are disabled we fall back to the centre.
+  -- Determine the starting point.  If a valid frame was supplied start there,
+  -- otherwise fall back to the centre of the screen.
   local startX, startY
-  if not SpellFlyDB.fromCenter and SpellFlyDB.offActionBar and origin and origin:IsVisible() then
+  if origin and origin:IsVisible() then
     startX, startY = origin:GetCenter()
   end
   if not startX then
@@ -163,14 +163,27 @@ end
 
 -- Event handler for UNIT_SPELLCAST_SUCCEEDED. We only care about the player.
 SpellFly:SetScript("OnEvent", function(_, _, unit, _, spellID)
-  if unit ~= "player" then
+  if unit ~= "player" or not spellID then
     return
   end
 
-  if spellID then
-    PlaySpellAnimation(spellID, lastUsedButton)
+  -- Determine whether any origins are enabled. If none are checked we skip
+  -- playing animations entirely.
+  local doBar = SpellFlyDB.offActionBar and lastUsedButton and lastUsedButton:IsVisible()
+  local doCenter = SpellFlyDB.fromCenter
+  if not doBar and not doCenter then
     lastUsedButton = nil
+    return
   end
+
+  if doBar then
+    PlaySpellAnimation(spellID, lastUsedButton)
+  end
+  if doCenter then
+    PlaySpellAnimation(spellID, nil)
+  end
+
+  lastUsedButton = nil
 end)
 
 -- Random seed for the move offset so different sessions don't start with the
@@ -202,19 +215,19 @@ function SpellFly:ToggleOptions()
     optionsFrame.title:SetPoint("CENTER", optionsFrame.TitleBg, "CENTER", 0, 0)
     optionsFrame.title:SetText("SpellFly Options")
 
-    -- Checkbox: Spells fly off action bar
+    -- Checkbox: enable animations from the action bar
     local check1 = CreateFrame("CheckButton", nil, optionsFrame, "ChatConfigCheckButtonTemplate")
     check1:SetPoint("TOPLEFT", 20, -40)
-    check1.Text:SetText("Spells Fly off Actionbar")
+    check1.Text:SetText("Fly from Action Bar")
     check1:SetChecked(SpellFlyDB.offActionBar)
     check1:SetScript("OnClick", function(self)
       SpellFlyDB.offActionBar = self:GetChecked()
     end)
 
-    -- Checkbox: Spells fly from middle of screen
+    -- Checkbox: enable animations from the screen centre
     local check2 = CreateFrame("CheckButton", nil, optionsFrame, "ChatConfigCheckButtonTemplate")
     check2:SetPoint("TOPLEFT", check1, "BOTTOMLEFT", 0, -10)
-    check2.Text:SetText("Spells fly from middle of screen")
+    check2.Text:SetText("Fly from Screen Centre")
     check2:SetChecked(SpellFlyDB.fromCenter)
     check2:SetScript("OnClick", function(self)
       SpellFlyDB.fromCenter = self:GetChecked()
