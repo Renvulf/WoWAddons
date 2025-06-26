@@ -137,7 +137,15 @@ local function PlaySpellAnimation(spellID, origin)
   local screenWidth = UIParent:GetWidth()
   local distanceToLeft = startX
   local distanceToRight = screenWidth - startX
-  local direction = distanceToRight < distanceToLeft and 1 or -1
+  local diff = math.abs(distanceToRight - distanceToLeft)
+  local direction
+  if diff <= 5 then
+    -- When near the middle of the screen pick a random direction
+    direction = math.random(0, 1) == 0 and -1 or 1
+  else
+    -- Otherwise prefer the shortest path off screen
+    direction = distanceToRight < distanceToLeft and 1 or -1
+  end
   local horizontalOffset
   if direction == 1 then
     horizontalOffset = distanceToRight + iconFrame:GetWidth()
