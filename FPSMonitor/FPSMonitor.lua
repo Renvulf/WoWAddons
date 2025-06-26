@@ -191,7 +191,12 @@ local function AddSample(dt)
     -- initializing (which would report unrealistically high FPS values).
     if dt <= 0 or dt > 1 or dt < 0.001 then return end
 
-    local fps = 1 / dt
+    -- Use the API provided FPS value rather than 1/dt.  The OnUpdate elapsed
+    -- time can be clamped by the client (typically to ~3ms), which caused the
+    -- maximum FPS to incorrectly report ~333.3.  GetFramerate() provides a more
+    -- accurate instantaneous value for this purpose.
+    local fps = GetFramerate()
+    if not fps or fps <= 0 then return end
 
     -- Update running sums used for quick statistics calculation
     sumFPS = sumFPS + fps
@@ -405,6 +410,15 @@ local function CreateDisplayFrame()
     config:SetPoint("BOTTOMLEFT", displayFrame, "BOTTOMLEFT", 8, 8)
     config:SetText("Options")
     config:SetScript("OnClick", function()
+        -- Lazily create the options panel if something prevented it from
+        -- being created during ADDON_LOADED.
+        if not optionsPanel then
+            local ok = pcall(CreateOptionsPanel)
+            if not ok then
+                print("FPSMonitor: failed to open options panel")
+                return
+            end
+        end
         if OpenConfigPanel then OpenConfigPanel() end
     end)
     if UISpecialFrames then
@@ -492,6 +506,13 @@ local function CreateMinimapButton()
     minimapButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     minimapButton:SetScript("OnClick", function(_, btn)
         if btn == "RightButton" then
+            if not optionsPanel then
+                local ok = pcall(CreateOptionsPanel)
+                if not ok then
+                    print("FPSMonitor: failed to open options panel")
+                    return
+                end
+            end
             if OpenConfigPanel then OpenConfigPanel() end
             return
         end
@@ -682,6 +703,9 @@ SlashCmdList["FPSMON"] = function(msg)
         PrintStats(stats, updateFrame.currentMemory)
         return
     elseif msg == "config" then
+        if not optionsPanel then
+            pcall(CreateOptionsPanel)
+        end
         if OpenConfigPanel then
             OpenConfigPanel()
         end
