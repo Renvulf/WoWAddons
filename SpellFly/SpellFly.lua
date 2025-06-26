@@ -5,6 +5,16 @@
 
 local SpellFly = CreateFrame("Frame")
 
+-- Initialise saved variables with sensible defaults on first load. This table
+-- persists between sessions and is declared in the TOC via SavedVariables.
+SpellFlyDB = SpellFlyDB or {
+  offActionBar = true,  -- When true the spell icon flies from the action button
+  fromCenter = false,   -- When true the icon always starts from the screen centre
+}
+
+-- Forward declaration for the options frame so helper functions can access it.
+local optionsFrame
+
 -- UNIT_SPELLCAST_SUCCEEDED gives us reliable information about spells cast by
 -- the player without needing to parse the combat log.
 SpellFly:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
@@ -103,10 +113,11 @@ local function PlaySpellAnimation(spellID, origin)
   local iconFrame = AcquireIconFrame()
   iconFrame.texture:SetTexture(texture)
 
-  -- Position the icon frame.  Default to the centre of the screen if we cannot
-  -- determine a specific origin frame.
+  -- Position the icon frame. The user can choose whether the animation begins
+  -- from the action button that triggered the spell or always from the centre
+  -- of the screen. When both options are disabled we fall back to the centre.
   local startX, startY
-  if origin and origin:IsVisible() then
+  if not SpellFlyDB.fromCenter and SpellFlyDB.offActionBar and origin and origin:IsVisible() then
     startX, startY = origin:GetCenter()
   end
   if not startX then
@@ -167,5 +178,84 @@ end)
 -- Seed the pseudo random generator if the Lua math library supports it.
 if math and math.randomseed then
   math.randomseed(GetTime() * 1000)
+end
+
+-- ---------------------------------------------------------------------
+-- Options UI and minimap button
+-- ---------------------------------------------------------------------
+
+-- Helper to show or hide the options frame. If the frame hasn't been created
+-- yet it will be initialised here.
+function SpellFly:ToggleOptions()
+  if not optionsFrame then
+    -- Basic frame container using the game's standard template for consistency
+    optionsFrame = CreateFrame("Frame", "SpellFlyOptionsFrame", UIParent, "BasicFrameTemplateWithInset")
+    optionsFrame:SetSize(260, 120)
+    optionsFrame:SetPoint("CENTER")
+    optionsFrame:SetMovable(true)
+    optionsFrame:EnableMouse(true)
+    optionsFrame:RegisterForDrag("LeftButton")
+    optionsFrame:SetScript("OnDragStart", optionsFrame.StartMoving)
+    optionsFrame:SetScript("OnDragStop", optionsFrame.StopMovingOrSizing)
+
+    optionsFrame.title = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    optionsFrame.title:SetPoint("CENTER", optionsFrame.TitleBg, "CENTER", 0, 0)
+    optionsFrame.title:SetText("SpellFly Options")
+
+    -- Checkbox: Spells fly off action bar
+    local check1 = CreateFrame("CheckButton", nil, optionsFrame, "ChatConfigCheckButtonTemplate")
+    check1:SetPoint("TOPLEFT", 20, -40)
+    check1.Text:SetText("Spells Fly off Actionbar")
+    check1:SetChecked(SpellFlyDB.offActionBar)
+    check1:SetScript("OnClick", function(self)
+      SpellFlyDB.offActionBar = self:GetChecked()
+    end)
+
+    -- Checkbox: Spells fly from middle of screen
+    local check2 = CreateFrame("CheckButton", nil, optionsFrame, "ChatConfigCheckButtonTemplate")
+    check2:SetPoint("TOPLEFT", check1, "BOTTOMLEFT", 0, -10)
+    check2.Text:SetText("Spells fly from middle of screen")
+    check2:SetChecked(SpellFlyDB.fromCenter)
+    check2:SetScript("OnClick", function(self)
+      SpellFlyDB.fromCenter = self:GetChecked()
+    end)
+
+    optionsFrame:Hide()
+  end
+
+  if optionsFrame:IsShown() then
+    optionsFrame:Hide()
+  else
+    optionsFrame:Show()
+  end
+end
+
+-- Create a simple minimap button that opens the options when clicked.
+local minimapButton = CreateFrame("Button", "SpellFlyMinimapButton", Minimap)
+minimapButton:SetSize(32, 32)
+minimapButton:SetFrameStrata("MEDIUM")
+minimapButton:SetPoint("TOPLEFT", Minimap, "TOPLEFT")
+
+minimapButton.icon = minimapButton:CreateTexture(nil, "ARTWORK")
+minimapButton.icon:SetAllPoints()
+minimapButton.icon:SetTexture("Interface\\AddOns\\SpellFly\\magifly.png")
+
+minimapButton:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+minimapButton:SetScript("OnClick", function()
+  SpellFly:ToggleOptions()
+end)
+minimapButton:SetScript("OnEnter", function(self)
+  GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+  GameTooltip:SetText("SpellFly Options")
+  GameTooltip:Show()
+end)
+minimapButton:SetScript("OnLeave", function()
+  GameTooltip:Hide()
+end)
+
+-- Slash command to open the options panel.
+SLASH_SPELLFLY1 = "/fly"
+SlashCmdList["SPELLFLY"] = function()
+  SpellFly:ToggleOptions()
 end
 
