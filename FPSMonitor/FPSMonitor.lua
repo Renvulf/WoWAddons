@@ -364,12 +364,12 @@ local function CreateDisplayFrame()
     local y = -30
     for i, text in ipairs(statsLabels) do
         local label = displayFrame:CreateFontString(nil, "ARTWORK")
-        label:SetPoint("TOPLEFT", 10, y)
+        label:SetPoint("TOPLEFT", displayFrame, "TOPLEFT", 10, y)
         SetFontSafe(label, 12)
         label:SetText(text .. ":")
 
         local value = displayFrame:CreateFontString(nil, "ARTWORK")
-        value:SetPoint("TOPRIGHT", -10, y)
+        value:SetPoint("TOPRIGHT", displayFrame, "TOPRIGHT", -10, y)
         value:SetJustifyH("RIGHT")
         SetFontSafe(value, 12, "OUTLINE")
 
