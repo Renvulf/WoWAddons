@@ -2,7 +2,9 @@
 -- Simple FPS monitoring addon for World of Warcraft
 -- Displays various frame-rate statistics and provides a minimap toggle button
 
-local addonName, addon = ...
+-- The addon name is provided as the first return from ... when this file is loaded.
+-- We only need the name for event filtering so discard the second value.
+local addonName = ...
 
 local sampleInterval = 60 -- seconds to keep frame history for average and percentiles
 local updateInterval = 0.5 -- seconds between display updates
@@ -26,9 +28,12 @@ local defaultConfig = {
     },
 }
 
+-- History of recent frame times. We keep samples for the last `sampleInterval`
+-- seconds using a simple ring buffer to avoid expensive table.remove calls.
 local frameHistory = {}
+local historyStart = 1
+local historyCount = 0
 local historyTime = 0
-local lastTime = GetTime()
 local sessionMinFPS = math.huge
 local sessionMaxFPS = 0
 local displayFrame
@@ -51,20 +56,40 @@ end
 local function AddSample(dt)
     -- Ignore extremely long frames which usually occur during loading screens
     if dt <= 0 or dt > 1 then return end
+
     local fps = 1 / dt
-    table.insert(frameHistory, {dt = dt, fps = fps})
+
+    -- Add sample at the end of the buffer
+    local index = historyStart + historyCount
+    frameHistory[index] = {dt = dt, fps = fps}
+    historyCount = historyCount + 1
     historyTime = historyTime + dt
-    while historyTime > sampleInterval do
-        local removed = table.remove(frameHistory, 1)
-        historyTime = historyTime - removed.dt
+
+    -- Trim old samples outside the sliding window
+    while historyCount > 0 and historyTime > sampleInterval do
+        local sample = frameHistory[historyStart]
+        historyTime = historyTime - sample.dt
+        frameHistory[historyStart] = nil
+        historyStart = historyStart + 1
+        historyCount = historyCount - 1
     end
+
+    -- Reindex the buffer occasionally to avoid huge numeric indices
+    if historyStart > 1000 then
+        for i = historyStart, historyStart + historyCount - 1 do
+            frameHistory[i - historyStart + 1] = frameHistory[i]
+            frameHistory[i] = nil
+        end
+        historyStart = 1
+    end
+
     if fps < sessionMinFPS then sessionMinFPS = fps end
     if fps > sessionMaxFPS then sessionMaxFPS = fps end
 end
 
 -- Compute stats from history
 local function CalculateStats(currentFPS, currentDT)
-    local count = #frameHistory
+    local count = historyCount
     if count == 0 then
         return {
             current = currentFPS,
@@ -81,7 +106,8 @@ local function CalculateStats(currentFPS, currentDT)
     local sumFPS, sumDT = 0, 0
     local dtValues = {}
     local fpsValues = {}
-    for i, sample in ipairs(frameHistory) do
+    for i = historyStart, historyStart + historyCount - 1 do
+        local sample = frameHistory[i]
         sumFPS = sumFPS + sample.fps
         sumDT = sumDT + sample.dt
         table.insert(dtValues, sample.dt)
@@ -122,8 +148,15 @@ end
 local function UpdateDisplay(stats)
     if not displayFrame then return end
     local text = string.format(
-        "Current FPS: %.1f\nAverage FPS: %.1f\nMin FPS: %.1f / Max FPS: %.1f\n1%% Low FPS: %.1f\n0.1%% Low FPS: %.1f\nFrame Time: %.2f ms\nJitter: %.2f ms",
-        stats.current, stats.average, stats.min, stats.max, stats.low1, stats.low01, stats.frameTime, stats.jitter)
+        "Current FPS: %.1f\n" ..
+        "Average FPS: %.1f\n" ..
+        "Min FPS: %.1f / Max FPS: %.1f\n" ..
+        "1%% Low FPS: %.1f\n" ..
+        "0.1%% Low FPS: %.1f\n" ..
+        "Frame Time: %.2f ms\n" ..
+        "Jitter: %.2f ms",
+        stats.current, stats.average, stats.min, stats.max,
+        stats.low1, stats.low01, stats.frameTime, stats.jitter)
     displayFrame.text:SetText(text)
 end
 
@@ -150,6 +183,8 @@ local function CreateDisplayFrame()
     displayFrame.text = displayFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     displayFrame.text:SetPoint("TOPLEFT", 10, -10)
     displayFrame.text:SetJustifyH("LEFT")
+    displayFrame.text:SetWidth(displayFrame:GetWidth() - 20)
+    displayFrame.text:SetFont(STANDARD_TEXT_FONT, 12)
     displayFrame.text:SetText("FPS Monitor")
 end
 
@@ -210,24 +245,27 @@ end
 -- Main OnUpdate handler: collect data and refresh display
 local updateFrame = CreateFrame("Frame")
 updateFrame:SetScript("OnUpdate", function(self, elapsed)
-    local now = GetTime()
-    local dt = now - lastTime
-    lastTime = now
+    -- 'elapsed' is the time since the last OnUpdate and represents the
+    -- frame's duration. It is more reliable than calculating our own
+    -- delta using GetTime().
+    AddSample(elapsed)
 
-    AddSample(dt)
     self.t = (self.t or 0) + elapsed
     if self.t >= updateInterval then
         self.t = 0
         local currentFPS = GetFramerate()
-        local stats = CalculateStats(currentFPS, math.min(dt, 1))
+        local stats = CalculateStats(currentFPS, elapsed)
         UpdateDisplay(stats)
     end
 end)
 
 -- Initialize addon
-local function OnEvent(self, event, arg1)
+local function OnEvent(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
-        -- Merge saved variables with defaults
+        -- Ensure saved variables exist then merge defaults
+        if type(FPSMonitorDB) ~= "table" then
+            FPSMonitorDB = {}
+        end
         DeepCopyDefaults(defaultConfig, FPSMonitorDB)
     elseif event == "PLAYER_LOGIN" then
         if not FPSMonitorDB.minimap.hide then
