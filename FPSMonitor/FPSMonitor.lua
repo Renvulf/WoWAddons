@@ -61,9 +61,13 @@ end
 -- History of recent frame times. We keep samples for the last `sampleInterval`
 -- seconds using a simple ring buffer to avoid expensive table.remove calls.
 local frameHistory = {}
-local historyStart = 1
-local historyCount = 0
-local historyTime = 0
+local historyStart = 1 -- first valid index in the history buffer
+local historyCount = 0 -- number of samples currently stored
+local historyTime = 0   -- total time represented by the samples
+-- Running sums allow average and jitter calculations without scanning
+local sumFPS = 0
+local sumDT = 0
+local sumDTSquared = 0
 local sessionMinFPS = math.huge
 local sessionMaxFPS = 0
 local capturing = false
@@ -94,7 +98,7 @@ local function DeepCopyDefaults(src, dest)
     end
 end
 
--- Utility: insert value and trim time window
+-- Utility: insert a new frame sample and maintain running statistics
 local function AddSample(dt)
     -- Ignore extremely long frames which usually occur during loading screens
     -- and extremely small frames that can appear while the UI is still
@@ -103,16 +107,24 @@ local function AddSample(dt)
 
     local fps = 1 / dt
 
+    -- Update running sums used for quick statistics calculation
+    sumFPS = sumFPS + fps
+    sumDT = sumDT + dt
+    sumDTSquared = sumDTSquared + dt * dt
+
     -- Add sample at the end of the buffer
     local index = historyStart + historyCount
     frameHistory[index] = {dt = dt, fps = fps}
     historyCount = historyCount + 1
     historyTime = historyTime + dt
 
-    -- Trim old samples outside the sliding window
+    -- Trim old samples outside the sliding window and update sums
     while historyCount > 0 and historyTime > sampleInterval do
         local sample = frameHistory[historyStart]
         historyTime = historyTime - sample.dt
+        sumFPS = sumFPS - sample.fps
+        sumDT = sumDT - sample.dt
+        sumDTSquared = sumDTSquared - sample.dt * sample.dt
         frameHistory[historyStart] = nil
         historyStart = historyStart + 1
         historyCount = historyCount - 1
@@ -150,7 +162,9 @@ local function CalculateStats(currentFPS, currentDT)
         }
     end
 
-    local sumFPS, sumDT, sumDTSquared = 0, 0, 0
+    -- Use running sums for faster calculations on each update
+    local sumDT_local = sumDT
+    local sumDTSquared_local = sumDTSquared
     -- Keep small sorted tables of the lowest 1% and 0.1% FPS values to avoid
     -- allocating large tables every update. This drastically reduces memory
     -- churn compared to sorting the full history each time.
@@ -172,21 +186,17 @@ local function CalculateStats(currentFPS, currentDT)
 
     for i = historyStart, historyStart + historyCount - 1 do
         local sample = frameHistory[i]
-        sumFPS = sumFPS + sample.fps
-        sumDT = sumDT + sample.dt
-        sumDTSquared = sumDTSquared + sample.dt * sample.dt
-
         InsertSorted(low1List, sample.fps, low1Size)
         InsertSorted(low01List, sample.fps, low01Size)
     end
 
-    local avgFPS = sumDT > 0 and (count / sumDT) or currentFPS
+    local avgFPS = sumDT_local > 0 and (count / sumDT_local) or currentFPS
     local low1 = low1List[low1Size] or low1List[#low1List]
     local low01 = low01List[low01Size] or low01List[#low01List]
 
     -- calculate jitter as standard deviation of frame times
-    local meanDT = sumDT / count
-    local variance = (sumDTSquared / count) - meanDT * meanDT
+    local meanDT = sumDT_local / count
+    local variance = (sumDTSquared_local / count) - meanDT * meanDT
     if variance < 0 then variance = 0 end
 
     return {
@@ -374,6 +384,10 @@ SlashCmdList["FPSMON"] = function(msg)
         historyStart = 1
         historyCount = 0
         historyTime = 0
+        -- Clear running sums so averages restart cleanly
+        sumFPS = 0
+        sumDT = 0
+        sumDTSquared = 0
         sessionMinFPS = math.huge
         sessionMaxFPS = 0
         print("FPSMonitor: session statistics reset")
@@ -383,6 +397,10 @@ SlashCmdList["FPSMON"] = function(msg)
         historyStart = 1
         historyCount = 0
         historyTime = 0
+        -- Clear running sums so averages restart cleanly
+        sumFPS = 0
+        sumDT = 0
+        sumDTSquared = 0
         sessionMinFPS = math.huge
         sessionMaxFPS = 0
         FPSPerCharDB.overall = { min = math.huge, max = 0 }
