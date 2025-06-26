@@ -69,7 +69,24 @@ SpellFly:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
 local iconPool = {}
 
 -- Map of action slot -> action button for quick lookup
+-- Cached lookup of action slot -> action button.
+-- This improves performance when mapping slots to frames during casts.
 local slotButtonMap = {}
+
+-- Patterns for common action button names used across the default UI.
+-- These act as a fallback when ActionBarButtonEventsFrame does not list a
+-- particular button (which can occur in some UI states).
+local fallbackButtonPatterns = {
+  "ActionButton%d",                 -- Main bar
+  "MultiBarBottomLeftButton%d",    -- Bottom left bar
+  "MultiBarBottomRightButton%d",   -- Bottom right bar
+  "MultiBarRightButton%d",         -- Right bar
+  "MultiBarLeftButton%d",          -- Left bar
+  "MultiBar5Button%d",             -- Extra bars introduced in later patches
+  "MultiBar6Button%d",
+  "MultiBar7Button%d",
+  "MultiBar8Button%d",
+}
 
 local lastOriginInfo -- table with pre-calculated x, y, w, h
 
@@ -90,20 +107,50 @@ local function GetButtonForAction(slot)
     return button
   end
 
-  -- Build the cache if it hasn't been created yet or if this slot was not found.
+  -- Build the cache when not found. This covers both the standard list and the
+  -- fallback patterns so we only pay the enumeration cost once when a mapping
+  -- is missing.
+  wipe(slotButtonMap)
+
   if ActionBarButtonEventsFrame and ActionBarButtonEventsFrame.frames then
-    wipe(slotButtonMap)
     for _, b in pairs(ActionBarButtonEventsFrame.frames) do
-      if b and b.action then
-        slotButtonMap[b.action] = b
-        if b.action == slot then
-          button = b
+      AddButtonToMap(b)
+      if not button and b and b.action == slot then
+        button = b
+      end
+    end
+  end
+
+  if not button then
+    for i = 1, 12 do
+      for _, pattern in ipairs(fallbackButtonPatterns) do
+        local btn = _G[pattern:format(i)]
+        AddButtonToMap(btn)
+        if not button and btn and btn.action == slot then
+          button = btn
         end
       end
     end
   end
 
   return button
+end
+
+-- Helper used by HookActionButtons to register a button frame. This keeps
+-- the slot cache in sync and ensures we only hook each button once.
+local function AddButtonToMap(button)
+  if not button or not button.action then
+    return
+  end
+
+  slotButtonMap[button.action] = button
+
+  if not button.SpellFlyHooked then
+    button:HookScript("OnMouseDown", function(self)
+      CaptureButtonInfo(self)
+    end)
+    button.SpellFlyHooked = true
+  end
 end
 
 -- Hook UseAction so we know which button (if any) the player activated.  This
@@ -128,25 +175,23 @@ if UseAction and hooksecurefunc then
 end
 
 -- Hook action buttons directly so we capture the exact frame the user clicked.
+-- Collect action buttons from various sources and hook them for capture.
 local function HookActionButtons()
-  if not ActionBarButtonEventsFrame or not ActionBarButtonEventsFrame.frames then
-    return
-  end
-
-  -- Refresh the slot->button mapping each time we hook.
   wipe(slotButtonMap)
 
-  for _, button in pairs(ActionBarButtonEventsFrame.frames) do
-    if button then
-      if button.action then
-        slotButtonMap[button.action] = button
-      end
-      if not button.SpellFlyHooked then
-        button:HookScript("OnMouseDown", function(self)
-          CaptureButtonInfo(self)
-        end)
-        button.SpellFlyHooked = true
-      end
+  -- ActionBarButtonEventsFrame maintains a list of active action buttons.
+  if ActionBarButtonEventsFrame and ActionBarButtonEventsFrame.frames then
+    for _, button in pairs(ActionBarButtonEventsFrame.frames) do
+      AddButtonToMap(button)
+    end
+  end
+
+  -- Fallback enumeration of known button name patterns for UI elements that
+  -- may not be included in ActionBarButtonEventsFrame.frames.
+  for i = 1, 12 do
+    for _, pattern in ipairs(fallbackButtonPatterns) do
+      local btn = _G[pattern:format(i)]
+      AddButtonToMap(btn)
     end
   end
 end
