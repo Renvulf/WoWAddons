@@ -358,6 +358,37 @@ local function CreateDisplayFrame()
         local point, _, relativePoint, x, y = self:GetPoint()
         FPSMonitorDB.pos = { point = point, relativePoint = relativePoint, x = x, y = y }
     end)
+    -- Standard close button for convenience
+    local close = CreateFrame("Button", nil, displayFrame, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -4, -4)
+
+    -- Quick reset button for session statistics
+    local reset = CreateFrame("Button", nil, displayFrame, "UIPanelButtonTemplate")
+    reset:SetSize(60, 20)
+    reset:SetPoint("BOTTOMRIGHT", displayFrame, "BOTTOMRIGHT", -8, 8)
+    reset:SetText("Reset")
+    reset:SetScript("OnClick", function()
+        -- Clear history and running sums just like the /fpsmon reset command
+        frameHistory = {}
+        historyStart = 1
+        historyCount = 0
+        historyTime = 0
+        sumFPS = 0
+        sumDT = 0
+        sumDTSquared = 0
+        sessionMinFPS = math.huge
+        sessionMaxFPS = 0
+        print("FPSMonitor: session statistics reset")
+    end)
+
+    -- Button to open configuration panel
+    local config = CreateFrame("Button", nil, displayFrame, "UIPanelButtonTemplate")
+    config:SetSize(60, 20)
+    config:SetPoint("BOTTOMLEFT", displayFrame, "BOTTOMLEFT", 8, 8)
+    config:SetText("Options")
+    config:SetScript("OnClick", function()
+        if OpenConfigPanel then OpenConfigPanel() end
+    end)
     if UISpecialFrames then
         table.insert(UISpecialFrames, "FPSMonitorDisplay")
     end
@@ -435,7 +466,12 @@ local function CreateMinimapButton()
         FPSMonitorDB.minimap.angle = NormalizeAngle(FPSMonitorDB.minimap.angle)
         UpdateMinimapButtonPosition(FPSMonitorDB.minimap.angle)
     end)
-    minimapButton:SetScript("OnClick", function()
+    minimapButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    minimapButton:SetScript("OnClick", function(_, btn)
+        if btn == "RightButton" then
+            if OpenConfigPanel then OpenConfigPanel() end
+            return
+        end
         if displayFrame and displayFrame:IsShown() then
             displayFrame:Hide()
         else
@@ -533,6 +569,19 @@ local function CreateOptionsPanel()
     InterfaceOptions_AddCategory(optionsPanel)
 end
 
+-- Open configuration panel using whichever API is available
+local function OpenConfigPanel()
+    if not optionsPanel then return end
+    if Settings and Settings.OpenToCategory then
+        -- Dragonflight settings system
+        Settings.OpenToCategory(optionsPanel.name or "FPS Monitor")
+    elseif InterfaceOptionsFrame_OpenToCategory then
+        -- Classic options system
+        InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+        InterfaceOptionsFrame_OpenToCategory(optionsPanel) -- open twice for reliability
+    end
+end
+
 
 -- Slash command to toggle
 SLASH_FPSMON1 = "/fpsmon"
@@ -583,16 +632,15 @@ SlashCmdList["FPSMON"] = function(msg)
         PrintStats(stats, updateFrame.currentMemory)
         return
     elseif msg == "config" then
-        if optionsPanel then
-            InterfaceOptionsFrame_OpenToCategory(optionsPanel)
-            InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+        if OpenConfigPanel then
+            OpenConfigPanel()
         end
         return
     elseif msg == "help" then
         print("/fpsmon - toggle display")
         print("/fpsmon minimap - toggle minimap button")
         print("/fpsmon stats - print current statistics")
-        print("/fpsmon config - open configuration")
+        print("/fpsmon config - open configuration (or right-click minimap icon)")
         print("/fpsmon reset - reset session statistics")
         print("/fpsmon resetall - reset all statistics")
         return
