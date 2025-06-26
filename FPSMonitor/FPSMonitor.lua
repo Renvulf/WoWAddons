@@ -350,6 +350,7 @@ local function CreateDisplayFrame()
     displayFrame:SetBackdropColor(0, 0, 0, 0.6)
     displayFrame:EnableMouse(true)
     displayFrame:SetMovable(true)
+    displayFrame:SetClampedToScreen(true)
     displayFrame:RegisterForDrag("LeftButton")
     displayFrame:SetScript("OnDragStart", displayFrame.StartMoving)
     displayFrame:SetScript("OnDragStop", function(self)
@@ -357,6 +358,9 @@ local function CreateDisplayFrame()
         local point, _, relativePoint, x, y = self:GetPoint()
         FPSMonitorDB.pos = { point = point, relativePoint = relativePoint, x = x, y = y }
     end)
+    if UISpecialFrames then
+        table.insert(UISpecialFrames, "FPSMonitorDisplay")
+    end
 
     -- Title
     displayFrame.title = displayFrame:CreateFontString(nil, "ARTWORK")
@@ -532,6 +536,7 @@ end
 
 -- Slash command to toggle
 SLASH_FPSMON1 = "/fpsmon"
+SLASH_FPSMON2 = "/fpsmonitor"
 SlashCmdList["FPSMON"] = function(msg)
     msg = msg and msg:lower() or ""
     if msg == "reset" then
