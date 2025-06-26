@@ -170,6 +170,7 @@ end
 
 -- Dropdowns for each font group arranged neatly in two columns
 local order = {"Fun", "Future", "Movie/Game", "Easy-to-Read", "Default"}
+local lastDropdown
 for idx, grp in ipairs(order) do
     local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]", "") .. "DD", frame, "UIDropDownMenuTemplate")
     local row = math.floor((idx-1)/2)
@@ -178,6 +179,9 @@ for idx, grp in ipairs(order) do
     dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 20 + col*180, -20 - row*50)
     UIDropDownMenu_SetWidth(dd, 160)
     dropdowns[grp] = dd
+    if idx == #order then
+        lastDropdown = dd -- remember last dropdown for layout anchoring
+    end
 
     local label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     label:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 16, 3)
@@ -216,7 +220,12 @@ end
 
 -- 5) SCALE SLIDER -----------------------------------------------------------
 local scaleLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-scaleLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -140)
+-- position the label below the last dropdown to prevent overlap
+if lastDropdown then
+    scaleLabel:SetPoint("TOPLEFT", lastDropdown, "BOTTOMLEFT", 0, -20)
+else
+    scaleLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -160)
+end
 scaleLabel:SetText("Combat Text Size:")
 
 local slider = CreateFrame("Slider", addonName .. "ScaleSlider", frame, "OptionsSliderTemplate")
@@ -274,12 +283,18 @@ local opts = {
     {k="periodicDamage", l="Show Periodic Damage", c="floatingCombatTextPeriodicDamage"},
 }
 for i,opt in ipairs(opts) do
-    local col = (i-1)%2
-    local row = math.floor((i-1)/2)
-    local cb = CreateCheckbox(frame, opt.l, 16 + col*200, -260 - row*30, FCTFPCDB[opt.k], function(self)
+    local col = (i-1) % 2
+    local row = math.floor((i-1) / 2)
+    -- anchor checkboxes below the edit box to avoid overlap with the preview box
+    local x = 16 + col * 200
+    local y = -16 - row * 30
+    -- initially anchor at origin; we reposition immediately after
+    local cb = CreateCheckbox(frame, opt.l, 0, 0, FCTFPCDB[opt.k], function(self)
         FCTFPCDB[opt.k] = self:GetChecked()
         SetCVar(opt.c, self:GetChecked() and 1 or 0)
     end)
+    cb:ClearAllPoints()
+    cb:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", x, y)
 end
 
 -- 8) APPLY & DEFAULT BUTTONS -----------------------------------------------
