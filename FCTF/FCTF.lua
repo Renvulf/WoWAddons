@@ -1,6 +1,8 @@
 -- FCTF.lua
 local addonName = ...
 local ADDON_PATH = "Interface\\AddOns\\" .. addonName .. "\\"
+-- store the original combat text font so we can revert
+local DEFAULT_DAMAGE_FONT = DAMAGE_TEXT_FONT
 --[[
   ---------------------------------------------------------------------------
     Font Detection
@@ -321,11 +323,10 @@ applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
     if FCTFDB.selectedFont then
         DAMAGE_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
-        print("|cFF00FF00[FCTF]|r Combat font saved. Restart WoW to apply.")
-        UIErrorsFrame:AddMessage("FCTF: please EXIT & RESTART WoW to apply.",1,1,0)
     else
-        print("|cFFFF0000[FCTF]|r No font selected.")
+        DAMAGE_TEXT_FONT = DEFAULT_DAMAGE_FONT
     end
+    print("|cFF00FF00[FCTF]|r Combat font saved. Type /reload to apply.")
 end)
 
 local defaultBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
@@ -333,13 +334,9 @@ defaultBtn:SetSize(100,22)
 defaultBtn:SetPoint("LEFT", applyBtn, "RIGHT", 8, 0)
 defaultBtn:SetText("Default")
 defaultBtn:SetScript("OnClick", function()
-    FCTFDB.selectedFont = "Default/default.ttf"
-    local cache = cachedFonts["Default"] and cachedFonts["Default"]["default.ttf"]
-    if cache then
-        SetPreviewFont(cache)
-    else
-        SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
-    end
+    FCTFDB.selectedFont = nil
+    DAMAGE_TEXT_FONT = DEFAULT_DAMAGE_FONT
+    SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
     editBox:SetText(editBox:GetText())
     slider:SetValue(1.0); UpdateScale(1.0)
     for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
@@ -403,36 +400,40 @@ ring:SetTexture(ADDON_PATH .. "ring.png")
 local w, h = minimapButton:GetSize()
 ring:SetSize(w * 1.6, h * 1.6)
 ring:SetPoint("CENTER", minimapButton, "CENTER", 0, 0)
+local function UpdateMinimapButton()
+    local ang = math.rad(FCTFDB.minimapAngle or 45)
+    local r = Minimap:GetWidth() / 2 + 10
+    minimapButton:ClearAllPoints()
+    minimapButton:SetPoint("CENTER", Minimap, "CENTER", math.cos(ang) * r, math.sin(ang) * r)
+end
 
 minimapButton:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 minimapButton:EnableMouse(true)
 minimapButton:RegisterForClicks("LeftButtonUp")
 minimapButton:RegisterForDrag("LeftButton")
 minimapButton:SetScript("OnClick", function() SlashCmdList["FCT"]() end)
-minimapButton:SetScript("OnDragStart", function(self) self.isMoving = true end)
-minimapButton:SetScript("OnDragStop", function(self) self.isMoving = false end)
+
+minimapButton:SetScript("OnDragStart", function(self)
+    self:SetScript("OnUpdate", function()
+        local mx, my = GetCursorPosition()
+        local scale = Minimap:GetEffectiveScale()
+        mx, my = mx / scale, my / scale
+        local cx, cy = Minimap:GetCenter()
+        FCTFDB.minimapAngle = math.deg(math.atan2(my - cy, mx - cx))
+        UpdateMinimapButton()
+    end)
+end)
+minimapButton:SetScript("OnDragStop", function(self)
+    self:SetScript("OnUpdate", nil)
+    UpdateMinimapButton()
+end)
 minimapButton:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:SetText("Click to toggle FCTF settings", 1, 1, 1)
     GameTooltip:Show()
 end)
 minimapButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-minimapButton:SetScript("OnUpdate", function(self)
-    if self.isMoving then
-        local mx, my = GetCursorPosition()
-        local scale = Minimap:GetEffectiveScale()
-        mx, my = mx / scale, my / scale
-        local cx, cy = Minimap:GetCenter()
-        local dx, dy = mx - cx, my - cy
-        FCTFDB.minimapAngle = math.deg(math.atan2(dy, dx))
-    end
-    local ang = math.rad(FCTFDB.minimapAngle or 45)
-    local r = Minimap:GetWidth() / 2 + 10
-    self:ClearAllPoints()
-    self:SetPoint("CENTER", Minimap, "CENTER", math.cos(ang) * r, math.sin(ang) * r)
-end)
-
+UpdateMinimapButton()
 -- 14) APPLY/SAVE ON ADDON_LOADED
 frame:RegisterEvent("ADDON_LOADED")
 frame:SetScript("OnEvent", function(self, event, name)
@@ -447,7 +448,10 @@ frame:SetScript("OnEvent", function(self, event, name)
                 for grp,dd in pairs(dropdowns) do UIDropDownMenu_SetText(dd, "Select Font") end
                 UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$",""))
             end
+        else
+            DAMAGE_TEXT_FONT = DEFAULT_DAMAGE_FONT
         end
         if InterfaceOptions_AddCategory then InterfaceOptions_AddCategory(frame) end
+        UpdateMinimapButton()
     end
 end)
