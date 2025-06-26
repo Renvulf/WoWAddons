@@ -305,8 +305,12 @@ function SpellFly:ToggleOptions()
     -- Overlay to close the options when clicking outside
     optionsFrame.backdrop = CreateFrame("Button", nil, UIParent)
     optionsFrame.backdrop:SetAllPoints(UIParent)
-    optionsFrame.backdrop:SetFrameStrata("DIALOG")
-    optionsFrame.backdrop:SetFrameLevel(optionsFrame:GetFrameLevel() - 1)
+    -- Match the options frame strata so the backdrop always sits behind it
+    optionsFrame.backdrop:SetFrameStrata(optionsFrame:GetFrameStrata())
+    -- Ensure the backdrop is one level lower so clicks on the options frame are not intercepted
+    optionsFrame.backdrop:SetFrameLevel(math.max(0, optionsFrame:GetFrameLevel() - 1))
+    -- Explicitly enable mouse so the click is registered even if some addons manipulate it
+    optionsFrame.backdrop:EnableMouse(true)
     optionsFrame.backdrop:Hide()
     optionsFrame.backdrop:SetScript("OnClick", function()
       optionsFrame:Hide()
