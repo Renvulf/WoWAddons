@@ -358,7 +358,9 @@ local function CreateDisplayFrame()
     if displayFrame then return end
     -- Use BackdropTemplate for compatibility with modern client versions
     displayFrame = CreateFrame("Frame", "FPSMonitorDisplay", UIParent, BackdropTemplateMixin and "BackdropTemplate")
-    displayFrame:SetSize(220, 186)
+    -- Slightly taller to leave room for the buttons
+    -- so they don't overlap the statistic text
+    displayFrame:SetSize(220, 206)
     -- Position is restored from the saved configuration
     local pos = FPSMonitorDB.pos or defaultConfig.pos
     displayFrame:SetPoint(pos.point, UIParent, pos.relativePoint, pos.x, pos.y)
@@ -447,6 +449,11 @@ local function CreateDisplayFrame()
 
         y = y - 16
     end
+
+    -- Populate with initial values so text is visible immediately
+    local fps = GetFramerate()
+    local stats = CalculateStats(fps, fps > 0 and (1 / fps) or 0)
+    UpdateDisplay(stats, updateFrame.currentMemory)
 end
 
 -- Create simple minimap button
@@ -603,7 +610,13 @@ local function CreateOptionsPanel()
     memorySlider:SetValue(memoryUpdateInterval)
     memorySlider.text:SetText("Memory update: " .. memoryUpdateInterval .. "s")
 
-    InterfaceOptions_AddCategory(optionsPanel)
+    -- Register the options panel with whichever API is available
+    if Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory then
+        optionsPanel.category = Settings.RegisterCanvasLayoutCategory(optionsPanel, optionsPanel.name)
+        Settings.RegisterAddOnCategory(optionsPanel.category)
+    elseif InterfaceOptions_AddCategory then
+        InterfaceOptions_AddCategory(optionsPanel)
+    end
 end
 
 -- Open configuration panel using whichever API is available
@@ -611,7 +624,7 @@ local function OpenConfigPanel()
     if not optionsPanel then return end
     if Settings and Settings.OpenToCategory then
         -- Dragonflight settings system
-        Settings.OpenToCategory(optionsPanel.name or "FPS Monitor")
+        Settings.OpenToCategory(optionsPanel.category or optionsPanel.name or "FPS Monitor")
     elseif InterfaceOptionsFrame_OpenToCategory then
         -- Classic options system
         InterfaceOptionsFrame_OpenToCategory(optionsPanel)
