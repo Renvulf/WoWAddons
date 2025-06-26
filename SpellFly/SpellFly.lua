@@ -13,6 +13,36 @@ SpellFly:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 -- creating excessive UI widgets on repeated casts.
 local iconPool = {}
 
+-- Store the last action button that triggered a spell cast so we can start
+-- the animation from its location.  This will be updated whenever the player
+-- uses an action button via clicking or keybinds.
+local lastUsedButton
+
+-- Utility that attempts to find an action button frame for a given action slot.
+-- This relies on the default UI's ActionBarButtonEventsFrame which keeps a list
+-- of all action buttons.
+local function GetButtonForAction(slot)
+  if not slot or not ActionBarButtonEventsFrame or not ActionBarButtonEventsFrame.frames then
+    return nil
+  end
+
+  for button in pairs(ActionBarButtonEventsFrame.frames) do
+    if button.action == slot then
+      return button
+    end
+  end
+
+  return nil
+end
+
+-- Hook UseAction so we know which button (if any) the player activated.  This
+-- allows the animation to originate from the correct on-screen location.
+if UseAction then
+  hooksecurefunc("UseAction", function(slot)
+    lastUsedButton = GetButtonForAction(slot)
+  end)
+end
+
 -- Acquire a frame from the pool or create a new one when needed.
 local function AcquireIconFrame()
   local frame = table.remove(iconPool)
@@ -26,7 +56,6 @@ local function AcquireIconFrame()
   end
 
   frame:ClearAllPoints()
-  frame:SetPoint("CENTER", UIParent, "CENTER")
   frame:Show()
 
   return frame
@@ -45,7 +74,10 @@ local function ReleaseIconFrame(frame)
 end
 
 -- Create and play the flying animation for the provided spellID.
-local function PlaySpellAnimation(spellID)
+-- Create and play the flying animation for the provided spellID.  If
+-- `origin` is supplied and is a valid frame, the animation will begin from its
+-- on-screen location; otherwise it starts from the center of the screen.
+local function PlaySpellAnimation(spellID, origin)
   -- Get the icon for this spell.  Some spells may not have a texture, in which
   -- case we simply abort the animation.
   local texture = GetSpellTexture(spellID)
@@ -56,6 +88,17 @@ local function PlaySpellAnimation(spellID)
   local iconFrame = AcquireIconFrame()
   iconFrame.texture:SetTexture(texture)
 
+  -- Position the icon frame.  Default to the centre of the screen if we cannot
+  -- determine a specific origin frame.
+  local startX, startY
+  if origin and origin:IsVisible() then
+    startX, startY = origin:GetCenter()
+  end
+  if not startX then
+    startX, startY = UIParent:GetCenter()
+  end
+  iconFrame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", startX, startY)
+
   local animationGroup = iconFrame:CreateAnimationGroup()
   iconFrame.animationGroup = animationGroup
 
@@ -65,8 +108,17 @@ local function PlaySpellAnimation(spellID)
   fadeIn:SetDuration(0.2)
 
   local move = animationGroup:CreateAnimation("Translation")
-  local direction = math.random(0, 1) == 0 and -1 or 1
-  move:SetOffset(math.random(200, 800) * direction, math.random(-100, 100))
+  local screenWidth = UIParent:GetWidth()
+  local distanceToLeft = startX
+  local distanceToRight = screenWidth - startX
+  local direction = distanceToRight < distanceToLeft and 1 or -1
+  local horizontalOffset
+  if direction == 1 then
+    horizontalOffset = distanceToRight + iconFrame:GetWidth()
+  else
+    horizontalOffset = -(distanceToLeft + iconFrame:GetWidth())
+  end
+  move:SetOffset(horizontalOffset, math.random(-100, 100))
   move:SetDuration(2)
   move:SetSmoothing("OUT")
 
@@ -90,11 +142,15 @@ SpellFly:SetScript("OnEvent", function(_, _, unit, _, spellID)
   end
 
   if spellID then
-    PlaySpellAnimation(spellID)
+    PlaySpellAnimation(spellID, lastUsedButton)
+    lastUsedButton = nil
   end
 end)
 
 -- Random seed for the move offset so different sessions don't start with the
 -- same pattern.  os.time() is sufficient for this simple visual effect.
-math.randomseed(GetTime() * 1000)
+-- Seed the pseudo random generator if the Lua math library supports it.
+if math and math.randomseed then
+  math.randomseed(GetTime() * 1000)
+end
 
