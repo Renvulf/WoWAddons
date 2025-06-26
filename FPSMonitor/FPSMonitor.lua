@@ -410,8 +410,7 @@ local function CreateDisplayFrame()
     config:SetPoint("BOTTOMLEFT", displayFrame, "BOTTOMLEFT", 8, 8)
     config:SetText("Options")
     config:SetScript("OnClick", function()
-        -- Lazily create the options panel if something prevented it from
-        -- being created during ADDON_LOADED.
+        -- Lazily create the options panel if it could not be created earlier.
         if not optionsPanel then
             local ok = pcall(CreateOptionsPanel)
             if not ok then
@@ -419,7 +418,13 @@ local function CreateDisplayFrame()
                 return
             end
         end
-        if OpenConfigPanel then OpenConfigPanel() end
+        if OpenConfigPanel then
+            OpenConfigPanel()
+        end
+        -- Hide the display to avoid covering the settings window.
+        if displayFrame and displayFrame:IsShown() then
+            displayFrame:Hide()
+        end
     end)
     if UISpecialFrames then
         table.insert(UISpecialFrames, "FPSMonitorDisplay")
@@ -643,13 +648,25 @@ end
 -- Open configuration panel using whichever API is available
 local function OpenConfigPanel()
     if not optionsPanel then return end
+
+    -- Ensure the Blizzard settings UI is loaded when using the modern API.
+    if not Settings and not IsAddOnLoaded("Blizzard_Settings") then
+        pcall(UIParentLoadAddOn, "Blizzard_Settings")
+    end
+
     if Settings and Settings.OpenToCategory then
         -- Dragonflight settings system
-        Settings.OpenToCategory(optionsPanel.category or optionsPanel.name or "FPS Monitor")
-    elseif InterfaceOptionsFrame_OpenToCategory then
+        local ok = pcall(Settings.OpenToCategory, optionsPanel.category or optionsPanel.name or "FPS Monitor")
+        if ok then return end
+    end
+
+    if InterfaceOptionsFrame_OpenToCategory then
         -- Classic options system
         InterfaceOptionsFrame_OpenToCategory(optionsPanel)
         InterfaceOptionsFrame_OpenToCategory(optionsPanel) -- open twice for reliability
+    else
+        -- Fallback: show the panel directly
+        optionsPanel:Show()
     end
 end
 
