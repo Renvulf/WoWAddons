@@ -98,6 +98,64 @@ local function DeepCopyDefaults(src, dest)
     end
 end
 
+-- Copy an entire table recursively. This is used when replacing
+-- corrupted saved variable tables with defaults so we don't end up
+-- referencing the defaults directly.
+local function CopyTable(tbl)
+    if type(tbl) ~= "table" then return tbl end
+    local copy = {}
+    for k, v in pairs(tbl) do
+        if type(v) == "table" then
+            copy[k] = CopyTable(v)
+        else
+            copy[k] = v
+        end
+    end
+    return copy
+end
+
+-- Validate the saved variables. If any expected value has the wrong type
+-- replace it with a sensible default. This guards against corrupted saved
+-- variables or manual user edits that could otherwise cause errors.
+local function ValidateConfig()
+    if type(FPSMonitorDB) ~= "table" then
+        FPSMonitorDB = {}
+    end
+    DeepCopyDefaults(defaultConfig, FPSMonitorDB)
+
+    if type(FPSMonitorDB.pos) ~= "table" then
+        FPSMonitorDB.pos = CopyTable(defaultConfig.pos)
+    else
+        local pos = FPSMonitorDB.pos
+        if type(pos.point) ~= "string" then pos.point = defaultConfig.pos.point end
+        if type(pos.relativePoint) ~= "string" then pos.relativePoint = defaultConfig.pos.relativePoint end
+        if type(pos.x) ~= "number" then pos.x = defaultConfig.pos.x end
+        if type(pos.y) ~= "number" then pos.y = defaultConfig.pos.y end
+    end
+
+    if type(FPSMonitorDB.minimap) ~= "table" then
+        FPSMonitorDB.minimap = CopyTable(defaultConfig.minimap)
+    else
+        local mm = FPSMonitorDB.minimap
+        if type(mm.hide) ~= "boolean" then mm.hide = defaultConfig.minimap.hide end
+        if type(mm.angle) ~= "number" then mm.angle = defaultConfig.minimap.angle end
+    end
+end
+
+-- Insert a value into a sorted array while keeping its size limited. Used by
+-- CalculateStats to efficiently maintain lists of the lowest FPS samples.
+local function InsertSorted(list, value, maxSize)
+    local i = #list
+    while i > 0 and value < list[i] do
+        list[i + 1] = list[i]
+        i = i - 1
+    end
+    list[i + 1] = value
+    if #list > maxSize then
+        list[#list] = nil
+    end
+end
+
 -- Utility: insert a new frame sample and maintain running statistics
 local function AddSample(dt)
     -- Ignore extremely long frames which usually occur during loading screens
@@ -172,17 +230,6 @@ local function CalculateStats(currentFPS, currentDT)
     local low1Size = math_max(1, math_floor(count * 0.01 + 0.5))
     local low01Size = math_max(1, math_floor(count * 0.001 + 0.5))
 
-    local function InsertSorted(list, value, maxSize)
-        local i = #list
-        while i > 0 and value < list[i] do
-            list[i + 1] = list[i]
-            i = i - 1
-        end
-        list[i + 1] = value
-        if #list > maxSize then
-            list[#list] = nil
-        end
-    end
 
     for i = historyStart, historyStart + historyCount - 1 do
         local sample = frameHistory[i]
@@ -324,7 +371,10 @@ end
 
 -- Create simple minimap button
 local function CreateMinimapButton()
-    minimapButton = CreateFrame("Button", "FPSMonitorMinimapButton", Minimap)
+    if minimapButton or not Minimap then return end
+    local ok, button = pcall(CreateFrame, "Button", "FPSMonitorMinimapButton", Minimap)
+    if not ok or not button then return end
+    minimapButton = button
     minimapButton:SetSize(32, 32)
     minimapButton:SetFrameStrata("MEDIUM")
     minimapButton:SetFrameLevel(8)
@@ -354,8 +404,8 @@ local function CreateMinimapButton()
         if displayFrame and displayFrame:IsShown() then
             displayFrame:Hide()
         else
-            CreateDisplayFrame()
-            displayFrame:Show()
+            pcall(CreateDisplayFrame)
+            if displayFrame then displayFrame:Show() end
         end
     end)
     minimapButton:SetScript("OnEnter", function(self)
@@ -434,8 +484,8 @@ SlashCmdList["FPSMON"] = function(msg)
     if displayFrame and displayFrame:IsShown() then
         displayFrame:Hide()
     else
-        CreateDisplayFrame()
-        displayFrame:Show()
+        pcall(CreateDisplayFrame)
+        if displayFrame then displayFrame:Show() end
     end
 end
 
@@ -468,17 +518,13 @@ end)
 -- Initialize addon
 local function OnEvent(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 == addonName then
-        -- Ensure saved variables exist then merge defaults
-        if type(FPSMonitorDB) ~= "table" then
-            FPSMonitorDB = {}
-        end
-        DeepCopyDefaults(defaultConfig, FPSMonitorDB)
-        if type(FPSMonitorDB.minimap.angle) ~= "number" then
-            FPSMonitorDB.minimap.angle = 0
-        end
+        -- Validate saved variables on startup. This also merges any new
+        -- defaults that may have been added between versions.
+        ValidateConfig()
+        updateFrame:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_LOGIN" then
         if not FPSMonitorDB.minimap.hide then
-            CreateMinimapButton()
+            pcall(CreateMinimapButton)
         end
     elseif event == "PLAYER_ENTERING_WORLD" then
         -- Delay sample collection for a short period to avoid skewing
