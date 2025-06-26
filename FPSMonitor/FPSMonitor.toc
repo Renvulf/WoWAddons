@@ -2,7 +2,7 @@
 ## Title: FPS Monitor
 ## Notes: Displays advanced FPS statistics
 ## Author: Renvulf
-## Version: 1.0
+## Version: 1.1
 ## SavedVariables: FPSMonitorDB
 ## SavedVariablesPerCharacter: FPSPerCharDB
 ## IconTexture: Interface\AddOns\FPSMonitor\FPS1.tga
