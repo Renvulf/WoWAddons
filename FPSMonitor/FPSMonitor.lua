@@ -21,6 +21,13 @@ local math_cos = math.cos
 local math_sin = math.sin
 local math_atan2 = math.atan2
 local math_atan = math.atan
+local TAU = math.pi * 2
+
+local function NormalizeAngle(angle)
+    angle = angle % TAU
+    if angle < 0 then angle = angle + TAU end
+    return angle
+end
 
 -- SavedVariables tables declared in the TOC file. They may not exist on the
 -- first run so we create them if needed when the addon loads.
@@ -78,7 +85,7 @@ local minimapButton
 -- Reposition minimap button around the minimap based on stored angle
 local function UpdateMinimapButtonPosition(angle)
     if not minimapButton or not Minimap then return end
-    angle = angle or FPSMonitorDB.minimap.angle or 0
+    angle = NormalizeAngle(angle or FPSMonitorDB.minimap.angle or 0)
     local radius = (Minimap:GetWidth() / 2) + 5
     local x = radius * math_cos(angle)
     local y = radius * math_sin(angle)
@@ -138,7 +145,11 @@ local function ValidateConfig()
     else
         local mm = FPSMonitorDB.minimap
         if type(mm.hide) ~= "boolean" then mm.hide = defaultConfig.minimap.hide end
-        if type(mm.angle) ~= "number" then mm.angle = defaultConfig.minimap.angle end
+        if type(mm.angle) ~= "number" then
+            mm.angle = defaultConfig.minimap.angle
+        else
+            mm.angle = NormalizeAngle(mm.angle)
+        end
     end
 end
 
@@ -270,7 +281,7 @@ local function ColorizeFPS(fps)
 end
 
 local function UpdateDisplay(stats)
-    if not displayFrame then return end
+    if not displayFrame or not displayFrame:IsShown() then return end
 
     local values = {
         ColorizeFPS(stats.current),
@@ -392,12 +403,14 @@ local function CreateMinimapButton()
             -- argument form of atan behaves like atan2, so fall back to that
             -- when atan2 isn't available.
             local angle = math_atan2 and math_atan2(py - my, px - mx) or math_atan(py - my, px - mx)
+            angle = NormalizeAngle(angle)
             FPSMonitorDB.minimap.angle = angle
             UpdateMinimapButtonPosition(angle)
         end)
     end)
     minimapButton:SetScript("OnDragStop", function(self)
         self:SetScript("OnUpdate", nil)
+        FPSMonitorDB.minimap.angle = NormalizeAngle(FPSMonitorDB.minimap.angle)
         UpdateMinimapButtonPosition(FPSMonitorDB.minimap.angle)
     end)
     minimapButton:SetScript("OnClick", function()
