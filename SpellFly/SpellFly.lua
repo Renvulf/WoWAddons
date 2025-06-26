@@ -241,11 +241,11 @@ SpellFly:SetScript("OnEvent", function(_, event, ...)
   lastUsedButton = nil
 end)
 
--- Random seed for the move offset so different sessions don't start with the
--- same pattern.  os.time() is sufficient for this simple visual effect.
--- Seed the pseudo random generator if the Lua math library supports it.
-if math and math.randomseed then
-  math.randomseed(GetTime() * 1000)
+-- Seed the random generator using a time-based value to avoid identical
+-- patterns across sessions. `time()` is available in all WoW Lua
+-- environments and provides a reasonably unpredictable seed.
+if math and math.randomseed and time then
+  math.randomseed(time())
 end
 
 -- ---------------------------------------------------------------------
@@ -262,6 +262,7 @@ function SpellFly:ToggleOptions()
     optionsFrame:SetPoint("CENTER")
     optionsFrame:SetMovable(true)
     optionsFrame:EnableMouse(true)
+    optionsFrame:SetClampedToScreen(true)
     optionsFrame:RegisterForDrag("LeftButton")
     optionsFrame:SetScript("OnDragStart", optionsFrame.StartMoving)
     optionsFrame:SetScript("OnDragStop", optionsFrame.StopMovingOrSizing)
@@ -269,6 +270,11 @@ function SpellFly:ToggleOptions()
     optionsFrame.title = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     optionsFrame.title:SetPoint("CENTER", optionsFrame.TitleBg, "CENTER", 0, 0)
     optionsFrame.title:SetText("SpellFly Options")
+
+    -- Provide a close button and allow the frame to be dismissed with the ESC key
+    optionsFrame.closeButton = CreateFrame("Button", nil, optionsFrame, "UIPanelCloseButton")
+    optionsFrame.closeButton:SetPoint("TOPRIGHT", optionsFrame, "TOPRIGHT", -5, -5)
+    tinsert(UISpecialFrames, optionsFrame:GetName())
 
     -- Checkbox: enable animations from the action bar
     local check1 = CreateFrame("CheckButton", nil, optionsFrame, "ChatConfigCheckButtonTemplate")
