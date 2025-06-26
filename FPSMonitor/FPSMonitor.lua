@@ -30,6 +30,19 @@ local defaultConfig = {
     },
 }
 
+-- Default font used for the display. If the custom font fails to load we fall
+-- back to STANDARD_TEXT_FONT to avoid any errors.
+local FONT_PATH = "Interface/\AddOns/FPSMonitor/Pepsi.ttf"
+
+-- Helper to safely apply a font to a FontString
+local function SetFontSafe(fs, size, flags)
+    if fs and fs.SetFont then
+        if not fs:SetFont(FONT_PATH, size, flags) then
+            fs:SetFont(STANDARD_TEXT_FONT, size, flags)
+        end
+    end
+end
+
 -- History of recent frame times. We keep samples for the last `sampleInterval`
 -- seconds using a simple ring buffer to avoid expensive table.remove calls.
 local frameHistory = {}
@@ -185,17 +198,23 @@ end
 
 local function UpdateDisplay(stats)
     if not displayFrame then return end
-    local text = string.format(
-        "Current FPS: %s\n" ..
-        "Average FPS: %.1f\n" ..
-        "Min FPS: %.1f / Max FPS: %.1f\n" ..
-        "1%% Low FPS: %.1f\n" ..
-        "0.1%% Low FPS: %.1f\n" ..
-        "Frame Time: %.2f ms\n" ..
-        "Jitter: %.2f ms",
-        ColorizeFPS(stats.current), stats.average, stats.min, stats.max,
-        stats.low1, stats.low01, stats.frameTime, stats.jitter)
-    displayFrame.text:SetText(text)
+
+    local values = {
+        ColorizeFPS(stats.current),
+        string.format("%.1f", stats.average),
+        string.format("%.1f", stats.min),
+        string.format("%.1f", stats.max),
+        string.format("%.1f", stats.low1),
+        string.format("%.1f", stats.low01),
+        string.format("%.2f ms", stats.frameTime),
+        string.format("%.2f ms", stats.jitter),
+    }
+
+    for i = 1, #values do
+        if displayFrame.values[i] then
+            displayFrame.values[i]:SetText(values[i])
+        end
+    end
 end
 
 -- Create movable display frame
@@ -203,7 +222,7 @@ local function CreateDisplayFrame()
     if displayFrame then return end
     -- Use BackdropTemplate for compatibility with modern client versions
     displayFrame = CreateFrame("Frame", "FPSMonitorDisplay", UIParent, BackdropTemplateMixin and "BackdropTemplate")
-    displayFrame:SetSize(220, 140)
+    displayFrame:SetSize(220, 170)
     -- Position is restored from the saved configuration
     local pos = FPSMonitorDB.pos or defaultConfig.pos
     displayFrame:SetPoint(pos.point, UIParent, pos.relativePoint, pos.x, pos.y)
@@ -219,12 +238,43 @@ local function CreateDisplayFrame()
         FPSMonitorDB.pos = { point = point, relativePoint = relativePoint, x = x, y = y }
     end)
 
-    displayFrame.text = displayFrame:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    displayFrame.text:SetPoint("TOPLEFT", 10, -10)
-    displayFrame.text:SetJustifyH("LEFT")
-    displayFrame.text:SetWidth(displayFrame:GetWidth() - 20)
-    displayFrame.text:SetFont(STANDARD_TEXT_FONT, 12)
-    displayFrame.text:SetText("FPS Monitor")
+    -- Title
+    displayFrame.title = displayFrame:CreateFontString(nil, "ARTWORK")
+    displayFrame.title:SetPoint("TOP", 0, -10)
+    SetFontSafe(displayFrame.title, 14, "OUTLINE")
+    displayFrame.title:SetText("FPS Monitor")
+
+    displayFrame.labels = {}
+    displayFrame.values = {}
+
+    local statsLabels = {
+        "Current FPS",
+        "Average FPS",
+        "Min FPS",
+        "Max FPS",
+        "1% Low",
+        "0.1% Low",
+        "Frame Time",
+        "Jitter",
+    }
+
+    local y = -30
+    for i, text in ipairs(statsLabels) do
+        local label = displayFrame:CreateFontString(nil, "ARTWORK")
+        label:SetPoint("TOPLEFT", 10, y)
+        SetFontSafe(label, 12)
+        label:SetText(text .. ":")
+
+        local value = displayFrame:CreateFontString(nil, "ARTWORK")
+        value:SetPoint("TOPRIGHT", -10, y)
+        value:SetJustifyH("RIGHT")
+        SetFontSafe(value, 12, "OUTLINE")
+
+        displayFrame.labels[i] = label
+        displayFrame.values[i] = value
+
+        y = y - 16
+    end
 end
 
 -- Create simple minimap button
