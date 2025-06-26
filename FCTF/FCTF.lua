@@ -15,8 +15,15 @@ local DEFAULT_DAMAGE_FONT = DAMAGE_TEXT_FONT
 --]]
 
 -- SavedDB defaults
+-- initialize saved variables with sane defaults
 if not FCTFDB then
-    FCTFDB = { minimapAngle = 45 }
+    FCTFDB = {
+        minimapAngle      = 45,
+        showMinimapButton = true,
+    }
+end
+if FCTFDB.showMinimapButton == nil then
+    FCTFDB.showMinimapButton = true
 end
 FCTFPCDB = FCTFPCDB or {}
 
@@ -335,6 +342,16 @@ for i,opt in ipairs(opts) do
     cb:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", x, y)
 end
 
+-- optional minimap icon visibility toggle
+local minimapToggle = CreateCheckbox(frame, "Show Minimap Icon", 0, 0,
+    FCTFDB.showMinimapButton ~= false,
+    function(self)
+        FCTFDB.showMinimapButton = self:GetChecked()
+        if minimapButton then minimapButton:SetShown(self:GetChecked()) end
+    end)
+minimapToggle:ClearAllPoints()
+minimapToggle:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", 16, -76)
+
 -- 8) APPLY & DEFAULT BUTTONS -----------------------------------------------
 local applyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 applyBtn:SetSize(120, 22)
@@ -454,6 +471,7 @@ minimapButton:SetScript("OnEnter", function(self)
 end)
 minimapButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 UpdateMinimapButton()
+minimapButton:SetShown(FCTFDB.showMinimapButton ~= false)
 -- 14) APPLY/SAVE ON ADDON_LOADED
 frame:RegisterEvent("ADDON_LOADED")
 frame:SetScript("OnEvent", function(self, event, name)
@@ -473,5 +491,6 @@ frame:SetScript("OnEvent", function(self, event, name)
         end
         if InterfaceOptions_AddCategory then InterfaceOptions_AddCategory(frame) end
         UpdateMinimapButton()
+        minimapButton:SetShown(FCTFDB.showMinimapButton ~= false)
     end
 end)
