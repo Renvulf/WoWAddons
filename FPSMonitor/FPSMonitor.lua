@@ -8,6 +8,7 @@ local addonName = ...
 
 local sampleInterval = 60 -- seconds to keep frame history for average and percentiles
 local updateInterval = 0.5 -- seconds between display updates
+local captureDelay = 5 -- seconds to wait after loading screens before collecting samples
 
 -- SavedVariables tables declared in the TOC file. They may not exist on the
 -- first run so we create them if needed when the addon loads.
@@ -37,6 +38,8 @@ local historyCount = 0
 local historyTime = 0
 local sessionMinFPS = math.huge
 local sessionMaxFPS = 0
+local capturing = false
+local captureStartTime
 local displayFrame
 local minimapButton
 
@@ -66,7 +69,9 @@ end
 -- Utility: insert value and trim time window
 local function AddSample(dt)
     -- Ignore extremely long frames which usually occur during loading screens
-    if dt <= 0 or dt > 1 then return end
+    -- and extremely small frames that can appear while the UI is still
+    -- initializing (which would report unrealistically high FPS values).
+    if dt <= 0 or dt > 1 or dt < 0.001 then return end
 
     local fps = 1 / dt
 
@@ -94,8 +99,11 @@ local function AddSample(dt)
         historyStart = 1
     end
 
-    if fps < sessionMinFPS then sessionMinFPS = fps end
-    if fps > sessionMaxFPS then sessionMaxFPS = fps end
+    -- Update session min/max only when we are actively capturing data
+    if capturing then
+        if fps < sessionMinFPS then sessionMinFPS = fps end
+        if fps > sessionMaxFPS then sessionMaxFPS = fps end
+    end
 end
 
 -- Compute stats from history
@@ -300,7 +308,16 @@ updateFrame:SetScript("OnUpdate", function(self, elapsed)
     -- 'elapsed' is the time since the last OnUpdate and represents the
     -- frame's duration. It is more reliable than calculating our own
     -- delta using GetTime().
-    AddSample(elapsed)
+
+    -- Handle delayed start after loading screens
+    if captureStartTime and GetTime() >= captureStartTime then
+        capturing = true
+        captureStartTime = nil
+    end
+
+    if capturing then
+        AddSample(elapsed)
+    end
 
     self.t = (self.t or 0) + elapsed
     if self.t >= updateInterval then
@@ -323,8 +340,18 @@ local function OnEvent(_, event, arg1)
         if not FPSMonitorDB.minimap.hide then
             CreateMinimapButton()
         end
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Delay sample collection for a short period to avoid skewing
+        -- statistics with extremely high FPS values while assets load.
+        captureStartTime = GetTime() + captureDelay
+        capturing = false
+    elseif event == "PLAYER_LEAVING_WORLD" then
+        capturing = false
+        captureStartTime = nil
     end
 end
 updateFrame:RegisterEvent("ADDON_LOADED")
 updateFrame:RegisterEvent("PLAYER_LOGIN")
+updateFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+updateFrame:RegisterEvent("PLAYER_LEAVING_WORLD")
 updateFrame:SetScript("OnEvent", OnEvent)
