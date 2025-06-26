@@ -184,6 +184,25 @@ local function SetPreviewFont(fontObj, path)
     preview:SetHeight(applied + math.ceil(applied * 0.4))
 end
 
+--[[
+    Apply the selected combat font to the live combat text frame if possible.
+    WoW requires a UI reload to fully propagate font changes, but applying it
+    here allows immediate previewing without reloading. Fallbacks ensure we
+    don't taint global state when CombatTextFont isn't available.
+]]
+local function ApplyCombatFont(path)
+    DAMAGE_TEXT_FONT = path or DEFAULT_DAMAGE_FONT
+    if CombatTextFont and CombatTextFont.GetFont then
+        local _, size, flags = CombatTextFont:GetFont()
+        size  = size or 24
+        flags = flags or ""
+        local ok = pcall(CombatTextFont.SetFont, CombatTextFont, DAMAGE_TEXT_FONT, size, flags)
+        if ok and type(CombatText_UpdateDisplayedMessages) == "function" then
+            CombatText_UpdateDisplayedMessages()
+        end
+    end
+end
+
 -- Dropdowns for each font group arranged neatly in two columns
 -- Displayed dropdown order; the "Custom" category replaces the old "Default"
 -- dropdown to allow users to provide their own fonts.
@@ -219,6 +238,7 @@ for idx, grp in ipairs(order) do
                     FCTFDB.selectedFont = grp .. "/" .. fname
                     UIDropDownMenu_SetText(dd, display)
                     SetPreviewFont(cache)
+                    ApplyCombatFont(cache.path)
                     local txt = editBox:GetText()
                     preview:SetText("")
                     preview:SetText(txt)
@@ -322,9 +342,9 @@ applyBtn:SetPoint("BOTTOMLEFT", 16, 16)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
     if FCTFDB.selectedFont then
-        DAMAGE_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
+        ApplyCombatFont(ADDON_PATH .. FCTFDB.selectedFont)
     else
-        DAMAGE_TEXT_FONT = DEFAULT_DAMAGE_FONT
+        ApplyCombatFont(nil)
     end
     print("|cFF00FF00[FCTF]|r Combat font saved. Type /reload to apply.")
 end)
@@ -335,7 +355,7 @@ defaultBtn:SetPoint("LEFT", applyBtn, "RIGHT", 8, 0)
 defaultBtn:SetText("Default")
 defaultBtn:SetScript("OnClick", function()
     FCTFDB.selectedFont = nil
-    DAMAGE_TEXT_FONT = DEFAULT_DAMAGE_FONT
+    ApplyCombatFont(nil)
     SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
     editBox:SetText(editBox:GetText())
     slider:SetValue(1.0); UpdateScale(1.0)
@@ -441,7 +461,7 @@ frame:SetScript("OnEvent", function(self, event, name)
         if FCTFDB.selectedFont then
             local g,f = FCTFDB.selectedFont:match("^([^/]+)/(.+)$")
             if g and f and dropdowns[g] and existsFonts[g] and existsFonts[g][f] then
-                DAMAGE_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
+                ApplyCombatFont(ADDON_PATH .. FCTFDB.selectedFont)
                 local cache = cachedFonts[g] and cachedFonts[g][f]
                 if cache then SetPreviewFont(cache) end
                 preview:SetText(editBox:GetText())
@@ -449,7 +469,7 @@ frame:SetScript("OnEvent", function(self, event, name)
                 UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$",""))
             end
         else
-            DAMAGE_TEXT_FONT = DEFAULT_DAMAGE_FONT
+            ApplyCombatFont(nil)
         end
         if InterfaceOptions_AddCategory then InterfaceOptions_AddCategory(frame) end
         UpdateMinimapButton()
