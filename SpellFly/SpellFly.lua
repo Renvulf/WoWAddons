@@ -12,6 +12,29 @@ local math_random     = math.random
 local math_randomseed = math.randomseed
 local math_abs        = math.abs
 local math_atan2      = math.atan2
+local math_cos        = math.cos
+local math_sin        = math.sin
+
+-- Provide a fallback implementation for math.atan2 for older game builds
+-- where it may not be available. This ensures the minimap button drag logic
+-- works reliably across versions.
+if not math_atan2 then
+  function math_atan2(y, x)
+    if x > 0 then
+      return math.atan(y / x)
+    elseif x < 0 and y >= 0 then
+      return math.atan(y / x) + math.pi
+    elseif x < 0 and y < 0 then
+      return math.atan(y / x) - math.pi
+    elseif x == 0 and y > 0 then
+      return math.pi / 2
+    elseif x == 0 and y < 0 then
+      return -math.pi / 2
+    end
+    return 0
+  end
+  math.atan2 = math_atan2
+end
 local tinsert         = table.insert
 local tremove         = table.remove
 local wipe            = wipe
@@ -129,20 +152,23 @@ local function HookActionButtons()
 end
 
 -- Acquire a frame from the pool or create a new one when needed.
-local function AcquireIconFrame()
-  local frame = tremove(iconPool)
-  if not frame then
-    frame = CreateFrame("Frame", nil, UIParent)
-    frame:SetSize(50, 50)
-    frame:EnableMouse(false)
+  local function AcquireIconFrame()
+    local frame = tremove(iconPool)
+    if not frame then
+      frame = CreateFrame("Frame", nil, UIParent)
+      frame:SetSize(50, 50)
+      frame:EnableMouse(false)
 
-    frame.texture = frame:CreateTexture(nil, "OVERLAY")
-    frame.texture:SetAllPoints(frame)
-  else
-    frame:SetParent(UIParent)
-  end
+      frame.texture = frame:CreateTexture(nil, "OVERLAY")
+      frame.texture:SetAllPoints(frame)
+    else
+      frame:SetParent(UIParent)
+      -- Reset size in case a previous animation used custom dimensions
+      frame:SetSize(50, 50)
+      frame.texture:SetTexture(nil)
+    end
 
-  frame:SetFrameStrata("HIGH")
+    frame:SetFrameStrata("HIGH")
 
   frame:ClearAllPoints()
   -- Ensure the frame starts fully transparent for the fade in
@@ -163,6 +189,7 @@ local function ReleaseIconFrame(frame)
   frame:Hide()
   frame:SetAlpha(0)
   frame.texture:SetTexture(nil)
+  frame:SetParent(nil)
   frame.animationGroup = nil
   tinsert(iconPool, frame)
 end
@@ -227,6 +254,10 @@ local function PlaySpellAnimation(spellID, origin)
   end
   if w and h and w > 0 and h > 0 then
     iconFrame:SetSize(w, h)
+  end
+  -- Use a sensible default when no size information is available.
+  if not (w and h and w > 0 and h > 0) then
+    iconFrame:SetSize(50, 50)
   end
   iconFrame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", startX, startY)
 
@@ -401,8 +432,8 @@ minimapButton:SetFrameStrata("MEDIUM")
 local function UpdateMinimapButtonPosition()
   local angle = SpellFlyDB.minimapAngle or 0
   local radius = Minimap:GetWidth() / 2 + 10
-  local x = math.cos(angle) * radius
-  local y = math.sin(angle) * radius
+  local x = math_cos(angle) * radius
+  local y = math_sin(angle) * radius
   minimapButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
 end
 
@@ -419,9 +450,11 @@ minimapButton:SetScript("OnDragStart", function(self)
     local mx, my = GetCursorPosition()
     local px, py = Minimap:GetCenter()
     local scale = Minimap:GetEffectiveScale()
-    mx, my = mx / scale, my / scale
-    SpellFlyDB.minimapAngle = math_atan2(my - py, mx - px)
-    UpdateMinimapButtonPosition()
+    if mx and my and px and py and scale then
+      mx, my = mx / scale, my / scale
+      SpellFlyDB.minimapAngle = math_atan2(my - py, mx - px)
+      UpdateMinimapButtonPosition()
+    end
   end)
 end)
 minimapButton:SetScript("OnDragStop", function(self)
