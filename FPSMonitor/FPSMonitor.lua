@@ -15,6 +15,12 @@ local GetFramerate = GetFramerate
 local GetTime = GetTime
 local CreateFrame = CreateFrame
 local math_sqrt = math.sqrt
+local math_floor = math.floor
+local math_max = math.max
+local math_cos = math.cos
+local math_sin = math.sin
+local math_atan2 = math.atan2
+local math_atan = math.atan
 
 -- SavedVariables tables declared in the TOC file. They may not exist on the
 -- first run so we create them if needed when the addon loads.
@@ -70,8 +76,8 @@ local function UpdateMinimapButtonPosition(angle)
     if not minimapButton or not Minimap then return end
     angle = angle or FPSMonitorDB.minimap.angle or 0
     local radius = (Minimap:GetWidth() / 2) + 5
-    local x = radius * math.cos(angle)
-    local y = radius * math.sin(angle)
+    local x = radius * math_cos(angle)
+    local y = radius * math_sin(angle)
     minimapButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
 end
 
@@ -149,8 +155,8 @@ local function CalculateStats(currentFPS, currentDT)
     -- allocating large tables every update. This drastically reduces memory
     -- churn compared to sorting the full history each time.
     local low1List, low01List = {}, {}
-    local low1Size = math.max(1, math.floor(count * 0.01 + 0.5))
-    local low01Size = math.max(1, math.floor(count * 0.001 + 0.5))
+    local low1Size = math_max(1, math_floor(count * 0.01 + 0.5))
+    local low01Size = math_max(1, math_floor(count * 0.001 + 0.5))
 
     local function InsertSorted(list, value, maxSize)
         local i = #list
@@ -325,7 +331,7 @@ local function CreateMinimapButton()
             -- Some WoW versions expose math.atan rather than math.atan2. The two
             -- argument form of atan behaves like atan2, so fall back to that
             -- when atan2 isn't available.
-            local angle = math.atan2 and math.atan2(py - my, px - mx) or math.atan(py - my, px - mx)
+            local angle = math_atan2 and math_atan2(py - my, px - mx) or math_atan(py - my, px - mx)
             FPSMonitorDB.minimap.angle = angle
             UpdateMinimapButtonPosition(angle)
         end)
@@ -342,6 +348,18 @@ local function CreateMinimapButton()
             displayFrame:Show()
         end
     end)
+    minimapButton:SetScript("OnEnter", function(self)
+        local fps = GetFramerate()
+        local stats = CalculateStats(fps, fps > 0 and (1 / fps) or 0)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
+        GameTooltip:SetText("FPS Monitor")
+        GameTooltip:AddLine(string.format("Current: %.1f", stats.current))
+        GameTooltip:AddLine(string.format("Average: %.1f", stats.average))
+        GameTooltip:AddLine(string.format("1%% Low: %.1f", stats.low1))
+        GameTooltip:AddLine(string.format("0.1%% Low: %.1f", stats.low01))
+        GameTooltip:Show()
+    end)
+    minimapButton:SetScript("OnLeave", GameTooltip_Hide)
     if FPSMonitorDB.minimap.hide then
         minimapButton:Hide()
     end
@@ -437,6 +455,9 @@ local function OnEvent(_, event, arg1)
             FPSMonitorDB = {}
         end
         DeepCopyDefaults(defaultConfig, FPSMonitorDB)
+        if type(FPSMonitorDB.minimap.angle) ~= "number" then
+            FPSMonitorDB.minimap.angle = 0
+        end
     elseif event == "PLAYER_LOGIN" then
         if not FPSMonitorDB.minimap.hide then
             CreateMinimapButton()
