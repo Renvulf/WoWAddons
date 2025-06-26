@@ -142,23 +142,6 @@ local function GetButtonForAction(slot)
   return button
 end
 
--- Helper used by HookActionButtons to register a button frame. This keeps
--- the slot cache in sync and ensures we only hook each button once.
-local function AddButtonToMap(button)
-  if not button or not button.action then
-    return
-  end
-
-  slotButtonMap[button.action] = button
-
-  if not button.SpellFlyHooked then
-    button:HookScript("OnMouseDown", function(self)
-      CaptureButtonInfo(self)
-    end)
-    button.SpellFlyHooked = true
-  end
-end
-
 -- Hook UseAction so we know which button (if any) the player activated.  This
 -- allows the animation to originate from the correct on-screen location.
 local function CaptureButtonInfo(button)
@@ -178,6 +161,23 @@ if UseAction and hooksecurefunc then
   hooksecurefunc("UseAction", function(slot)
     CaptureButtonInfo(GetButtonForAction(slot))
   end)
+end
+
+-- Helper used by HookActionButtons to register a button frame. This keeps
+-- the slot cache in sync and ensures we only hook each button once.
+local function AddButtonToMap(button)
+  if not button or not button.action then
+    return
+  end
+
+  slotButtonMap[button.action] = button
+
+  if not button.SpellFlyHooked then
+    button:HookScript("OnMouseDown", function(self)
+      CaptureButtonInfo(self)
+    end)
+    button.SpellFlyHooked = true
+  end
 end
 
 -- Hook action buttons directly so we capture the exact frame the user clicked.
