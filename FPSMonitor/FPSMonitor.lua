@@ -10,10 +10,17 @@ local sampleInterval = 60 -- seconds to keep frame history for average and perce
 local updateInterval = 0.5 -- seconds between display updates
 local captureDelay = 5 -- seconds to wait after loading screens before collecting samples
 
+-- Local references to frequently used globals for slight performance gain
+local GetFramerate = GetFramerate
+local GetTime = GetTime
+local CreateFrame = CreateFrame
+local math_sqrt = math.sqrt
+
 -- SavedVariables tables declared in the TOC file. They may not exist on the
 -- first run so we create them if needed when the addon loads.
 FPSMonitorDB = FPSMonitorDB or {}
 FPSPerCharDB = FPSPerCharDB or {}
+FPSPerCharDB.overall = FPSPerCharDB.overall or { min = math.huge, max = 0 }
 
 -- Default configuration values. These are merged into the saved variables on
 -- load so that new options are automatically added without wiping user data.
@@ -32,7 +39,9 @@ local defaultConfig = {
 
 -- Default font used for the display. If the custom font fails to load we fall
 -- back to STANDARD_TEXT_FONT to avoid any errors.
-local FONT_PATH = "Interface/\AddOns/FPSMonitor/Pepsi.ttf"
+-- Use standard addon path delimiters with backslashes. Double backslashes are
+-- required in Lua string literals to represent a single backslash.
+local FONT_PATH = "Interface\\AddOns\\FPSMonitor\\Pepsi.ttf"
 
 -- Helper to safely apply a font to a FontString
 local function SetFontSafe(fs, size, flags)
@@ -165,13 +174,14 @@ local function CalculateStats(currentFPS, currentDT)
         InsertSorted(low01List, sample.fps, low01Size)
     end
 
-    local avgFPS = sumFPS / count
+    local avgFPS = sumDT > 0 and (count / sumDT) or currentFPS
     local low1 = low1List[low1Size] or low1List[#low1List]
     local low01 = low01List[low01Size] or low01List[#low01List]
 
     -- calculate jitter as standard deviation of frame times
     local meanDT = sumDT / count
     local variance = (sumDTSquared / count) - meanDT * meanDT
+    if variance < 0 then variance = 0 end
 
     return {
         current = currentFPS,
@@ -181,7 +191,7 @@ local function CalculateStats(currentFPS, currentDT)
         low1 = low1,
         low01 = low01,
         frameTime = currentDT * 1000,
-        jitter = math.sqrt(variance) * 1000,
+        jitter = math_sqrt(variance) * 1000,
     }
 end
 
@@ -215,6 +225,25 @@ local function UpdateDisplay(stats)
             displayFrame.values[i]:SetText(values[i])
         end
     end
+end
+
+-- Print summarized statistics to the chat frame
+local function PrintStats(stats)
+    print(string.format(
+        "FPSMonitor: %.1f avg %.1f min %.1f max %.1f 1%% %.1f 0.1%% %.1f frame %.2f ms jitter %.2f ms",
+        stats.current, stats.average, stats.min, stats.max, stats.low1,
+        stats.low01, stats.frameTime, stats.jitter))
+    if FPSPerCharDB.overall then
+        print(string.format("Overall min %.1f  Overall max %.1f",
+            FPSPerCharDB.overall.min, FPSPerCharDB.overall.max))
+    end
+end
+
+-- Update persistent per-character statistics
+local function UpdateCharacterStats()
+    local overall = FPSPerCharDB.overall
+    if sessionMinFPS < overall.min then overall.min = sessionMinFPS end
+    if sessionMaxFPS > overall.max then overall.max = sessionMaxFPS end
 end
 
 -- Create movable display frame
@@ -331,6 +360,16 @@ SlashCmdList["FPSMON"] = function(msg)
         sessionMaxFPS = 0
         print("FPSMonitor: session statistics reset")
         return
+    elseif msg == "resetall" then
+        frameHistory = {}
+        historyStart = 1
+        historyCount = 0
+        historyTime = 0
+        sessionMinFPS = math.huge
+        sessionMaxFPS = 0
+        FPSPerCharDB.overall = { min = math.huge, max = 0 }
+        print("FPSMonitor: all statistics reset")
+        return
     elseif msg == "minimap" then
         FPSMonitorDB.minimap.hide = not FPSMonitorDB.minimap.hide
         if FPSMonitorDB.minimap.hide then
@@ -341,6 +380,18 @@ SlashCmdList["FPSMON"] = function(msg)
             minimapButton:Show()
             print("FPSMonitor: minimap button shown")
         end
+        return
+    elseif msg == "stats" then
+        local fps = GetFramerate()
+        local stats = CalculateStats(fps, fps > 0 and (1 / fps) or 0)
+        PrintStats(stats)
+        return
+    elseif msg == "help" then
+        print("/fpsmon - toggle display")
+        print("/fpsmon minimap - toggle minimap button")
+        print("/fpsmon stats - print current statistics")
+        print("/fpsmon reset - reset session statistics")
+        print("/fpsmon resetall - reset all statistics")
         return
     end
 
@@ -395,13 +446,19 @@ local function OnEvent(_, event, arg1)
         -- statistics with extremely high FPS values while assets load.
         captureStartTime = GetTime() + captureDelay
         capturing = false
+        sessionMinFPS = math.huge
+        sessionMaxFPS = 0
     elseif event == "PLAYER_LEAVING_WORLD" then
         capturing = false
         captureStartTime = nil
+        UpdateCharacterStats()
+    elseif event == "PLAYER_LOGOUT" then
+        UpdateCharacterStats()
     end
 end
 updateFrame:RegisterEvent("ADDON_LOADED")
 updateFrame:RegisterEvent("PLAYER_LOGIN")
 updateFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 updateFrame:RegisterEvent("PLAYER_LEAVING_WORLD")
+updateFrame:RegisterEvent("PLAYER_LOGOUT")
 updateFrame:SetScript("OnEvent", OnEvent)
