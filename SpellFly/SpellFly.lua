@@ -12,6 +12,8 @@ SpellFlyDB = SpellFlyDB or {
   offActionBar = true,
   -- When true the spell icon additionally flies from the screen centre
   fromCenter = false,
+  -- Angle around the minimap for the addon button
+  minimapAngle = 0,
 }
 
 -- Forward declaration for the options frame so helper functions can access it.
@@ -30,6 +32,7 @@ local iconPool = {}
 -- the animation from its location.  This will be updated whenever the player
 -- uses an action button via clicking or keybinds.
 local lastUsedButton
+local lastOriginInfo -- table with pre-calculated x, y, w, h
 
 -- Utility that attempts to find an action button frame for a given action slot.
 -- This relies on the default UI's ActionBarButtonEventsFrame which keeps a list
@@ -54,9 +57,23 @@ end
 
 -- Hook UseAction so we know which button (if any) the player activated.  This
 -- allows the animation to originate from the correct on-screen location.
+local function CaptureButtonInfo(button)
+  lastUsedButton = button
+  if button then
+    local x, y, w, h = GetOriginInfo(button)
+    if x then
+      lastOriginInfo = {x = x, y = y, w = w, h = h}
+    else
+      lastOriginInfo = nil
+    end
+  else
+    lastOriginInfo = nil
+  end
+end
+
 if UseAction then
   hooksecurefunc("UseAction", function(slot)
-    lastUsedButton = GetButtonForAction(slot)
+    CaptureButtonInfo(GetButtonForAction(slot))
   end)
 end
 
@@ -69,7 +86,7 @@ local function HookActionButtons()
   for _, button in pairs(ActionBarButtonEventsFrame.frames) do
     if button and not button.SpellFlyHooked then
       button:HookScript("OnMouseDown", function(self)
-        lastUsedButton = self
+        CaptureButtonInfo(self)
       end)
       button.SpellFlyHooked = true
     end
@@ -109,7 +126,11 @@ end
 -- Attempt to retrieve the centre point and size of an action button's icon.
 -- Falls back to the button itself when no icon texture is found.
 local function GetOriginInfo(origin)
-  if not origin or not origin:IsVisible() then
+  if type(origin) == "table" then
+    return origin.x, origin.y, origin.w, origin.h
+  end
+
+  if not origin or not origin.IsVisible or not origin:IsVisible() then
     return nil
   end
 
@@ -214,6 +235,9 @@ end
 SpellFly:SetScript("OnEvent", function(_, event, ...)
   if event == "PLAYER_LOGIN" then
     HookActionButtons()
+    if UpdateMinimapButtonPosition then
+      UpdateMinimapButtonPosition()
+    end
     return
   end
 
@@ -224,21 +248,23 @@ SpellFly:SetScript("OnEvent", function(_, event, ...)
 
   -- Determine whether any origins are enabled. If none are checked we skip
   -- playing animations entirely.
-  local doBar = SpellFlyDB.offActionBar and lastUsedButton and lastUsedButton:IsVisible()
+  local doBar = SpellFlyDB.offActionBar and lastOriginInfo
   local doCenter = SpellFlyDB.fromCenter
   if not doBar and not doCenter then
     lastUsedButton = nil
+    lastOriginInfo = nil
     return
   end
 
   if doBar then
-    PlaySpellAnimation(spellID, lastUsedButton)
+    PlaySpellAnimation(spellID, lastOriginInfo)
   end
   if doCenter then
     PlaySpellAnimation(spellID, nil)
   end
 
   lastUsedButton = nil
+  lastOriginInfo = nil
 end)
 
 -- Seed the random generator using a time-based value to avoid identical
@@ -271,10 +297,21 @@ function SpellFly:ToggleOptions()
     optionsFrame.title:SetPoint("CENTER", optionsFrame.TitleBg, "CENTER", 0, 0)
     optionsFrame.title:SetText("SpellFly Options")
 
-    -- Provide a close button and allow the frame to be dismissed with the ESC key
-    optionsFrame.closeButton = CreateFrame("Button", nil, optionsFrame, "UIPanelCloseButton")
-    optionsFrame.closeButton:SetPoint("TOPRIGHT", optionsFrame, "TOPRIGHT", -5, -5)
+    -- Allow the frame to be dismissed with the ESC key
     tinsert(UISpecialFrames, optionsFrame:GetName())
+
+    -- Overlay to close the options when clicking outside
+    optionsFrame.backdrop = CreateFrame("Button", nil, UIParent)
+    optionsFrame.backdrop:SetAllPoints(UIParent)
+    optionsFrame.backdrop:SetFrameStrata("DIALOG")
+    optionsFrame.backdrop:SetFrameLevel(optionsFrame:GetFrameLevel() - 1)
+    optionsFrame.backdrop:Hide()
+    optionsFrame.backdrop:SetScript("OnClick", function()
+      optionsFrame:Hide()
+    end)
+    optionsFrame:HookScript("OnHide", function()
+      optionsFrame.backdrop:Hide()
+    end)
 
     -- Checkbox: enable animations from the action bar
     local check1 = CreateFrame("CheckButton", nil, optionsFrame, "ChatConfigCheckButtonTemplate")
@@ -301,6 +338,9 @@ function SpellFly:ToggleOptions()
     optionsFrame:Hide()
   else
     optionsFrame:Show()
+    if optionsFrame.backdrop then
+      optionsFrame.backdrop:Show()
+    end
   end
 end
 
@@ -308,13 +348,36 @@ end
 local minimapButton = CreateFrame("Button", "SpellFlyMinimapButton", Minimap)
 minimapButton:SetSize(32, 32)
 minimapButton:SetFrameStrata("MEDIUM")
-minimapButton:SetPoint("TOPLEFT", Minimap, "TOPLEFT")
+
+local function UpdateMinimapButtonPosition()
+  local angle = SpellFlyDB.minimapAngle or 0
+  local radius = Minimap:GetWidth() / 2 + 10
+  local x = math.cos(angle) * radius
+  local y = math.sin(angle) * radius
+  minimapButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
+end
+
+UpdateMinimapButtonPosition()
 
 minimapButton.icon = minimapButton:CreateTexture(nil, "ARTWORK")
 minimapButton.icon:SetAllPoints()
 minimapButton.icon:SetTexture("Interface\\AddOns\\SpellFly\\magifly.png")
 
 minimapButton:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+minimapButton:RegisterForDrag("LeftButton")
+minimapButton:SetScript("OnDragStart", function(self)
+  self:SetScript("OnUpdate", function()
+    local mx, my = GetCursorPosition()
+    local px, py = Minimap:GetCenter()
+    local scale = Minimap:GetEffectiveScale()
+    mx, my = mx / scale, my / scale
+    SpellFlyDB.minimapAngle = math.atan2(my - py, mx - px)
+    UpdateMinimapButtonPosition()
+  end)
+end)
+minimapButton:SetScript("OnDragStop", function(self)
+  self:SetScript("OnUpdate", nil)
+end)
 minimapButton:SetScript("OnClick", function()
   SpellFly:ToggleOptions()
 end)
