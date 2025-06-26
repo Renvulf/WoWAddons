@@ -67,7 +67,21 @@ local COMBAT_FONT_GROUPS = {
         path  = ADDON_PATH,
         fonts = {"default.ttf"},
     },
+    -- Folder for user provided fonts.  Any files named 1.ttf - 20.ttf will be
+    -- detected and offered in the dropdown.  Missing files are ignored.
+    ["Custom"] = {
+        path  = ADDON_PATH .. "Custom\\",
+        fonts = {}, -- populated below
+    },
 }
+
+-- Populate the expected custom font names (1.ttf .. 20.ttf)
+do
+    local t = COMBAT_FONT_GROUPS["Custom"].fonts
+    for i = 1, 20 do
+        t[i] = i .. ".ttf"
+    end
+end
 
 -- Cache loaded fonts to allow previewing in the options panel
 local cachedFonts, existsFonts = {}, {}
@@ -169,7 +183,9 @@ local function SetPreviewFont(fontObj, path)
 end
 
 -- Dropdowns for each font group arranged neatly in two columns
-local order = {"Fun", "Future", "Movie/Game", "Easy-to-Read", "Default"}
+-- Displayed dropdown order; the "Custom" category replaces the old "Default"
+-- dropdown to allow users to provide their own fonts.
+local order = {"Fun", "Future", "Movie/Game", "Easy-to-Read", "Custom"}
 local lastDropdown
 for idx, grp in ipairs(order) do
     local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]", "") .. "DD", frame, "UIDropDownMenuTemplate")
@@ -327,7 +343,6 @@ defaultBtn:SetScript("OnClick", function()
     editBox:SetText(editBox:GetText())
     slider:SetValue(1.0); UpdateScale(1.0)
     for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
-    UIDropDownMenu_SetText(dropdowns["Default"], "default")
     print("|cFF00FF00[FCTF]|r Reset to default font.")
 end)
 
@@ -424,7 +439,7 @@ frame:SetScript("OnEvent", function(self, event, name)
     if name == addonName then
         if FCTFDB.selectedFont then
             local g,f = FCTFDB.selectedFont:match("^([^/]+)/(.+)$")
-            if g and f and existsFonts[g] and existsFonts[g][f] then
+            if g and f and dropdowns[g] and existsFonts[g] and existsFonts[g][f] then
                 DAMAGE_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
                 local cache = cachedFonts[g] and cachedFonts[g][f]
                 if cache then SetPreviewFont(cache) end
