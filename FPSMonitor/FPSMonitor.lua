@@ -25,6 +25,7 @@ local defaultConfig = {
     },
     minimap = {
         hide = false,
+        angle = 0, -- radians around the minimap for the button position
     },
 }
 
@@ -38,6 +39,16 @@ local sessionMinFPS = math.huge
 local sessionMaxFPS = 0
 local displayFrame
 local minimapButton
+
+-- Reposition minimap button around the minimap based on stored angle
+local function UpdateMinimapButtonPosition(angle)
+    if not minimapButton or not Minimap then return end
+    angle = angle or FPSMonitorDB.minimap.angle or 0
+    local radius = (Minimap:GetWidth() / 2) + 5
+    local x = radius * math.cos(angle)
+    local y = radius * math.sin(angle)
+    minimapButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
+end
 
 -- Utility function to merge default values into the saved configuration table
 local function DeepCopyDefaults(src, dest)
@@ -145,17 +156,27 @@ local function CalculateStats(currentFPS, currentDT)
 end
 
 -- Update the on-screen display text
+local function ColorizeFPS(fps)
+    if fps < 30 then
+        return string.format("|cffff0000%.1f|r", fps)
+    elseif fps < 60 then
+        return string.format("|cffffff00%.1f|r", fps)
+    else
+        return string.format("|cff00ff00%.1f|r", fps)
+    end
+end
+
 local function UpdateDisplay(stats)
     if not displayFrame then return end
     local text = string.format(
-        "Current FPS: %.1f\n" ..
+        "Current FPS: %s\n" ..
         "Average FPS: %.1f\n" ..
         "Min FPS: %.1f / Max FPS: %.1f\n" ..
         "1%% Low FPS: %.1f\n" ..
         "0.1%% Low FPS: %.1f\n" ..
         "Frame Time: %.2f ms\n" ..
         "Jitter: %.2f ms",
-        stats.current, stats.average, stats.min, stats.max,
+        ColorizeFPS(stats.current), stats.average, stats.min, stats.max,
         stats.low1, stats.low01, stats.frameTime, stats.jitter)
     displayFrame.text:SetText(text)
 end
@@ -196,7 +217,23 @@ local function CreateMinimapButton()
     minimapButton:SetFrameLevel(8)
     minimapButton:SetNormalTexture("Interface/AddOns/FPSMonitor/FPS1.tga")
     minimapButton:SetHighlightTexture("Interface/Minimap/UI-Minimap-ZoomButton-Highlight")
-    minimapButton:SetPoint("TOPLEFT", Minimap, "TOPLEFT")
+    UpdateMinimapButtonPosition(FPSMonitorDB.minimap.angle)
+    minimapButton:RegisterForDrag("LeftButton")
+    minimapButton:SetScript("OnDragStart", function(self)
+        self:SetScript("OnUpdate", function()
+            local mx, my = Minimap:GetCenter()
+            local px, py = GetCursorPosition()
+            local scale = Minimap:GetEffectiveScale()
+            px, py = px / scale, py / scale
+            local angle = math.atan2(py - my, px - mx)
+            FPSMonitorDB.minimap.angle = angle
+            UpdateMinimapButtonPosition(angle)
+        end)
+    end)
+    minimapButton:SetScript("OnDragStop", function(self)
+        self:SetScript("OnUpdate", nil)
+        UpdateMinimapButtonPosition(FPSMonitorDB.minimap.angle)
+    end)
     minimapButton:SetScript("OnClick", function()
         if displayFrame and displayFrame:IsShown() then
             displayFrame:Hide()
@@ -216,6 +253,8 @@ SlashCmdList["FPSMON"] = function(msg)
     msg = msg and msg:lower() or ""
     if msg == "reset" then
         frameHistory = {}
+        historyStart = 1
+        historyCount = 0
         historyTime = 0
         sessionMinFPS = math.huge
         sessionMaxFPS = 0
