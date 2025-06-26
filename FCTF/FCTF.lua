@@ -127,30 +127,58 @@ local dropdowns = {}
 local preview
 local editBox
 
+--[[
+    Apply a font to the preview field.
+
+    The original implementation assumed fontObj was always valid. During early
+    loading however, "GameFontNormalLarge" may not yet exist which triggered
+    the reported "attempt to index local 'fontObj'" error. To make the function
+    robust we guard against nil values and gracefully fall back when loading via
+    the font path fails.
+--]]
 local function SetPreviewFont(fontObj, path)
+    if not fontObj then return end -- nothing to apply
+
+    -- allow passing the cached font table directly
     if type(fontObj) == "table" then
         path    = fontObj.path
         fontObj = fontObj.font
     end
+
+    if not fontObj or type(fontObj.GetFont) ~= "function" then return end
+
+    -- retrieve font attributes for scaling
     local fPath, size, flags = fontObj:GetFont()
     path  = path  or fPath
     size  = (size or 20) * 2
     flags = flags or ""
-    local ok = pcall(preview.SetFont, preview, path, size, flags)
-    if not ok then preview:SetFontObject(fontObj) end
+
+    -- attempt to load via explicit path first
+    local ok = false
+    if path then
+        ok = pcall(preview.SetFont, preview, path, size, flags)
+    end
+    if not ok then
+        preview:SetFontObject(fontObj)
+    end
+
+    -- adjust height so tall fonts are not clipped
     local _, applied = preview:GetFont()
     applied = applied or size
     preview:SetHeight(applied + math.ceil(applied * 0.4))
 end
 
+-- Dropdowns for each font group arranged neatly in two columns
 local order = {"Fun", "Future", "Movie/Game", "Easy-to-Read", "Default"}
 for idx, grp in ipairs(order) do
     local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]", "") .. "DD", frame, "UIDropDownMenuTemplate")
     local row = math.floor((idx-1)/2)
-    local col = (idx-1)%2
-    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 16 + col*200, -16 - row*50)
+    local col = (idx-1) % 2
+    -- small left margin so text does not hug the frame edge
+    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 20 + col*180, -20 - row*50)
     UIDropDownMenu_SetWidth(dd, 160)
     dropdowns[grp] = dd
+
     local label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     label:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 16, 3)
     label:SetText(grp)
@@ -227,7 +255,9 @@ preview:SetWidth(360)
 preview:SetJustifyH("LEFT")
 preview:SetText("12345")
 
-SetPreviewFont(GameFontNormalLarge)
+-- Apply a default preview font. GameFontNormalLarge should normally exist,
+-- but we fall back to the current FontObject if it does not to avoid errors.
+SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
 
 editBox = CreateFrame("EditBox", addonName .. "PreviewEdit", frame, "InputBoxTemplate")
 editBox:SetSize(360, 24)
@@ -273,7 +303,12 @@ defaultBtn:SetPoint("LEFT", applyBtn, "RIGHT", 8, 0)
 defaultBtn:SetText("Default")
 defaultBtn:SetScript("OnClick", function()
     FCTFDB.selectedFont = "Default/default.ttf"
-    SetPreviewFont(cachedFonts["Default"]["default.ttf"]) 
+    local cache = cachedFonts["Default"] and cachedFonts["Default"]["default.ttf"]
+    if cache then
+        SetPreviewFont(cache)
+    else
+        SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
+    end
     editBox:SetText(editBox:GetText())
     slider:SetValue(1.0); UpdateScale(1.0)
     for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
@@ -310,7 +345,8 @@ SlashCmdList["FCT"] = function()
         local grp,fname = FCTFDB.selectedFont:match("^([^/]+)/(.+)$")
         if grp and fname and dropdowns[grp] and existsFonts[grp][fname] then
             UIDropDownMenu_SetText(dropdowns[grp], fname:gsub("%.otf$",""):gsub("%.ttf$",""))
-            SetPreviewFont(cachedFonts[grp][fname])
+            local cache = cachedFonts[grp][fname]
+            if cache then SetPreviewFont(cache) end
         end
     end
     preview:SetText(editBox:GetText())
@@ -375,7 +411,8 @@ frame:SetScript("OnEvent", function(self, event, name)
             local g,f = FCTFDB.selectedFont:match("^([^/]+)/(.+)$")
             if g and f and existsFonts[g] and existsFonts[g][f] then
                 DAMAGE_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
-                SetPreviewFont(cachedFonts[g][f])
+                local cache = cachedFonts[g] and cachedFonts[g][f]
+                if cache then SetPreviewFont(cache) end
                 preview:SetText(editBox:GetText())
                 for grp,dd in pairs(dropdowns) do UIDropDownMenu_SetText(dd, "Select Font") end
                 UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$",""))
