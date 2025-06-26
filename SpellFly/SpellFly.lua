@@ -5,6 +5,20 @@
 
 local SpellFly = CreateFrame("Frame")
 
+-- Cache often used globals locally for slight performance gains and
+-- to avoid accidental taint when other addons modify them.
+local pairs       = pairs
+local math_random = math.random
+local math_randomseed = math.randomseed
+local math_abs    = math.abs
+local math_atan2  = math.atan2
+local tinsert     = table.insert
+local tremove     = table.remove
+
+local GetCursorPosition = GetCursorPosition
+local GetSpellTexture   = GetSpellTexture
+local GetSpellInfo      = GetSpellInfo
+
 -- Initialise saved variables with sensible defaults on first load. This table
 -- persists between sessions and is declared in the TOC via SavedVariables.
 SpellFlyDB = SpellFlyDB or {
@@ -28,10 +42,6 @@ SpellFly:RegisterEvent("PLAYER_LOGIN")
 -- creating excessive UI widgets on repeated casts.
 local iconPool = {}
 
--- Store the last action button that triggered a spell cast so we can start
--- the animation from its location.  This will be updated whenever the player
--- uses an action button via clicking or keybinds.
-local lastUsedButton
 local lastOriginInfo -- table with pre-calculated x, y, w, h
 
 -- Forward declare for use in CaptureButtonInfo.
@@ -61,7 +71,6 @@ end
 -- Hook UseAction so we know which button (if any) the player activated.  This
 -- allows the animation to originate from the correct on-screen location.
 local function CaptureButtonInfo(button)
-  lastUsedButton = button
   if button then
     local x, y, w, h = GetOriginInfo(button)
     if x then
@@ -74,7 +83,7 @@ local function CaptureButtonInfo(button)
   end
 end
 
-if UseAction then
+if UseAction and hooksecurefunc then
   hooksecurefunc("UseAction", function(slot)
     CaptureButtonInfo(GetButtonForAction(slot))
   end)
@@ -98,18 +107,22 @@ end
 
 -- Acquire a frame from the pool or create a new one when needed.
 local function AcquireIconFrame()
-  local frame = table.remove(iconPool)
+  local frame = tremove(iconPool)
   if not frame then
     frame = CreateFrame("Frame", nil, UIParent)
     frame:SetSize(50, 50)
     frame:SetFrameStrata("HIGH")
+    frame:EnableMouse(false)
 
     frame.texture = frame:CreateTexture(nil, "OVERLAY")
     frame.texture:SetAllPoints(frame)
+  else
+    frame:SetParent(UIParent)
   end
 
   frame:ClearAllPoints()
   frame:Show()
+  frame.animationGroup = nil
 
   return frame
 end
@@ -123,7 +136,8 @@ local function ReleaseIconFrame(frame)
 
   frame:Hide()
   frame.texture:SetTexture(nil)
-  table.insert(iconPool, frame)
+  frame.animationGroup = nil
+  tinsert(iconPool, frame)
 end
 
 -- Implementation assigned after forward declaration above.
@@ -201,11 +215,11 @@ local function PlaySpellAnimation(spellID, origin)
   local screenWidth = UIParent:GetWidth()
   local distanceToLeft = startX
   local distanceToRight = screenWidth - startX
-  local diff = math.abs(distanceToRight - distanceToLeft)
+  local diff = math_abs(distanceToRight - distanceToLeft)
   local direction
   if diff <= 5 then
     -- When near the middle of the screen pick a random direction
-    direction = math.random(0, 1) == 0 and -1 or 1
+    direction = math_random(0, 1) == 0 and -1 or 1
   else
     -- Otherwise prefer the shortest path off screen
     direction = distanceToRight < distanceToLeft and 1 or -1
@@ -216,7 +230,7 @@ local function PlaySpellAnimation(spellID, origin)
   else
     horizontalOffset = -(distanceToLeft + iconFrame:GetWidth())
   end
-  move:SetOffset(horizontalOffset, math.random(-100, 100))
+  move:SetOffset(horizontalOffset, math_random(-100, 100))
   move:SetDuration(2)
   move:SetSmoothing("OUT")
 
@@ -253,7 +267,6 @@ SpellFly:SetScript("OnEvent", function(_, event, ...)
   local doBar = SpellFlyDB.offActionBar and lastOriginInfo
   local doCenter = SpellFlyDB.fromCenter
   if not doBar and not doCenter then
-    lastUsedButton = nil
     lastOriginInfo = nil
     return
   end
@@ -265,15 +278,14 @@ SpellFly:SetScript("OnEvent", function(_, event, ...)
     PlaySpellAnimation(spellID, nil)
   end
 
-  lastUsedButton = nil
   lastOriginInfo = nil
 end)
 
 -- Seed the random generator using a time-based value to avoid identical
 -- patterns across sessions. `time()` is available in all WoW Lua
 -- environments and provides a reasonably unpredictable seed.
-if math and math.randomseed and time then
-  math.randomseed(time())
+if math and math_randomseed and time then
+  math_randomseed(time())
 end
 
 -- ---------------------------------------------------------------------
@@ -377,7 +389,7 @@ minimapButton:SetScript("OnDragStart", function(self)
     local px, py = Minimap:GetCenter()
     local scale = Minimap:GetEffectiveScale()
     mx, my = mx / scale, my / scale
-    SpellFlyDB.minimapAngle = math.atan2(my - py, mx - px)
+    SpellFlyDB.minimapAngle = math_atan2(my - py, mx - px)
     UpdateMinimapButtonPosition()
   end)
 end)
