@@ -2,7 +2,7 @@
 ## Title: FPS Monitor
 ## Notes: Displays advanced FPS statistics with a draggable minimap button
 ## Author: Renvulf
-## Version: 1.6.1
+## Version: 1.6.2
 ## SavedVariables: FPSMonitorDB
 ## SavedVariablesPerCharacter: FPSPerCharDB
 ## IconTexture: Interface\AddOns\FPSMonitor\FPS1.tga
