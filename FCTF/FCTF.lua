@@ -90,8 +90,8 @@ end
 
 -- 2) MAIN WINDOW
 local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, "BackdropTemplate")
--- Expanded size to fit additional controls
-frame:SetSize(420, 480)
+-- Expanded size and extra top padding so header text doesn't clip
+frame:SetSize(420, 500)
 frame:SetPoint("CENTER")
 frame:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -175,8 +175,8 @@ for idx, grp in ipairs(order) do
     local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]", "") .. "DD", frame, "UIDropDownMenuTemplate")
     local row = math.floor((idx-1)/2)
     local col = (idx-1) % 2
-    -- small left margin so text does not hug the frame edge
-    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 20 + col*180, -20 - row*50)
+    -- extra vertical padding to keep labels away from the top border
+    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 20 + col*180, -40 - row*50)
     UIDropDownMenu_SetWidth(dd, 160)
     dropdowns[grp] = dd
     if idx == #order then
