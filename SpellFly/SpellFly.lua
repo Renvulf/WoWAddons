@@ -26,8 +26,12 @@ local function GetButtonForAction(slot)
     return nil
   end
 
-  for button in pairs(ActionBarButtonEventsFrame.frames) do
-    if button.action == slot then
+  -- ActionBarButtonEventsFrame.frames is a list of action button frames.  When
+  -- iterating with pairs the table keys are numeric indices, so we must use the
+  -- value rather than the key.  Otherwise we would end up with the index number
+  -- and attempt to access "button.action" on a number which causes errors.
+  for _, button in pairs(ActionBarButtonEventsFrame.frames) do
+    if button and button.action == slot then
       return button
     end
   end
@@ -80,7 +84,18 @@ end
 local function PlaySpellAnimation(spellID, origin)
   -- Get the icon for this spell.  Some spells may not have a texture, in which
   -- case we simply abort the animation.
-  local texture = GetSpellTexture(spellID)
+  -- Blizzard removed the global GetSpellTexture API in later versions.  Use the
+  -- C_Spell version if available, or fall back to GetSpellInfo which also
+  -- returns the spell icon.
+  local texture
+  if GetSpellTexture then
+    texture = GetSpellTexture(spellID)
+  elseif C_Spell and C_Spell.GetSpellTexture then
+    texture = C_Spell.GetSpellTexture(spellID)
+  else
+    local _, _, icon = GetSpellInfo(spellID)
+    texture = icon
+  end
   if not texture then
     return
   end
