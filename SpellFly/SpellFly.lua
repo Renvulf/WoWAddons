@@ -43,6 +43,10 @@ local UIParent          = UIParent
 local GetCursorPosition = GetCursorPosition
 local GetSpellTexture   = GetSpellTexture
 local GetSpellInfo      = GetSpellInfo
+-- Forward declarations
+local GetOriginInfo
+local CaptureButtonInfo
+local AddButtonToMap
 
 -- Initialise saved variables with sensible defaults on first load. This table
 -- persists between sessions and is declared in the TOC via SavedVariables.
@@ -64,6 +68,7 @@ SpellFly:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 SpellFly:RegisterEvent("PLAYER_LOGIN")
 SpellFly:RegisterEvent("PLAYER_ENTERING_WORLD")
 SpellFly:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+SpellFly:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
 
 -- Frame pool used to recycle icon frames for better performance and to avoid
 -- creating excessive UI widgets on repeated casts.
@@ -87,13 +92,28 @@ local fallbackButtonPatterns = {
   "MultiBar6Button%d",
   "MultiBar7Button%d",
   "MultiBar8Button%d",
+  "PetActionButton%d",
+  "ShapeshiftButton%d",
+  "OverrideActionBarButton%d",
 }
 
--- forward declarations so local functions can be referenced before they are defined
-local GetOriginInfo
-local CaptureButtonInfo
-local AddButtonToMap
 
+-- Helper used by HookActionButtons to register a button frame. This keeps
+-- the slot cache in sync and ensures we only hook each button once.
+local function AddButtonToMap(button)
+  if not button or not button.action then
+    return
+  end
+
+  slotButtonMap[button.action] = button
+
+  if not button.SpellFlyHooked then
+    button:HookScript("OnMouseDown", function(self)
+      CaptureButtonInfo(self)
+    end)
+    button.SpellFlyHooked = true
+  end
+end
 -- Utility to scan all UI frames for action buttons. This helps support
 -- third-party action bar addons which may not register their buttons with the
 -- default ActionBarButtonEventsFrame.
@@ -176,21 +196,13 @@ if UseAction and hooksecurefunc then
   end)
 end
 
--- Helper used by HookActionButtons to register a button frame. This keeps
--- the slot cache in sync and ensures we only hook each button once.
-local function AddButtonToMap(button)
-  if not button or not button.action then
-    return
-  end
-
-  slotButtonMap[button.action] = button
-
-  if not button.SpellFlyHooked then
-    button:HookScript("OnMouseDown", function(self)
-      CaptureButtonInfo(self)
-    end)
-    button.SpellFlyHooked = true
-  end
+if hooksecurefunc then
+  hooksecurefunc("CastSpellByName", function(spellName)
+    CaptureButtonInfo(nil)
+  end)
+  hooksecurefunc("SpellButton_OnClick", function(self)
+    CaptureButtonInfo(self)
+  end)
 end
 
 -- Hook action buttons directly so we capture the exact frame the user clicked.
@@ -221,30 +233,25 @@ local function HookActionButtons()
 end
 
 -- Acquire a frame from the pool or create a new one when needed.
-  local function AcquireIconFrame()
-    local frame = tremove(iconPool)
-    if not frame then
-      frame = CreateFrame("Frame", nil, UIParent)
-      frame:SetSize(50, 50)
-      frame:EnableMouse(false)
-
-      frame.texture = frame:CreateTexture(nil, "OVERLAY")
-      frame.texture:SetAllPoints(frame)
-    else
-      frame:SetParent(UIParent)
-      -- Reset size in case a previous animation used custom dimensions
-      frame:SetSize(50, 50)
-      frame.texture:SetTexture(nil)
+local function AcquireIconFrame()
+  local frame = tremove(iconPool)
+  if frame then
+    if frame.animationGroup then
+      frame.animationGroup:Stop()
+      frame.animationGroup = nil
     end
-
-    frame:SetFrameStrata("HIGH")
-
+  else
+    frame = CreateFrame("Frame", nil, UIParent)
+    frame.texture = frame:CreateTexture(nil, "OVERLAY")
+    frame.texture:SetAllPoints(frame)
+  end
+  frame:SetParent(UIParent)
+  frame:SetFrameStrata("HIGH")
+  frame:SetSize(50, 50)
+  frame.texture:SetTexture(nil)
   frame:ClearAllPoints()
-  -- Ensure the frame starts fully transparent for the fade in
   frame:SetAlpha(0)
   frame:Show()
-  frame.animationGroup = nil
-
   return frame
 end
 
@@ -265,33 +272,38 @@ end
 
 -- Implementation assigned after forward declaration above.
 GetOriginInfo = function(origin)
-  if type(origin) == "table" then
+  -- 1) Table-based origin (saved coords)
+  if type(origin) == "table" and origin.x and origin.y then
     return origin.x, origin.y, origin.w, origin.h
   end
-
+  -- 2) Frame must be visible
   if not origin or not origin.IsVisible or not origin:IsVisible() then
     return nil
   end
-
-  local icon = origin.icon or origin.Icon or origin.IconTexture or origin.iconTexture
+  -- 3) Try common icon fields & APIs
+  local icon = origin.icon
+            or origin.Icon
+            or origin.IconTexture
+            or (origin.GetNormalTexture and origin:GetNormalTexture())
   if icon and icon:IsVisible() then
-    local x, y = icon:GetCenter()
-    local w, h = icon:GetSize()
-    if x and y then
-      return x, y, w, h
+    local x,y = icon:GetCenter()
+    local w,h = icon:GetSize()
+    if x and y then return x, y, w, h end
+  end
+  -- 4) Scan Regions for a texture fallback
+  for _, region in ipairs({ origin:GetRegions() }) do
+    if region:GetObjectType() == "Texture" and region:GetTexture() then
+      local x,y = region:GetCenter()
+      local w,h = region:GetSize()
+      if x and y then return x, y, w, h end
     end
   end
-
-  local x, y = origin:GetCenter()
-  local w, h = origin:GetSize()
-  if x and y then
-    return x, y, w, h
-  end
-
+  -- 5) Last-ditch: origin’s center
+  local x,y = origin:GetCenter()
+  local w,h = origin:GetSize()
+  if x and y then return x, y, w, h end
   return nil
 end
-
--- Create and play the flying animation for the provided spellID.
 -- If `origin` is a valid frame the animation begins from that frame's centre.
 -- When `origin` is nil or not visible it will start from the screen centre.
 local function PlaySpellAnimation(spellID, origin)
@@ -377,20 +389,26 @@ end
 -- Main event handler. Sets up button hooks and plays animations for the
 -- player's successful spell casts.
 SpellFly:SetScript("OnEvent", function(_, event, ...)
-  if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
-    -- Hook buttons once the player is fully in game to ensure all bars are
-    -- detected. Also update the minimap button position.
+  if event == "PLAYER_LOGIN" then
+    math_randomseed(time())
+    HookActionButtons()
+    if UpdateMinimapButtonPosition then
+      UpdateMinimapButtonPosition()
+    end
+    return
+  elseif event == "PLAYER_ENTERING_WORLD" then
     HookActionButtons()
     if UpdateMinimapButtonPosition then
       UpdateMinimapButtonPosition()
     end
     return
   elseif event == "ACTIONBAR_SLOT_CHANGED" then
-    -- Re-hook buttons to account for newly created ones or changes.
+    HookActionButtons()
+    return
+  elseif event == "ACTIONBAR_PAGE_CHANGED" then
     HookActionButtons()
     return
   end
-
   local unit, _, spellID = ...
   if unit ~= "player" or not spellID then
     return
@@ -410,13 +428,6 @@ SpellFly:SetScript("OnEvent", function(_, event, ...)
     PlaySpellAnimation(spellID, nil)
   end
 end)
-
--- Seed the random generator using a time-based value to avoid identical
--- patterns across sessions. `time()` is available in all WoW Lua
--- environments and provides a reasonably unpredictable seed.
-if math and math_randomseed and time then
-  math_randomseed(time())
-end
 
 -- ---------------------------------------------------------------------
 -- Options UI and minimap button
