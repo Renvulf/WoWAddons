@@ -237,6 +237,7 @@ local function AcquireIconFrame()
   local frame = tremove(iconPool)
   if frame then
     if frame.animationGroup then
+      frame.animationGroup:SetScript("OnFinished", nil)
       frame.animationGroup:Stop()
       frame.animationGroup = nil
     end
