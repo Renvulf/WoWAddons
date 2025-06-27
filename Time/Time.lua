@@ -21,6 +21,36 @@ local addonName = ...
 TimeDB = TimeDB or {}                -- global settings across characters
 TimePerCharDB = TimePerCharDB or {}  -- per-character settings
 
+-- ─── Hex-entry wiring for Blizzard's default ColorPickerFrame ───────────────
+-- Blizzard's picker includes an EditBox "ColorPickerFrameHexInput" which
+-- accepts hex codes like "FFAABB". We hook that box so whenever the user types
+-- or confirms a hex code, the color wheel updates and our live callback runs.
+if LoadAddOn then LoadAddOn("Blizzard_ColorPicker") end
+local hexInput = _G["ColorPickerFrameHexInput"]
+if hexInput then
+  -- Apply the typed hex value by updating the wheel and firing ColorPickerFrame.func
+  local function applyHex(self)
+    local txt = (self:GetText() or ""):gsub("#", "")
+    self:ClearFocus()
+    if #txt == 6 then
+      local r = tonumber(txt:sub(1, 2), 16) / 255
+      local g = tonumber(txt:sub(3, 4), 16) / 255
+      local b = tonumber(txt:sub(5, 6), 16) / 255
+      -- Drive the wheel via its ColorSelect child so no methods are missing
+      ColorPickerFrame.ColorSelect:SetColorRGB(r, g, b)
+      if ColorPickerFrame.func then ColorPickerFrame.func() end
+    else
+      print(addonName .. ": Invalid hex code, please use RRGGBB format.")
+    end
+  end
+
+  hexInput:HookScript("OnEnterPressed", applyHex)
+  hexInput:HookScript("OnEscapePressed", function(self) self:ClearFocus() end)
+  hexInput:HookScript("OnTextChanged", function(self, userInput)
+    if userInput then applyHex(self) end
+  end)
+end
+
 -- ─── Combat Fonts Detection ──────────────────────────────────────────────────
 -- Font groups with their respective font files. These correspond to the folders
 -- inside the addon directory.
