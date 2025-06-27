@@ -381,7 +381,10 @@ local function MinimapButton_OnUpdate(self)
 end
 
 -- Create a simple minimap button that opens the options when clicked.
-local minimapButton = CreateFrame("Button", "SpellFlyMinimapButton", Minimap)
+-- The minimap button is declared above so functions can reference it even
+-- before this line executes.  Here we assign it without another `local`
+-- declaration so the existing upvalue receives the frame object.
+minimapButton = CreateFrame("Button", "SpellFlyMinimapButton", Minimap)
 minimapButton:SetSize(32, 32)
 minimapButton:SetFrameStrata("MEDIUM")
 minimapButton:SetMovable(true)
