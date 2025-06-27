@@ -26,7 +26,10 @@ if SpellFlyDB.minimapAngle == nil then
 end
 
 -- Forward declaration for the options frame so helper functions can access it.
+-- Forward declare frames so nested functions can reference them even before
+-- they are instantiated later in the file.
 local optionsFrame
+local minimapButton
 
 -- UNIT_SPELLCAST_SUCCEEDED gives us reliable information about spells cast by
 -- the player without needing to parse the combat log.
