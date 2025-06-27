@@ -62,6 +62,7 @@ local optionsFrame
 -- the player without needing to parse the combat log.
 SpellFly:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 SpellFly:RegisterEvent("PLAYER_LOGIN")
+SpellFly:RegisterEvent("PLAYER_ENTERING_WORLD")
 SpellFly:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
 
 -- Frame pool used to recycle icon frames for better performance and to avoid
@@ -381,9 +382,12 @@ local function PlaySpellAnimation(spellID, origin)
   animationGroup:Play()
 end
 
--- Event handler for UNIT_SPELLCAST_SUCCEEDED. We only care about the player.
+-- Main event handler. Sets up button hooks and plays animations for the
+-- player's successful spell casts.
 SpellFly:SetScript("OnEvent", function(_, event, ...)
-  if event == "PLAYER_LOGIN" then
+  if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
+    -- Hook buttons once the player is fully in game to ensure all bars are
+    -- detected. Also update the minimap button position.
     HookActionButtons()
     if UpdateMinimapButtonPosition then
       UpdateMinimapButtonPosition()
@@ -400,32 +404,19 @@ SpellFly:SetScript("OnEvent", function(_, event, ...)
     return
   end
 
-  -- Determine whether any origins are enabled. If none are checked we skip
-  -- playing animations entirely.
-  local doBarRequested = SpellFlyDB.offActionBar
-  local doCenter = SpellFlyDB.fromCenter
+  -- Grab and clear any stored action-bar origin so we never reuse stale data.
+  local origin = lastOriginInfo
+  lastOriginInfo = nil
 
-  -- If the user only enabled action bar animations but we failed to capture a
-  -- valid button (for example a keybind from a hidden bar), fall back to the
-  -- screen centre so an icon still displays.
-  local doBar = doBarRequested and lastOriginInfo
-  if not doBar and not doCenter then
-    if doBarRequested then
-      -- Fallback when action bar origin is unavailable
-      PlaySpellAnimation(spellID, nil)
-    end
-    lastOriginInfo = nil
-    return
+  -- Show from action bar only if requested and a valid origin was captured.
+  if SpellFlyDB.offActionBar and origin then
+    PlaySpellAnimation(spellID, origin)
   end
 
-  if doBar then
-    PlaySpellAnimation(spellID, lastOriginInfo)
-  end
-  if doCenter then
+  -- Show from the screen centre when explicitly enabled by the user.
+  if SpellFlyDB.fromCenter then
     PlaySpellAnimation(spellID, nil)
   end
-
-  lastOriginInfo = nil
 end)
 
 -- Seed the random generator using a time-based value to avoid identical
