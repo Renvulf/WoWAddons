@@ -9,7 +9,9 @@ local SpellFly = CreateFrame("Frame")
 -- to avoid accidental taint when other addons modify them.
 local pairs       = pairs
 local math_random     = math.random
-local math_randomseed = math.randomseed
+-- math.randomseed is unavailable in some game builds. Provide a safe wrapper
+-- that becomes a no-op when the function is missing.
+local math_randomseed = math.randomseed or function() end
 local math_abs        = math.abs
 local math_atan2      = math.atan2
 local math_cos        = math.cos
