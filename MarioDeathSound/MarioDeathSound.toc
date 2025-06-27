@@ -1,0 +1,6 @@
+## Title: MarioDeathSound
+## Version: 1.1
+## Interface: 11307,20403,30403,40304,50408,60204,70305,80307,90207,100207,110107
+## Author: Renvulf
+## Notes: Plays the Super Mario Death sound when you die
+MarioDeathSound.lua
