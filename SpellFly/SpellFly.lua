@@ -337,6 +337,13 @@ function SpellFly:ToggleOptions()
       UpdateEventRegistration()
     end)
 
+    -- Allow the frame to be closed with the Escape key like other special windows
+    -- by adding it to the global UISpecialFrames list once it has a name.
+    local name = optionsFrame:GetName()
+    if name and UISpecialFrames and not tContains(UISpecialFrames, name) then
+      table.insert(UISpecialFrames, name)
+    end
+
     optionsFrame:Hide()
   end
 
