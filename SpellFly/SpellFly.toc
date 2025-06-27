@@ -2,7 +2,7 @@
 ## Title: SpellFly
 ## Notes: Adds a visual effect to player's successful spell casts, making the icons fly off screen.
 ## Author: Renvulf
-## Version: 2.0
+## Version: 2.1
 ## IconTexture: Interface\AddOns\Spellfly\magifly.tga
 ## SavedVariables: SpellFlyDB
 SpellFly.lua

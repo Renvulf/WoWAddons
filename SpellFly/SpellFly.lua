@@ -5,14 +5,21 @@
 
 local SpellFly = CreateFrame("Frame")
 
--- Initialise saved variables with sensible defaults on first load. This table
--- persists between sessions and is declared in the TOC via SavedVariables.
-SpellFlyDB = SpellFlyDB or {
-  -- When true the spell icon also flies from the action button used
-  offActionBar = true,
-  -- When true the spell icon additionally flies from the screen centre
-  fromCenter = false,
-}
+-- Initialise saved variables with sensible defaults on first load.  The
+-- database table persists between sessions and is declared in the TOC via the
+-- `SavedVariables` directive.
+SpellFlyDB = SpellFlyDB or {}
+-- Allow the spell icon to fly from the action bar by default.  If the variable
+-- already exists we honour the user's setting.
+if SpellFlyDB.offActionBar == nil then
+  SpellFlyDB.offActionBar = true
+end
+-- Disable flying from the centre of the screen by default so new installations
+-- start with only the action bar behaviour.  Users may opt in via the options
+-- panel and the choice will persist across sessions.
+if SpellFlyDB.fromCenter == nil then
+  SpellFlyDB.fromCenter = false
+end
 
 -- Forward declaration for the options frame so helper functions can access it.
 local optionsFrame
