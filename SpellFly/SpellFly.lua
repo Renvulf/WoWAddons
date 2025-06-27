@@ -207,13 +207,24 @@ local function PlaySpellAnimation(spellID, origin)
   local screenWidth = UIParent:GetWidth()
   local distanceToLeft = startX
   local distanceToRight = screenWidth - startX
-  local direction = distanceToRight < distanceToLeft and 1 or -1
+
+  -- If the animation started from the screen centre randomise the
+  -- horizontal direction so icons can fly either left or right.  For
+  -- action bar origins continue to move towards the nearest edge.
+  local direction
+  if origin == nil or not origin:IsVisible() then
+    direction = math.random(0, 1) == 1 and 1 or -1
+  else
+    direction = distanceToRight < distanceToLeft and 1 or -1
+  end
+
   local horizontalOffset
   if direction == 1 then
     horizontalOffset = distanceToRight + iconFrame:GetWidth()
   else
     horizontalOffset = -(distanceToLeft + iconFrame:GetWidth())
   end
+
   move:SetOffset(horizontalOffset, math.random(-100, 100))
   move:SetDuration(2)
   move:SetSmoothing("OUT")
