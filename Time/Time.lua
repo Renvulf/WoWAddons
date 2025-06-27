@@ -1317,7 +1317,49 @@ function frame:CreateSettingsFrame()
         live()
         if prevOnHide then prevOnHide(self) end
         self:SetScript("OnHide", prevOnHide)
+        -- Remove temporary hex box hook after hiding
+        if self.timeHexBox then
+          local box = self.timeHexBox
+          if box.timePrev then
+            box:SetScript("OnTextChanged", box.timePrev)
+          end
+          box.timePrev = nil
+          self.timeHexBox = nil
+        end
       end)
+
+      -- Hook the color picker's hex input box so typing a hex code updates
+      -- the preview immediately. The exact name varies by version, so search
+      -- for the first EditBox child.
+      local hexBox
+      for _, child in ipairs({ColorPickerFrame:GetChildren()}) do
+        if child:GetObjectType() == "EditBox" then
+          hexBox = child
+          break
+        end
+      end
+      if hexBox and not hexBox.timeHooked then
+        hexBox.timePrev = hexBox:GetScript("OnTextChanged")
+        hexBox:SetScript("OnTextChanged", function(self, user)
+          if user then
+            local text = self:GetText() or ""
+            text = text:gsub("#", "")
+            if text:match("^[0-9a-fA-F]{6}$") then
+              local r = tonumber(text:sub(1,2), 16)/255
+              local g = tonumber(text:sub(3,4), 16)/255
+              local b = tonumber(text:sub(5,6), 16)/255
+              ColorPickerFrame:SetColorRGB(r,g,b)
+              live()
+            end
+          end
+          if hexBox.timePrev then
+            hexBox.timePrev(self, user)
+          end
+        end)
+        hexBox.timeHooked = true
+        ColorPickerFrame.timeHexBox = hexBox
+      end
+
       local sw = _G[ColorPickerFrame:GetName().."ColorSwatch"]
       if sw then sw:SetVertexColor(oR,oG,oB) end
       ShowUIPanel(ColorPickerFrame)
