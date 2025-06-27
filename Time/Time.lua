@@ -1309,6 +1309,15 @@ function frame:CreateSettingsFrame()
       ColorPickerFrame.swatchFunc  = live
       ColorPickerFrame.cancelFunc  = cancel
       ColorPickerFrame.hasOpacity  = false
+      -- When users type a hex code directly and close the picker, the
+      -- regular callback doesn't always fire. Temporarily hook OnHide to
+      -- ensure we apply whatever final color the frame ends with.
+      local prevOnHide = ColorPickerFrame:GetScript("OnHide")
+      ColorPickerFrame:SetScript("OnHide", function(self)
+        live()
+        if prevOnHide then prevOnHide(self) end
+        self:SetScript("OnHide", prevOnHide)
+      end)
       local sw = _G[ColorPickerFrame:GetName().."ColorSwatch"]
       if sw then sw:SetVertexColor(oR,oG,oB) end
       ShowUIPanel(ColorPickerFrame)
