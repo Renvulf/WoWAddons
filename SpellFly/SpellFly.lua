@@ -37,6 +37,28 @@ local iconPool = {}
 -- uses an action button via clicking or keybinds.
 local lastUsedButton
 
+-- Helper that converts a frame's centre coordinates into UIParent space while
+-- taking scale differences into account. Returns nil if the frame has no
+-- centre, which can happen if it hasn't been laid out yet.
+local function GetUIParentRelativeCenter(frame)
+  if not frame or not frame.GetCenter then
+    return nil
+  end
+
+  local x, y = frame:GetCenter()
+  if not x then
+    return nil
+  end
+
+  local scale = frame:GetEffectiveScale()
+  local uiScale = UIParent:GetEffectiveScale()
+  if not scale or scale == 0 or not uiScale or uiScale == 0 then
+    return nil
+  end
+
+  return x * scale / uiScale, y * scale / uiScale
+end
+
 -- Utility that attempts to find an action button frame for a given action slot.
 -- This relies on the default UI's ActionBarButtonEventsFrame which keeps a list
 -- of all action buttons.
@@ -122,13 +144,23 @@ local function PlaySpellAnimation(spellID, origin)
   iconFrame.texture:SetTexture(texture)
 
   -- Determine the starting point.  If a valid frame was supplied start there,
-  -- otherwise fall back to the centre of the screen.
+  -- otherwise fall back to the centre of the screen.  Coordinates are converted
+  -- to the UIParent scale so the animation originates precisely over the
+  -- action button even when different scales are used.
   local startX, startY
   if origin and origin:IsVisible() then
-    startX, startY = origin:GetCenter()
+    startX, startY = GetUIParentRelativeCenter(origin)
+    -- Match the flying icon size to the action button when possible.
+    if startX then
+      local w, h = origin:GetSize()
+      if w and h and w > 0 and h > 0 then
+        iconFrame:SetSize(w, h)
+      end
+    end
   end
   if not startX then
-    startX, startY = UIParent:GetCenter()
+    -- Fallback to the centre of the screen when no valid origin was supplied.
+    startX, startY = GetUIParentRelativeCenter(UIParent)
   end
   iconFrame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", startX, startY)
 
