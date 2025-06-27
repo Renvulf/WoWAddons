@@ -32,10 +32,6 @@ SpellFly:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 -- creating excessive UI widgets on repeated casts.
 local iconPool = {}
 
--- Store the last action button that triggered a spell cast so we can start
--- the animation from its location.  This will be updated whenever the player
--- uses an action button via clicking or keybinds.
-local lastUsedButton
 
 -- Helper that converts a frame's centre coordinates into UIParent space while
 -- taking scale differences into account. Returns nil if the frame has no
@@ -80,12 +76,47 @@ local function GetButtonForAction(slot)
   return nil
 end
 
--- Hook UseAction so we know which button (if any) the player activated.  This
--- allows the animation to originate from the correct on-screen location.
-if UseAction then
-  hooksecurefunc("UseAction", function(slot)
-    lastUsedButton = GetButtonForAction(slot)
-  end)
+
+--[[
+Finding the action button that triggered a spell cast can be accomplished via
+the C_ActionBar API in modern clients.  This avoids hooking secure functions
+like UseAction which may lead to taint.  If the API isn't available we fall
+back to scanning all action slots.  Only visible buttons are returned so the
+animation starts from an on-screen location when possible.
+]]
+local function FindVisibleButtonForSpell(spellID)
+  if not spellID then
+    return nil
+  end
+
+  -- Retail clients provide C_ActionBar.FindSpellActionButtons for an efficient
+  -- lookup.  Iterate through any returned slots and pick the first visible
+  -- button.
+  if C_ActionBar and C_ActionBar.FindSpellActionButtons then
+    local slots = C_ActionBar.FindSpellActionButtons(spellID)
+    if slots then
+      for _, slot in ipairs(slots) do
+        local button = GetButtonForAction(slot)
+        if button and button:IsVisible() then
+          return button
+        end
+      end
+    end
+  else
+    -- Fallback for older clients: manually inspect each action slot.
+    local maxSlots = ACTION_BUTTON_COUNT or 120
+    for slot = 1, maxSlots do
+      local actionType, id = GetActionInfo(slot)
+      if actionType == "spell" and id == spellID then
+        local button = GetButtonForAction(slot)
+        if button and button:IsVisible() then
+          return button
+        end
+      end
+    end
+  end
+
+  return nil
 end
 
 -- Acquire a frame from the pool or create a new one when needed.
@@ -208,21 +239,24 @@ SpellFly:SetScript("OnEvent", function(_, _, unit, _, spellID)
 
   -- Determine whether any origins are enabled. If none are checked we skip
   -- playing animations entirely.
-  local doBar = SpellFlyDB.offActionBar and lastUsedButton and lastUsedButton:IsVisible()
+  local actionButton
+  if SpellFlyDB.offActionBar then
+    actionButton = FindVisibleButtonForSpell(spellID)
+  end
+
+  local doBar = actionButton ~= nil
   local doCenter = SpellFlyDB.fromCenter
+
   if not doBar and not doCenter then
-    lastUsedButton = nil
     return
   end
 
   if doBar then
-    PlaySpellAnimation(spellID, lastUsedButton)
+    PlaySpellAnimation(spellID, actionButton)
   end
   if doCenter then
     PlaySpellAnimation(spellID, nil)
   end
-
-  lastUsedButton = nil
 end)
 
 -- Random seed for the move offset so different sessions don't start with the
