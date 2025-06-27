@@ -89,6 +89,11 @@ local fallbackButtonPatterns = {
   "MultiBar8Button%d",
 }
 
+-- forward declarations so local functions can be referenced before they are defined
+local GetOriginInfo
+local CaptureButtonInfo
+local AddButtonToMap
+
 -- Utility to scan all UI frames for action buttons. This helps support
 -- third-party action bar addons which may not register their buttons with the
 -- default ActionBarButtonEventsFrame.
@@ -107,19 +112,6 @@ local function EnumerateUnknownActionButtons()
 end
 
 local lastOriginInfo -- table with pre-calculated x, y, w, h
-
--- Forward declare for use in CaptureButtonInfo.
-local GetOriginInfo
--- Forward declare CaptureButtonInfo so references inside AddButtonToMap are
--- correctly treated as an upvalue rather than a global. Without this the
--- OnMouseDown handler would attempt to call a global function which results in
--- an "attempt to call global 'CaptureButtonInfo'" error when the button is
--- pressed.
-local CaptureButtonInfo
--- Forward declare AddButtonToMap so EnumerateUnknownActionButtons can call it
--- before the actual implementation is defined later in the file.
-local AddButtonToMap
-
 -- Utility that attempts to find an action button frame for a given action slot.
 -- This relies on the default UI's ActionBarButtonEventsFrame which keeps a list
 -- of all action buttons.
