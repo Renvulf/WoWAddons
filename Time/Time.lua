@@ -1281,72 +1281,50 @@ function frame:CreateSettingsFrame()
     cb:SetSize(100,22)
     cb:SetPoint("TOPLEFT", LAYOUT.col2, LAYOUT.top - 80)
     cb:SetText("Font Color")
-    cb:SetScript("OnClick",function()
+    cb:SetScript("OnClick", function()
+      -- 1) Ensure Blizzard's ColorPicker is loaded
       if LoadAddOn then LoadAddOn("Blizzard_ColorPicker") end
-      local oR,oG,oB,oA = unpack(TimeDB.fontColor)
-      local function live()
-        local r,g,b = ColorPickerFrame:GetColorRGB()
-        TimeDB.fontColor = {r,g,b,oA}
-        frame.fs:SetTextColor(r,g,b,oA)
-        if frame.icon then frame.icon:SetVertexColor(r,g,b,oA) end
-        if frame.shadows then
-          for _, s in ipairs(frame.shadows) do
-            s:SetTextColor(r,g,b,0.3)
-          end
-        end
-      end
-      local function cancel()
-        TimeDB.fontColor = {oR,oG,oB,oA}
-        frame.fs:SetTextColor(oR,oG,oB,oA)
-        if frame.icon then frame.icon:SetVertexColor(oR,oG,oB,oA) end
-        if frame.shadows then
-          for _, s in ipairs(frame.shadows) do
-            s:SetTextColor(oR,oG,oB,0.3)
-          end
-        end
-      end
-      ColorPickerFrame.func        = live
-      ColorPickerFrame.swatchFunc  = live
-      ColorPickerFrame.cancelFunc  = cancel
-      ColorPickerFrame.hasOpacity  = false
-      local sw = _G[ColorPickerFrame:GetName().."ColorSwatch"]
-      if sw then sw:SetVertexColor(oR,oG,oB) end
-      ShowUIPanel(ColorPickerFrame)
 
-      -- find the hex-entry box (Blizzard's InputBox for the hex field)
-      local hexBox
-      for _, child in ipairs({ ColorPickerFrame:GetChildren() }) do
-        if child:IsObjectType("EditBox") then
-          hexBox = child
-          break
+      -- 2) Snapshot old color
+      local oR, oG, oB, oA = unpack(TimeDB.fontColor)
+
+      -- 3) live callback: update DB and preview
+      local function live(r, g, b)
+        -- ShowColorPicker may call without args when OK is clicked
+        if not r then r, g, b = ColorPickerFrame:GetColorRGB() end
+        TimeDB.fontColor = { r, g, b, oA }
+        frame.fs:SetTextColor(r, g, b, oA)
+        if frame.icon then frame.icon:SetVertexColor(r, g, b, oA) end
+        if frame.shadows then
+          for _, s in ipairs(frame.shadows) do
+            s:SetTextColor(r, g, b, 0.3)
+          end
         end
       end
-      if not hexBox then return end
-      hexBox:SetScript("OnEnterPressed", function(self)
-        self:ClearFocus()
-        local txt = self:GetText():gsub("#", "")
-        if #txt == 6 then
-          local r = tonumber(txt:sub(1,2),16)/255
-          local g = tonumber(txt:sub(3,4),16)/255
-          local b = tonumber(txt:sub(5,6),16)/255
-          ColorPickerFrame:SetColorRGB(r, g, b)
-          live()
-        else
-          print(addonName..": Invalid hex code—use 6 characters (0–9, A–F).")
+
+      -- 4) cancel callback: restore old color
+      local function cancelFunc()
+        frame.fs:SetTextColor(oR, oG, oB, oA)
+        if frame.icon then frame.icon:SetVertexColor(oR, oG, oB, oA) end
+        if frame.shadows then
+          for _, s in ipairs(frame.shadows) do
+            s:SetTextColor(oR, oG, oB, 0.3)
+          end
         end
-      end)
-      hexBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-      hexBox:SetScript("OnTextChanged", function(self, userInput)
-        if not userInput then return end
-        local txt = self:GetText():gsub("#", "")
-        if #txt == 6 then
-          local r = tonumber(txt:sub(1,2),16)/255
-          local g = tonumber(txt:sub(3,4),16)/255
-          local b = tonumber(txt:sub(5,6),16)/255
-          ColorPickerFrame:SetColorRGB(r, g, b)
-          live()
-        end
-      end)
+        TimeDB.fontColor = { oR, oG, oB, oA }
+      end
+
+      -- 5) Fire up the picker with hex entry and no opacity slider
+      ShowColorPicker(
+        live,       -- redFunc
+        live,       -- greenFunc
+        live,       -- blueFunc
+        cancelFunc, -- cancelFunc
+        nil,        -- getColor
+        nil,        -- setColor
+        false,      -- hasOpacity
+        oR, oG, oB  -- initial color
+      )
     end)
 
     -- Clock Font Dropdown
