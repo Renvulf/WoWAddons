@@ -71,6 +71,7 @@ SpellFly:RegisterEvent("PLAYER_LOGIN")
 SpellFly:RegisterEvent("PLAYER_ENTERING_WORLD")
 SpellFly:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
 SpellFly:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
+SpellFly:RegisterEvent("ADDON_LOADED")
 
 -- Frame pool used to recycle icon frames for better performance and to avoid
 -- creating excessive UI widgets on repeated casts.
@@ -237,15 +238,15 @@ local function HookActionButtons()
 end
 
 -- Hook all visible SpellBook spell buttons so we can capture their location
--- when the player clicks them. We hook via SpellBookFrame_UpdateSpellButtons
--- because the buttons are dynamically wired by Blizzard and do not share a
--- global click handler.
+-- when the player clicks them.  The specific update function changed across
+-- game versions, so we try a few sensible options and fall back to hooking the
+-- frame's OnShow if needed.
 local function HookSpellBookButtons()
-  if SpellFly.SpellBookHooked then return end
-  SpellFly.SpellBookHooked = true
+  if SpellFly.SpellBookHooked then return true end
 
   local MAX_BUTTONS = SPELLS_PER_PAGE or 12
-  hooksecurefunc("SpellBookFrame_UpdateSpellButtons", function()
+
+  local function SetupButtons()
     for i = 1, MAX_BUTTONS do
       local btn = _G["SpellButton"..i]
       if btn and not btn.__SpellFlyHooked then
@@ -255,7 +256,26 @@ local function HookSpellBookButtons()
         btn.__SpellFlyHooked = true
       end
     end
-  end)
+  end
+
+  local hooked
+  if type(SpellBookFrame_UpdateSpellButtons) == "function" then
+    hooksecurefunc("SpellBookFrame_UpdateSpellButtons", SetupButtons)
+    hooked = true
+  elseif SpellBookFrame and SpellBookFrame.UpdatePages then
+    hooksecurefunc(SpellBookFrame, "UpdatePages", SetupButtons)
+    hooked = true
+  elseif SpellBookFrame then
+    SpellBookFrame:HookScript("OnShow", SetupButtons)
+    hooked = true
+  end
+
+  if hooked then
+    SetupButtons()
+    SpellFly.SpellBookHooked = true
+    return true
+  end
+  return false
 end
 
 -- Acquire a frame from the pool or create a new one when needed.
@@ -429,6 +449,12 @@ SpellFly:SetScript("OnEvent", function(_, event, ...)
     HookSpellBookButtons()
     if UpdateMinimapButtonPosition then
       UpdateMinimapButtonPosition()
+    end
+    return
+  elseif event == "ADDON_LOADED" then
+    local addon = ...
+    if addon == "Blizzard_SpellBookFrame" then
+      HookSpellBookButtons()
     end
     return
   elseif event == "ACTIONBAR_SLOT_CHANGED" then
