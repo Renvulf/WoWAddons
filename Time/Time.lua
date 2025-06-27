@@ -21,6 +21,40 @@ local addonName = ...
 TimeDB = TimeDB or {}                -- global settings across characters
 TimePerCharDB = TimePerCharDB or {}  -- per-character settings
 
+-- Helper to open Blizzard's default color picker (which includes a hex box).
+-- initialColor = table {r, g, b, a}
+-- onChange(r, g, b) will be called when the color is modified or confirmed.
+-- onCancel(r, g, b) will be called when the user cancels the picker.
+local function OpenDefaultColorPicker(initialColor, onChange, onCancel)
+  if LoadAddOn then LoadAddOn("Blizzard_ColorPicker") end
+  local r, g, b, a = unpack(initialColor)
+
+  -- Disable opacity; we only allow RGB changes
+  ColorPickerFrame.hasOpacity, ColorPickerFrame.opacity = false, a
+
+  -- Save current values so Blizzard can return them on cancel
+  ColorPickerFrame.previousValues = {r, g, b, a}
+
+  -- Initialize the swatch to the provided color
+  ColorPickerFrame:SetColorRGB(r, g, b)
+
+  -- Callback as user adjusts the picker or confirms via hex entry
+  ColorPickerFrame.func = function()
+    local nr, ng, nb = ColorPickerFrame:GetColorRGB()
+    onChange(nr, ng, nb)
+  end
+
+  -- Callback when "Cancel" is pressed
+  ColorPickerFrame.cancelFunc = function(prev)
+    local pr, pg, pb = unpack(prev)
+    onCancel(pr, pg, pb)
+  end
+
+  -- Trigger the picker; Hide/Show ensures OnShow runs with our settings
+  ColorPickerFrame:Hide()
+  ColorPickerFrame:Show()
+end
+
 -- ─── Combat Fonts Detection ──────────────────────────────────────────────────
 -- Font groups with their respective font files. These correspond to the folders
 -- inside the addon directory.
@@ -1281,37 +1315,36 @@ function frame:CreateSettingsFrame()
     cb:SetSize(100,22)
     cb:SetPoint("TOPLEFT", LAYOUT.col2, LAYOUT.top - 80)
     cb:SetText("Font Color")
-    cb:SetScript("OnClick",function()
-      if LoadAddOn then LoadAddOn("Blizzard_ColorPicker") end
-      local oR,oG,oB,oA = unpack(TimeDB.fontColor)
-      local function live()
-        local r,g,b = ColorPickerFrame:GetColorRGB()
-        TimeDB.fontColor = {r,g,b,oA}
-        frame.fs:SetTextColor(r,g,b,oA)
-        if frame.icon then frame.icon:SetVertexColor(r,g,b,oA) end
-        if frame.shadows then
-          for _, s in ipairs(frame.shadows) do
-            s:SetTextColor(r,g,b,0.3)
+    cb:SetScript("OnClick", function()
+      local oR, oG, oB, oA = unpack(TimeDB.fontColor)
+
+      OpenDefaultColorPicker(
+        {oR, oG, oB, oA},
+
+        -- OnColorChange: apply the selected color live
+        function(r, g, b)
+          TimeDB.fontColor = {r, g, b, oA}
+          frame.fs:SetTextColor(r, g, b, oA)
+          if frame.icon then frame.icon:SetVertexColor(r, g, b, oA) end
+          if frame.shadows then
+            for _, s in ipairs(frame.shadows) do
+              s:SetTextColor(r, g, b, 0.3)
+            end
+          end
+        end,
+
+        -- OnCancel: revert to the original color
+        function(r, g, b)
+          TimeDB.fontColor = {r, g, b, oA}
+          frame.fs:SetTextColor(r, g, b, oA)
+          if frame.icon then frame.icon:SetVertexColor(r, g, b, oA) end
+          if frame.shadows then
+            for _, s in ipairs(frame.shadows) do
+              s:SetTextColor(r, g, b, 0.3)
+            end
           end
         end
-      end
-      local function cancel()
-        TimeDB.fontColor = {oR,oG,oB,oA}
-        frame.fs:SetTextColor(oR,oG,oB,oA)
-        if frame.icon then frame.icon:SetVertexColor(oR,oG,oB,oA) end
-        if frame.shadows then
-          for _, s in ipairs(frame.shadows) do
-            s:SetTextColor(oR,oG,oB,0.3)
-          end
-        end
-      end
-      ColorPickerFrame.func        = live
-      ColorPickerFrame.swatchFunc  = live
-      ColorPickerFrame.cancelFunc  = cancel
-      ColorPickerFrame.hasOpacity  = false
-      local sw = _G[ColorPickerFrame:GetName().."ColorSwatch"]
-      if sw then sw:SetVertexColor(oR,oG,oB) end
-      ShowUIPanel(ColorPickerFrame)
+      )
     end)
 
     -- Clock Font Dropdown
