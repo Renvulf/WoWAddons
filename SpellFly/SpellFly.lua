@@ -20,6 +20,10 @@ end
 if SpellFlyDB.fromCenter == nil then
   SpellFlyDB.fromCenter = false
 end
+-- Default placement for the minimap button roughly at the top-left edge.
+if SpellFlyDB.minimapAngle == nil then
+  SpellFlyDB.minimapAngle = 135
+end
 
 -- Forward declaration for the options frame so helper functions can access it.
 local optionsFrame
@@ -340,17 +344,60 @@ function SpellFly:ToggleOptions()
   end
 end
 
+-- ---------------------------------------------------------------------
+-- Minimap button helpers
+-- ---------------------------------------------------------------------
+
+-- Update the minimap button position around the minimap's edge based on
+-- the stored angle in the saved variables.
+local function UpdateMinimapButtonPosition()
+  -- Radius is calculated from the minimap size so behaviour stays consistent
+  -- when using different minimap shapes or scales.
+  local radius = (Minimap:GetWidth() / 2) + 5
+  local angle = SpellFlyDB.minimapAngle or 0
+  local x = math.cos(math.rad(angle)) * radius
+  local y = math.sin(math.rad(angle)) * radius
+  minimapButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
+end
+
+-- While dragging, continuously update the saved angle to match the cursor.
+local function MinimapButton_OnUpdate(self)
+  local mx, my = Minimap:GetCenter()
+  local px, py = GetCursorPosition()
+  local scale = Minimap:GetEffectiveScale()
+  if not (mx and my and px and py and scale) then
+    return
+  end
+  local dx, dy = px / scale - mx, py / scale - my
+  local angle = math.deg(math.atan2(dy, dx))
+  if angle < 0 then
+    angle = angle + 360
+  end
+  SpellFlyDB.minimapAngle = angle
+  UpdateMinimapButtonPosition()
+end
+
 -- Create a simple minimap button that opens the options when clicked.
 local minimapButton = CreateFrame("Button", "SpellFlyMinimapButton", Minimap)
 minimapButton:SetSize(32, 32)
 minimapButton:SetFrameStrata("MEDIUM")
-minimapButton:SetPoint("TOPLEFT", Minimap, "TOPLEFT")
+minimapButton:SetMovable(true)
+minimapButton:RegisterForDrag("LeftButton")
+minimapButton:SetScript("OnDragStart", function(self)
+  self:SetScript("OnUpdate", MinimapButton_OnUpdate)
+end)
+minimapButton:SetScript("OnDragStop", function(self)
+  self:SetScript("OnUpdate", nil)
+  MinimapButton_OnUpdate(self)
+end)
 
 minimapButton.icon = minimapButton:CreateTexture(nil, "ARTWORK")
 minimapButton.icon:SetAllPoints()
 minimapButton.icon:SetTexture("Interface\\AddOns\\SpellFly\\magifly.png")
 
 minimapButton:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+-- Position the button using the stored angle on initial load.
+UpdateMinimapButtonPosition()
 minimapButton:SetScript("OnClick", function()
   SpellFly:ToggleOptions()
 end)
