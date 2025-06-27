@@ -5,51 +5,6 @@
 
 local SpellFly = CreateFrame("Frame")
 
--- Cache often used globals locally for slight performance gains and
--- to avoid accidental taint when other addons modify them.
-local pairs       = pairs
-local math_random     = math.random
--- math.randomseed is unavailable in some game builds. Provide a safe wrapper
--- that becomes a no-op when the function is missing.
-local math_randomseed = math.randomseed or function() end
-local math_abs        = math.abs
-local math_atan2      = math.atan2
-local math_cos        = math.cos
-local math_sin        = math.sin
-
--- Provide a fallback implementation for math.atan2 for older game builds
--- where it may not be available. This ensures the minimap button drag logic
--- works reliably across versions.
-if not math_atan2 then
-  function math_atan2(y, x)
-    if x > 0 then
-      return math.atan(y / x)
-    elseif x < 0 and y >= 0 then
-      return math.atan(y / x) + math.pi
-    elseif x < 0 and y < 0 then
-      return math.atan(y / x) - math.pi
-    elseif x == 0 and y > 0 then
-      return math.pi / 2
-    elseif x == 0 and y < 0 then
-      return -math.pi / 2
-    end
-    return 0
-  end
-  math.atan2 = math_atan2
-end
-local tinsert         = table.insert
-local tremove         = table.remove
-local wipe            = wipe
-
-local UIParent          = UIParent
-local GetCursorPosition = GetCursorPosition
-local GetSpellTexture   = GetSpellTexture
-local GetSpellInfo      = GetSpellInfo
--- Forward declarations
-local GetOriginInfo
-local CaptureButtonInfo
-local AddButtonToMap
-
 -- Initialise saved variables with sensible defaults on first load. This table
 -- persists between sessions and is declared in the TOC via SavedVariables.
 SpellFlyDB = SpellFlyDB or {
@@ -57,8 +12,6 @@ SpellFlyDB = SpellFlyDB or {
   offActionBar = true,
   -- When true the spell icon additionally flies from the screen centre
   fromCenter = false,
-  -- Angle around the minimap for the addon button
-  minimapAngle = 0,
 }
 
 -- Forward declaration for the options frame so helper functions can access it.
@@ -67,238 +20,60 @@ local optionsFrame
 -- UNIT_SPELLCAST_SUCCEEDED gives us reliable information about spells cast by
 -- the player without needing to parse the combat log.
 SpellFly:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
-SpellFly:RegisterEvent("PLAYER_LOGIN")
-SpellFly:RegisterEvent("PLAYER_ENTERING_WORLD")
-SpellFly:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
-SpellFly:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
-SpellFly:RegisterEvent("ADDON_LOADED")
 
 -- Frame pool used to recycle icon frames for better performance and to avoid
 -- creating excessive UI widgets on repeated casts.
 local iconPool = {}
 
--- Map of action slot -> action button for quick lookup
--- Cached lookup of action slot -> action button.
--- This improves performance when mapping slots to frames during casts.
-local slotButtonMap = {}
+-- Store the last action button that triggered a spell cast so we can start
+-- the animation from its location.  This will be updated whenever the player
+-- uses an action button via clicking or keybinds.
+local lastUsedButton
 
--- Patterns for common action button names used across the default UI.
--- These act as a fallback when ActionBarButtonEventsFrame does not list a
--- particular button (which can occur in some UI states).
-local fallbackButtonPatterns = {
-  "ActionButton%d",                 -- Main bar
-  "MultiBarBottomLeftButton%d",    -- Bottom left bar
-  "MultiBarBottomRightButton%d",   -- Bottom right bar
-  "MultiBarRightButton%d",         -- Right bar
-  "MultiBarLeftButton%d",          -- Left bar
-  "MultiBar5Button%d",             -- Extra bars introduced in later patches
-  "MultiBar6Button%d",
-  "MultiBar7Button%d",
-  "MultiBar8Button%d",
-  "PetActionButton%d",
-  "ShapeshiftButton%d",
-  "OverrideActionBarButton%d",
-}
-
-
--- Helper used by HookActionButtons to register a button frame. This keeps
--- the slot cache in sync and ensures we only hook each button once.
-local function AddButtonToMap(button)
-  if not button or not button.action then
-    return
-  end
-
-  slotButtonMap[button.action] = button
-
-  if not button.SpellFlyHooked then
-    button:HookScript("OnMouseDown", function(self)
-      CaptureButtonInfo(self)
-    end)
-    button.SpellFlyHooked = true
-  end
-end
--- Utility to scan all UI frames for action buttons. This helps support
--- third-party action bar addons which may not register their buttons with the
--- default ActionBarButtonEventsFrame.
-local function EnumerateUnknownActionButtons()
-  if not EnumerateFrames then
-    return
-  end
-
-  local frame = EnumerateFrames()
-  while frame do
-    if frame.action and frame.GetName and frame:IsObjectType("CheckButton") then
-      AddButtonToMap(frame)
-    end
-    frame = EnumerateFrames(frame)
-  end
-end
-
-local lastOriginInfo -- table with pre-calculated x, y, w, h
 -- Utility that attempts to find an action button frame for a given action slot.
 -- This relies on the default UI's ActionBarButtonEventsFrame which keeps a list
 -- of all action buttons.
 local function GetButtonForAction(slot)
-  if not slot then
+  if not slot or not ActionBarButtonEventsFrame or not ActionBarButtonEventsFrame.frames then
     return nil
   end
 
-  -- Use cached lookup when available for better performance.
-  local button = slotButtonMap[slot]
-  if button then
-    return button
-  end
-
-  -- Build the cache when not found. This covers both the standard list and the
-  -- fallback patterns so we only pay the enumeration cost once when a mapping
-  -- is missing.
-  wipe(slotButtonMap)
-
-  if ActionBarButtonEventsFrame and ActionBarButtonEventsFrame.frames then
-    for _, b in pairs(ActionBarButtonEventsFrame.frames) do
-      AddButtonToMap(b)
-      if not button and b and b.action == slot then
-        button = b
-      end
+  -- ActionBarButtonEventsFrame.frames is a list of action button frames.  When
+  -- iterating with pairs the table keys are numeric indices, so we must use the
+  -- value rather than the key.  Otherwise we would end up with the index number
+  -- and attempt to access "button.action" on a number which causes errors.
+  for _, button in pairs(ActionBarButtonEventsFrame.frames) do
+    if button and button.action == slot then
+      return button
     end
   end
 
-  if not button then
-    for i = 1, 12 do
-      for _, pattern in ipairs(fallbackButtonPatterns) do
-        local btn = _G[pattern:format(i)]
-        AddButtonToMap(btn)
-        if not button and btn and btn.action == slot then
-          button = btn
-        end
-      end
-    end
-  end
-
-  return button
+  return nil
 end
 
 -- Hook UseAction so we know which button (if any) the player activated.  This
 -- allows the animation to originate from the correct on-screen location.
-local function CaptureButtonInfo(button)
-  if button then
-    local x, y, w, h = GetOriginInfo(button)
-    if x then
-      lastOriginInfo = {x = x, y = y, w = w, h = h}
-    else
-      lastOriginInfo = nil
-    end
-  else
-    lastOriginInfo = nil
-  end
-end
-
-if UseAction and hooksecurefunc then
+if UseAction then
   hooksecurefunc("UseAction", function(slot)
-    CaptureButtonInfo(GetButtonForAction(slot))
+    lastUsedButton = GetButtonForAction(slot)
   end)
-end
-
-if hooksecurefunc then
-  hooksecurefunc("CastSpellByName", function(spellName)
-    CaptureButtonInfo(nil)
-  end)
-  -- SpellBook buttons do not use a global click handler, so we hook them
-  -- individually later instead of using hooksecurefunc here.
-  -- hooksecurefunc("SpellButton_OnClick", function(self)
-  --   CaptureButtonInfo(self)
-  -- end)
-end
-
--- Hook action buttons directly so we capture the exact frame the user clicked.
--- Collect action buttons from various sources and hook them for capture.
-local function HookActionButtons()
-  wipe(slotButtonMap)
-
-  -- ActionBarButtonEventsFrame maintains a list of active action buttons.
-  if ActionBarButtonEventsFrame and ActionBarButtonEventsFrame.frames then
-    for _, button in pairs(ActionBarButtonEventsFrame.frames) do
-      AddButtonToMap(button)
-    end
-  end
-
-  -- Fallback enumeration of known button name patterns for UI elements that
-  -- may not be included in ActionBarButtonEventsFrame.frames.
-  for i = 1, 12 do
-    for _, pattern in ipairs(fallbackButtonPatterns) do
-      local btn = _G[pattern:format(i)]
-      AddButtonToMap(btn)
-    end
-  end
-
-  -- Additional scan for buttons created by other addons. This call is
-  -- relatively heavy so we restrict it to situations where buttons have
-  -- potentially changed (PLAYER_LOGIN or ACTIONBAR_SLOT_CHANGED).
-  EnumerateUnknownActionButtons()
-end
-
--- Hook all visible SpellBook spell buttons so we can capture their location
--- when the player clicks them.  The specific update function changed across
--- game versions, so we try a few sensible options and fall back to hooking the
--- frame's OnShow if needed.
-local function HookSpellBookButtons()
-  if SpellFly.SpellBookHooked then return true end
-
-  local MAX_BUTTONS = SPELLS_PER_PAGE or 12
-
-  local function SetupButtons()
-    for i = 1, MAX_BUTTONS do
-      local btn = _G["SpellButton"..i]
-      if btn and not btn.__SpellFlyHooked then
-        btn:HookScript("OnClick", function(self)
-          CaptureButtonInfo(self)
-        end)
-        btn.__SpellFlyHooked = true
-      end
-    end
-  end
-
-  local hooked
-  if type(SpellBookFrame_UpdateSpellButtons) == "function" then
-    hooksecurefunc("SpellBookFrame_UpdateSpellButtons", SetupButtons)
-    hooked = true
-  elseif SpellBookFrame and SpellBookFrame.UpdatePages then
-    hooksecurefunc(SpellBookFrame, "UpdatePages", SetupButtons)
-    hooked = true
-  elseif SpellBookFrame then
-    SpellBookFrame:HookScript("OnShow", SetupButtons)
-    hooked = true
-  end
-
-  if hooked then
-    SetupButtons()
-    SpellFly.SpellBookHooked = true
-    return true
-  end
-  return false
 end
 
 -- Acquire a frame from the pool or create a new one when needed.
 local function AcquireIconFrame()
-  local frame = tremove(iconPool)
-  if frame then
-    if frame.animationGroup then
-      frame.animationGroup:SetScript("OnFinished", nil)
-      frame.animationGroup:Stop()
-      frame.animationGroup = nil
-    end
-  else
+  local frame = table.remove(iconPool)
+  if not frame then
     frame = CreateFrame("Frame", nil, UIParent)
+    frame:SetSize(50, 50)
+    frame:SetFrameStrata("HIGH")
+
     frame.texture = frame:CreateTexture(nil, "OVERLAY")
     frame.texture:SetAllPoints(frame)
   end
-  frame:SetParent(UIParent)
-  frame:SetFrameStrata("HIGH")
-  frame:SetSize(50, 50)
-  frame.texture:SetTexture(nil)
+
   frame:ClearAllPoints()
-  frame:SetAlpha(0)
   frame:Show()
+
   return frame
 end
 
@@ -310,47 +85,11 @@ local function ReleaseIconFrame(frame)
   end
 
   frame:Hide()
-  frame:SetAlpha(0)
   frame.texture:SetTexture(nil)
-  frame:SetParent(nil)
-  frame.animationGroup = nil
-  tinsert(iconPool, frame)
+  table.insert(iconPool, frame)
 end
 
--- Implementation assigned after forward declaration above.
-GetOriginInfo = function(origin)
-  -- 1) Table-based origin (saved coords)
-  if type(origin) == "table" and origin.x and origin.y then
-    return origin.x, origin.y, origin.w, origin.h
-  end
-  -- 2) Frame must be visible
-  if not origin or not origin.IsVisible or not origin:IsVisible() then
-    return nil
-  end
-  -- 3) Try common icon fields & APIs
-  local icon = origin.icon
-            or origin.Icon
-            or origin.IconTexture
-            or (origin.GetNormalTexture and origin:GetNormalTexture())
-  if icon and icon:IsVisible() then
-    local x,y = icon:GetCenter()
-    local w,h = icon:GetSize()
-    if x and y then return x, y, w, h end
-  end
-  -- 4) Scan Regions for a texture fallback
-  for _, region in ipairs({ origin:GetRegions() }) do
-    if region:GetObjectType() == "Texture" and region:GetTexture() then
-      local x,y = region:GetCenter()
-      local w,h = region:GetSize()
-      if x and y then return x, y, w, h end
-    end
-  end
-  -- 5) Last-ditch: origin’s center
-  local x,y = origin:GetCenter()
-  local w,h = origin:GetSize()
-  if x and y then return x, y, w, h end
-  return nil
-end
+-- Create and play the flying animation for the provided spellID.
 -- If `origin` is a valid frame the animation begins from that frame's centre.
 -- When `origin` is nil or not visible it will start from the screen centre.
 local function PlaySpellAnimation(spellID, origin)
@@ -375,17 +114,14 @@ local function PlaySpellAnimation(spellID, origin)
   local iconFrame = AcquireIconFrame()
   iconFrame.texture:SetTexture(texture)
 
-  -- Determine the starting point and match the size of the button's icon when possible.
-  local startX, startY, w, h = GetOriginInfo(origin)
+  -- Determine the starting point.  If a valid frame was supplied start there,
+  -- otherwise fall back to the centre of the screen.
+  local startX, startY
+  if origin and origin:IsVisible() then
+    startX, startY = origin:GetCenter()
+  end
   if not startX then
     startX, startY = UIParent:GetCenter()
-  end
-  if w and h and w > 0 and h > 0 then
-    iconFrame:SetSize(w, h)
-  end
-  -- Use a sensible default when no size information is available.
-  if not (w and h and w > 0 and h > 0) then
-    iconFrame:SetSize(50, 50)
   end
   iconFrame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", startX, startY)
 
@@ -401,22 +137,14 @@ local function PlaySpellAnimation(spellID, origin)
   local screenWidth = UIParent:GetWidth()
   local distanceToLeft = startX
   local distanceToRight = screenWidth - startX
-  local diff = math_abs(distanceToRight - distanceToLeft)
-  local direction
-  if diff <= 5 then
-    -- When near the middle of the screen pick a random direction
-    direction = math_random(0, 1) == 0 and -1 or 1
-  else
-    -- Otherwise prefer the shortest path off screen
-    direction = distanceToRight < distanceToLeft and 1 or -1
-  end
+  local direction = distanceToRight < distanceToLeft and 1 or -1
   local horizontalOffset
   if direction == 1 then
     horizontalOffset = distanceToRight + iconFrame:GetWidth()
   else
     horizontalOffset = -(distanceToLeft + iconFrame:GetWidth())
   end
-  move:SetOffset(horizontalOffset, math_random(-100, 100))
+  move:SetOffset(horizontalOffset, math.random(-100, 100))
   move:SetDuration(2)
   move:SetSmoothing("OUT")
 
@@ -433,56 +161,37 @@ local function PlaySpellAnimation(spellID, origin)
   animationGroup:Play()
 end
 
--- Main event handler. Sets up button hooks and plays animations for the
--- player's successful spell casts.
-SpellFly:SetScript("OnEvent", function(_, event, ...)
-  if event == "PLAYER_LOGIN" then
-    math_randomseed(time())
-    HookActionButtons()
-    HookSpellBookButtons()
-    if UpdateMinimapButtonPosition then
-      UpdateMinimapButtonPosition()
-    end
-    return
-  elseif event == "PLAYER_ENTERING_WORLD" then
-    HookActionButtons()
-    HookSpellBookButtons()
-    if UpdateMinimapButtonPosition then
-      UpdateMinimapButtonPosition()
-    end
-    return
-  elseif event == "ADDON_LOADED" then
-    local addon = ...
-    if addon == "Blizzard_SpellBookFrame" then
-      HookSpellBookButtons()
-    end
-    return
-  elseif event == "ACTIONBAR_SLOT_CHANGED" then
-    HookActionButtons()
-    return
-  elseif event == "ACTIONBAR_PAGE_CHANGED" then
-    HookActionButtons()
-    return
-  end
-  local unit, _, spellID = ...
+-- Event handler for UNIT_SPELLCAST_SUCCEEDED. We only care about the player.
+SpellFly:SetScript("OnEvent", function(_, _, unit, _, spellID)
   if unit ~= "player" or not spellID then
     return
   end
 
-  -- Grab and clear any stored action-bar origin so we never reuse stale data.
-  local origin = lastOriginInfo
-  lastOriginInfo = nil
-
-  -- Show from action bar only if requested and a valid origin was captured.
-  if SpellFlyDB.offActionBar and origin then
-    PlaySpellAnimation(spellID, origin)
+  -- Determine whether any origins are enabled. If none are checked we skip
+  -- playing animations entirely.
+  local doBar = SpellFlyDB.offActionBar and lastUsedButton and lastUsedButton:IsVisible()
+  local doCenter = SpellFlyDB.fromCenter
+  if not doBar and not doCenter then
+    lastUsedButton = nil
+    return
   end
 
-  -- Show from the screen centre when explicitly enabled by the user.
-  if SpellFlyDB.fromCenter then
+  if doBar then
+    PlaySpellAnimation(spellID, lastUsedButton)
+  end
+  if doCenter then
     PlaySpellAnimation(spellID, nil)
   end
+
+  lastUsedButton = nil
 end)
+
+-- Random seed for the move offset so different sessions don't start with the
+-- same pattern.  os.time() is sufficient for this simple visual effect.
+-- Seed the pseudo random generator if the Lua math library supports it.
+if math and math.randomseed then
+  math.randomseed(GetTime() * 1000)
+end
 
 -- ---------------------------------------------------------------------
 -- Options UI and minimap button
@@ -498,7 +207,6 @@ function SpellFly:ToggleOptions()
     optionsFrame:SetPoint("CENTER")
     optionsFrame:SetMovable(true)
     optionsFrame:EnableMouse(true)
-    optionsFrame:SetClampedToScreen(true)
     optionsFrame:RegisterForDrag("LeftButton")
     optionsFrame:SetScript("OnDragStart", optionsFrame.StartMoving)
     optionsFrame:SetScript("OnDragStop", optionsFrame.StopMovingOrSizing)
@@ -506,26 +214,6 @@ function SpellFly:ToggleOptions()
     optionsFrame.title = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     optionsFrame.title:SetPoint("CENTER", optionsFrame.TitleBg, "CENTER", 0, 0)
     optionsFrame.title:SetText("SpellFly Options")
-
-    -- Allow the frame to be dismissed with the ESC key
-    tinsert(UISpecialFrames, optionsFrame:GetName())
-
-    -- Overlay to close the options when clicking outside
-    optionsFrame.backdrop = CreateFrame("Button", nil, UIParent)
-    optionsFrame.backdrop:SetAllPoints(UIParent)
-    -- Match the options frame strata so the backdrop always sits behind it
-    optionsFrame.backdrop:SetFrameStrata(optionsFrame:GetFrameStrata())
-    -- Ensure the backdrop is one level lower so clicks on the options frame are not intercepted
-    optionsFrame.backdrop:SetFrameLevel(math.max(0, optionsFrame:GetFrameLevel() - 1))
-    -- Explicitly enable mouse so the click is registered even if some addons manipulate it
-    optionsFrame.backdrop:EnableMouse(true)
-    optionsFrame.backdrop:Hide()
-    optionsFrame.backdrop:SetScript("OnClick", function()
-      optionsFrame:Hide()
-    end)
-    optionsFrame:HookScript("OnHide", function()
-      optionsFrame.backdrop:Hide()
-    end)
 
     -- Checkbox: enable animations from the action bar
     local check1 = CreateFrame("CheckButton", nil, optionsFrame, "ChatConfigCheckButtonTemplate")
@@ -552,9 +240,6 @@ function SpellFly:ToggleOptions()
     optionsFrame:Hide()
   else
     optionsFrame:Show()
-    if optionsFrame.backdrop then
-      optionsFrame.backdrop:Show()
-    end
   end
 end
 
@@ -562,39 +247,13 @@ end
 local minimapButton = CreateFrame("Button", "SpellFlyMinimapButton", Minimap)
 minimapButton:SetSize(32, 32)
 minimapButton:SetFrameStrata("MEDIUM")
-
-local function UpdateMinimapButtonPosition()
-  local angle = SpellFlyDB.minimapAngle or 0
-  local radius = Minimap:GetWidth() / 2 + 10
-  local x = math_cos(angle) * radius
-  local y = math_sin(angle) * radius
-  minimapButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
-end
-
-UpdateMinimapButtonPosition()
+minimapButton:SetPoint("TOPLEFT", Minimap, "TOPLEFT")
 
 minimapButton.icon = minimapButton:CreateTexture(nil, "ARTWORK")
 minimapButton.icon:SetAllPoints()
 minimapButton.icon:SetTexture("Interface\\AddOns\\SpellFly\\magifly.png")
 
 minimapButton:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
-minimapButton:RegisterForDrag("LeftButton")
-minimapButton:SetScript("OnDragStart", function(self)
-  self:SetScript("OnUpdate", function()
-    local mx, my = GetCursorPosition()
-    local px, py = Minimap:GetCenter()
-    local scale = Minimap:GetEffectiveScale()
-    if mx and my and px and py and scale then
-      mx, my = mx / scale, my / scale
-      SpellFlyDB.minimapAngle = math_atan2(my - py, mx - px)
-      UpdateMinimapButtonPosition()
-    end
-  end)
-end)
-minimapButton:SetScript("OnDragStop", function(self)
-  self:SetScript("OnUpdate", nil)
-  UpdateMinimapButtonPosition()
-end)
 minimapButton:SetScript("OnClick", function()
   SpellFly:ToggleOptions()
 end)
