@@ -26,7 +26,18 @@ local optionsFrame
 
 -- UNIT_SPELLCAST_SUCCEEDED gives us reliable information about spells cast by
 -- the player without needing to parse the combat log.
-SpellFly:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+-- Register for UNIT_SPELLCAST_SUCCEEDED when any origin is enabled.  This is
+-- adjusted dynamically as the user toggles options so no unnecessary work is
+-- done when all animations are disabled.
+local function UpdateEventRegistration()
+  if SpellFlyDB.offActionBar or SpellFlyDB.fromCenter then
+    SpellFly:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+  else
+    SpellFly:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+  end
+end
+
+UpdateEventRegistration()
 
 -- Frame pool used to recycle icon frames for better performance and to avoid
 -- creating excessive UI widgets on repeated casts.
@@ -306,6 +317,7 @@ function SpellFly:ToggleOptions()
     check1:SetChecked(SpellFlyDB.offActionBar)
     check1:SetScript("OnClick", function(self)
       SpellFlyDB.offActionBar = self:GetChecked()
+      UpdateEventRegistration()
     end)
 
     -- Checkbox: enable animations from the screen centre
@@ -315,6 +327,7 @@ function SpellFly:ToggleOptions()
     check2:SetChecked(SpellFlyDB.fromCenter)
     check2:SetScript("OnClick", function(self)
       SpellFlyDB.fromCenter = self:GetChecked()
+      UpdateEventRegistration()
     end)
 
     optionsFrame:Hide()
