@@ -200,9 +200,11 @@ if hooksecurefunc then
   hooksecurefunc("CastSpellByName", function(spellName)
     CaptureButtonInfo(nil)
   end)
-  hooksecurefunc("SpellButton_OnClick", function(self)
-    CaptureButtonInfo(self)
-  end)
+  -- SpellBook buttons do not use a global click handler, so we hook them
+  -- individually later instead of using hooksecurefunc here.
+  -- hooksecurefunc("SpellButton_OnClick", function(self)
+  --   CaptureButtonInfo(self)
+  -- end)
 end
 
 -- Hook action buttons directly so we capture the exact frame the user clicked.
@@ -230,6 +232,28 @@ local function HookActionButtons()
   -- relatively heavy so we restrict it to situations where buttons have
   -- potentially changed (PLAYER_LOGIN or ACTIONBAR_SLOT_CHANGED).
   EnumerateUnknownActionButtons()
+end
+
+-- Hook all visible SpellBook spell buttons so we can capture their location
+-- when the player clicks them. We hook via SpellBookFrame_UpdateSpellButtons
+-- because the buttons are dynamically wired by Blizzard and do not share a
+-- global click handler.
+local function HookSpellBookButtons()
+  if SpellFly.SpellBookHooked then return end
+  SpellFly.SpellBookHooked = true
+
+  local MAX_BUTTONS = SPELLS_PER_PAGE or 12
+  hooksecurefunc("SpellBookFrame_UpdateSpellButtons", function()
+    for i = 1, MAX_BUTTONS do
+      local btn = _G["SpellButton"..i]
+      if btn and not btn.__SpellFlyHooked then
+        btn:HookScript("OnClick", function(self)
+          CaptureButtonInfo(self)
+        end)
+        btn.__SpellFlyHooked = true
+      end
+    end
+  end)
 end
 
 -- Acquire a frame from the pool or create a new one when needed.
@@ -393,12 +417,14 @@ SpellFly:SetScript("OnEvent", function(_, event, ...)
   if event == "PLAYER_LOGIN" then
     math_randomseed(time())
     HookActionButtons()
+    HookSpellBookButtons()
     if UpdateMinimapButtonPosition then
       UpdateMinimapButtonPosition()
     end
     return
   elseif event == "PLAYER_ENTERING_WORLD" then
     HookActionButtons()
+    HookSpellBookButtons()
     if UpdateMinimapButtonPosition then
       UpdateMinimapButtonPosition()
     end
