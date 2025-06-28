@@ -28,33 +28,51 @@ local COMBAT_FONT_GROUPS = {
   ["Fun"] = {
     path  = "Interface\\AddOns\\Time\\Fun\\",
     fonts = {
+      -- Existing fonts
       "04b.ttf", "Barriecito.ttf", "Green Fuz.otf", "Guroes.ttf",
       "Melted.ttf", "Munsteria.ttf", "Runic.ttf", "Skullphabet.ttf",
       "WhoAsksSatan.ttf", "Wickedmouse.ttf", "edkies.ttf", "graff.ttf",
+      -- Newly added fonts
+      "Dmagic.ttf", "Elven.ttf", "Gunung.ttf", "Heorot.ttf",
+      "Kiyrand.ttf", "Kting.ttf", "Odinson.ttf", "Pau.ttf",
+      "WKnight.ttf", "Wasser.ttf",
     },
   },
   ["Future"] = {
     path  = "Interface\\AddOns\\Time\\Future\\",
     fonts = {
+      -- Existing fonts
       "914Solid.ttf", "ChopSic.ttf", "Digital.ttf", "FastHand.ttf",
       "Orbitron.ttf", "Pepsi.ttf", "RaceSpace.ttf", "RushDriver.ttf",
+      -- Newly added fonts
+      "KArabia.ttf", "Magicbrush.ttf", "Moog.ttf", "Techdelight.ttf",
     },
   },
   ["Movie/Game"] = {
     -- Directory renamed from Movie:Game to avoid the colon
     path  = "Interface\\AddOns\\Time\\MovieGame\\",
     fonts = {
+      -- Existing fonts
       "Deltarune.ttf", "Halo.ttf", "HarryP.ttf", "Pokemon.ttf",
       "Spongebob.ttf", "Terminator.ttf", "modernwarfare.ttf",
+      -- Newly added fonts
+      "BElschool.ttf", "Briar.ttf", "Enchant.ttf", "Fanaisie.ttf",
+      "Firstorder.ttf", "Hobbit.ttf", "Ktingw.ttf", "Lumos.ttf",
+      "Ruritania.ttf", "Sabily.ttf", "Starburst.ttf", "The Centurion .ttf",
+      "Vanilla.ttf", "Wonderland.ttf",
     },
   },
   ["Easy-to-Read"] = {
     path  = "Interface\\AddOns\\Time\\Easy-to-Read\\",
     fonts = {
+      -- Existing fonts
       "AlteHaasGroteskBold.ttf", "Expressway.ttf", "NotoSans_Condensed-Bold.ttf",
       "PTSansNarrow-Bold.ttf", "Prototype.ttf", "Roboto-Bold.ttf",
       "SF-Pro.ttf", "accidentalpres.ttf", "bignoodletitling.ttf",
       "continuum.ttf", "pf_tempesta_seven.ttf",
+      -- Newly added fonts
+      "2cute.ttf", "Acadian.ttf", "Rockybilly.ttf", "SShiny.ttf",
+      "Wmelody.ttf", "Youngserif.ttf",
     },
   },
   ["Custom"] = {
@@ -123,11 +141,21 @@ end
 local frame        = CreateFrame("Frame", "TimeFrame", UIParent)
 local FONT_FOLDER  = "Interface\\AddOns\\Time\\ClockFonts\\"
 local AVAILABLE_FONTS = {
-  "SF-Pro-Regular",
-  "Roboto",
-  "Orbitron",
-  "Monster",
+  -- Complete list of fonts found in ClockFonts
+  "Acadian",
   "Digital",
+  "Elven",
+  "Gunung",
+  "Hobbit",
+  "Kting",
+  "Ktingw",
+  "Monster",
+  "Odinson",
+  "Orbitron",
+  "Roboto",
+  "Ruritania",
+  "SF-Pro-Regular",
+  "The Centurion ",
 }
 
 -- ─── Global Defaults ───────────────────────────────────────────────────────────
