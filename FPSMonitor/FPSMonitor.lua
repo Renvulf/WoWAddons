@@ -497,13 +497,20 @@ local function CreateMinimapButton()
     minimapButton:SetScript("OnClick", function(_, btn)
         if btn == "RightButton" then
             if not optionsPanel then
+                if not IsAddOnLoaded("Blizzard_Settings") then
+                    pcall(UIParentLoadAddOn, "Blizzard_Settings")
+                end
                 local ok = pcall(CreateOptionsPanel)
                 if not ok then
                     print("FPSMonitor: failed to open options panel")
                     return
                 end
             end
-            if OpenConfigPanel then OpenConfigPanel() end
+            if OpenConfigPanel then
+                OpenConfigPanel()
+            else
+                print("FPSMonitor: configuration panel unavailable")
+            end
             return
         end
         if displayFrame and displayFrame:IsShown() then
@@ -536,6 +543,10 @@ end
 -- Configuration options panel
 local function CreateOptionsPanel()
     if optionsPanel then return end
+    -- Load Blizzard Settings to ensure UI templates are available
+    if not IsAddOnLoaded("Blizzard_Settings") then
+        pcall(UIParentLoadAddOn, "Blizzard_Settings")
+    end
     optionsPanel = CreateFrame("Frame", "FPSMonitorOptions", InterfaceOptionsFramePanelContainer or UIParent)
     optionsPanel.name = "FPS Monitor"
 
@@ -709,10 +720,16 @@ SlashCmdList["FPSMON"] = function(msg)
         return
     elseif msg == "config" then
         if not optionsPanel then
+            -- Ensure the settings UI is available before creating the panel
+            if not IsAddOnLoaded("Blizzard_Settings") then
+                pcall(UIParentLoadAddOn, "Blizzard_Settings")
+            end
             pcall(CreateOptionsPanel)
         end
         if OpenConfigPanel then
             OpenConfigPanel()
+        else
+            print("FPSMonitor: configuration panel unavailable")
         end
         return
     elseif msg == "help" then
@@ -777,6 +794,10 @@ local function OnEvent(_, event, arg1)
         sampleInterval = FPSMonitorDB.sampleInterval or sampleInterval
         updateInterval = FPSMonitorDB.updateInterval or updateInterval
         memoryUpdateInterval = FPSMonitorDB.memoryUpdateInterval or memoryUpdateInterval
+        -- Load settings UI before creating the options panel to avoid missing templates
+        if not IsAddOnLoaded("Blizzard_Settings") then
+            pcall(UIParentLoadAddOn, "Blizzard_Settings")
+        end
         pcall(CreateOptionsPanel)
         updateFrame:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_LOGIN" then
