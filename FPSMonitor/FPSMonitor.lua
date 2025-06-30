@@ -17,6 +17,26 @@ local captureDelay = 5 -- seconds to wait after loading screens before collectin
 local GetFramerate = GetFramerate
 local GetTime = GetTime
 local CreateFrame = CreateFrame
+-- Compatibility helpers for APIs that changed between client versions
+local function IsAddonLoaded(addon)
+    if type(IsAddOnLoaded) == "function" then
+        return IsAddOnLoaded(addon)
+    elseif C_AddOns and C_AddOns.IsAddOnLoaded then
+        return C_AddOns.IsAddOnLoaded(addon)
+    end
+    return false
+end
+
+local function LoadAddOnSafe(addon)
+    if type(UIParentLoadAddOn) == "function" then
+        return UIParentLoadAddOn(addon)
+    elseif type(LoadAddOn) == "function" then
+        return LoadAddOn(addon)
+    elseif C_AddOns and C_AddOns.LoadAddOn then
+        return C_AddOns.LoadAddOn(addon)
+    end
+end
+
 local math_sqrt = math.sqrt
 local math_floor = math.floor
 local math_max = math.max
@@ -497,8 +517,8 @@ local function CreateMinimapButton()
     minimapButton:SetScript("OnClick", function(_, btn)
         if btn == "RightButton" then
             if not optionsPanel then
-                if not IsAddOnLoaded("Blizzard_Settings") then
-                    pcall(UIParentLoadAddOn, "Blizzard_Settings")
+                if not IsAddonLoaded("Blizzard_Settings") then
+                    pcall(LoadAddOnSafe, "Blizzard_Settings")
                 end
                 local ok = pcall(CreateOptionsPanel)
                 if not ok then
@@ -544,8 +564,8 @@ end
 local function CreateOptionsPanel()
     if optionsPanel then return end
     -- Load Blizzard Settings to ensure UI templates are available
-    if not IsAddOnLoaded("Blizzard_Settings") then
-        pcall(UIParentLoadAddOn, "Blizzard_Settings")
+    if not IsAddonLoaded("Blizzard_Settings") then
+        pcall(LoadAddOnSafe, "Blizzard_Settings")
     end
     optionsPanel = CreateFrame("Frame", "FPSMonitorOptions", InterfaceOptionsFramePanelContainer or UIParent)
     optionsPanel.name = "FPS Monitor"
@@ -646,8 +666,8 @@ local function OpenConfigPanel()
     if not optionsPanel then return end
 
     -- Ensure the Blizzard settings UI is loaded when using the modern API.
-    if not Settings and not IsAddOnLoaded("Blizzard_Settings") then
-        pcall(UIParentLoadAddOn, "Blizzard_Settings")
+    if not Settings and not IsAddonLoaded("Blizzard_Settings") then
+        pcall(LoadAddOnSafe, "Blizzard_Settings")
     end
 
     if Settings and Settings.OpenToCategory and optionsPanel.category then
@@ -721,8 +741,8 @@ SlashCmdList["FPSMON"] = function(msg)
     elseif msg == "config" then
         if not optionsPanel then
             -- Ensure the settings UI is available before creating the panel
-            if not IsAddOnLoaded("Blizzard_Settings") then
-                pcall(UIParentLoadAddOn, "Blizzard_Settings")
+            if not IsAddonLoaded("Blizzard_Settings") then
+                pcall(LoadAddOnSafe, "Blizzard_Settings")
             end
             pcall(CreateOptionsPanel)
         end
@@ -795,8 +815,8 @@ local function OnEvent(_, event, arg1)
         updateInterval = FPSMonitorDB.updateInterval or updateInterval
         memoryUpdateInterval = FPSMonitorDB.memoryUpdateInterval or memoryUpdateInterval
         -- Load settings UI before creating the options panel to avoid missing templates
-        if not IsAddOnLoaded("Blizzard_Settings") then
-            pcall(UIParentLoadAddOn, "Blizzard_Settings")
+        if not IsAddonLoaded("Blizzard_Settings") then
+            pcall(LoadAddOnSafe, "Blizzard_Settings")
         end
         pcall(CreateOptionsPanel)
         updateFrame:UnregisterEvent("ADDON_LOADED")
