@@ -88,6 +88,7 @@ local captureStartTime
 local displayFrame
 local minimapButton
 local optionsPanel
+local updateFrame -- frame used for periodic updates; declared early so slash commands can reference it safely
 
 -- Reposition minimap button around the minimap based on stored angle
 local function UpdateMinimapButtonPosition(angle)
@@ -462,7 +463,13 @@ local function CreateMinimapButton()
     minimapButton:SetSize(32, 32)
     minimapButton:SetFrameStrata("MEDIUM")
     minimapButton:SetFrameLevel(8)
-    minimapButton:SetNormalTexture("Interface/AddOns/FPSMonitor/FPS1.tga")
+    -- Use PNG icon if supported. If the texture fails to load fall back to the
+    -- provided TGA version so the button is always visible.
+    minimapButton:SetNormalTexture("Interface/AddOns/FPSMonitor/FPS1.png")
+    local tex = minimapButton:GetNormalTexture()
+    if not tex or tex:GetTexture() == "" then
+        minimapButton:SetNormalTexture("Interface/AddOns/FPSMonitor/FPS1.tga")
+    end
     minimapButton:SetHighlightTexture("Interface/Minimap/UI-Minimap-ZoomButton-Highlight")
     UpdateMinimapButtonPosition(FPSMonitorDB.minimap.angle)
     minimapButton:RegisterForDrag("LeftButton")
@@ -632,9 +639,9 @@ local function OpenConfigPanel()
         pcall(UIParentLoadAddOn, "Blizzard_Settings")
     end
 
-    if Settings and Settings.OpenToCategory then
+    if Settings and Settings.OpenToCategory and optionsPanel.category then
         -- Dragonflight settings system
-        local ok = pcall(Settings.OpenToCategory, optionsPanel.category or optionsPanel.name or "FPS Monitor")
+        local ok = pcall(Settings.OpenToCategory, optionsPanel.category)
         if ok then return end
     end
 
@@ -642,10 +649,11 @@ local function OpenConfigPanel()
         -- Classic options system
         InterfaceOptionsFrame_OpenToCategory(optionsPanel)
         InterfaceOptionsFrame_OpenToCategory(optionsPanel) -- open twice for reliability
-    else
-        -- Fallback: show the panel directly
-        optionsPanel:Show()
+        return
     end
+
+    -- Fallback: show the panel directly
+    optionsPanel:Show()
 end
 
 
@@ -695,7 +703,9 @@ SlashCmdList["FPSMON"] = function(msg)
     elseif msg == "stats" then
         local fps = GetFramerate()
         local stats = CalculateStats(fps, fps > 0 and (1 / fps) or 0)
-        PrintStats(stats, updateFrame.currentMemory)
+        -- updateFrame may not have collected memory yet; guard with nil check
+        local mem = updateFrame and updateFrame.currentMemory
+        PrintStats(stats, mem)
         return
     elseif msg == "config" then
         if not optionsPanel then
@@ -724,7 +734,7 @@ SlashCmdList["FPSMON"] = function(msg)
 end
 
 -- Main OnUpdate handler: collect data and refresh display
-local updateFrame = CreateFrame("Frame")
+updateFrame = CreateFrame("Frame")
 updateFrame:SetScript("OnUpdate", function(self, elapsed)
     -- 'elapsed' is the time since the last OnUpdate and represents the
     -- frame's duration. It is more reliable than calculating our own
