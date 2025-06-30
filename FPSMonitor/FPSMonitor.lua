@@ -91,6 +91,21 @@ local function SetFontSafe(fs, size, flags)
     end
 end
 
+-- Labels used for the statistic display.  Keeping this table
+-- at file scope allows reusing it whenever the display is
+-- (re)initialized.
+local STAT_LABELS = {
+    "Current FPS",
+    "Average FPS",
+    "Min FPS",
+    "Max FPS",
+    "1% Low",
+    "0.1% Low",
+    "Frame Time",
+    "Jitter",
+    "AddOn Memory",
+}
+
 -- History of recent frame times. We keep samples for the last `sampleInterval`
 -- seconds using a simple ring buffer to avoid expensive table.remove calls.
 local frameHistory = {}
@@ -380,6 +395,37 @@ local function UpdateCharacterStats()
 end
 
 -- Create movable display frame
+-- Initialize or refresh the label/value pairs on the display frame
+local function InitializeLabels()
+    if not displayFrame then return end
+
+    local y = -30
+    for i, labelText in ipairs(STAT_LABELS) do
+        local label = displayFrame.labels[i]
+        if not label then
+            label = displayFrame:CreateFontString(nil, "ARTWORK")
+            displayFrame.labels[i] = label
+        end
+        label:ClearAllPoints()
+        label:SetPoint("TOPLEFT", displayFrame, "TOPLEFT", 10, y)
+        SetFontSafe(label, 12)
+        label:SetText(labelText .. ":")
+
+        local value = displayFrame.values[i]
+        if not value then
+            value = displayFrame:CreateFontString(nil, "ARTWORK")
+            value:SetJustifyH("RIGHT")
+            displayFrame.values[i] = value
+        end
+        value:ClearAllPoints()
+        value:SetPoint("TOPRIGHT", displayFrame, "TOPRIGHT", -10, y)
+        SetFontSafe(value, 12, "OUTLINE")
+
+        y = y - 16
+    end
+end
+
+-- Create movable display frame
 local function CreateDisplayFrame()
     if displayFrame then return end
     -- Use BackdropTemplate for compatibility with modern client versions
@@ -437,41 +483,19 @@ local function CreateDisplayFrame()
 
     displayFrame.labels = {}
     displayFrame.values = {}
-
-    local statsLabels = {
-        "Current FPS",
-        "Average FPS",
-        "Min FPS",
-        "Max FPS",
-        "1% Low",
-        "0.1% Low",
-        "Frame Time",
-        "Jitter",
-        "AddOn Memory",
-    }
-
-    local y = -30
-    for i, text in ipairs(statsLabels) do
-        local label = displayFrame:CreateFontString(nil, "ARTWORK")
-        label:SetPoint("TOPLEFT", displayFrame, "TOPLEFT", 10, y)
-        SetFontSafe(label, 12)
-        label:SetText(text .. ":")
-
-        local value = displayFrame:CreateFontString(nil, "ARTWORK")
-        value:SetPoint("TOPRIGHT", displayFrame, "TOPRIGHT", -10, y)
-        value:SetJustifyH("RIGHT")
-        SetFontSafe(value, 12, "OUTLINE")
-
-        displayFrame.labels[i] = label
-        displayFrame.values[i] = value
-
-        y = y - 16
-    end
+    InitializeLabels()
 
     -- Populate with initial values so text is visible immediately
     local fps = GetFramerate()
     local stats = CalculateStats(fps, fps > 0 and (1 / fps) or 0)
     UpdateDisplay(stats, updateFrame.currentMemory)
+
+    displayFrame:SetScript("OnShow", function()
+        pcall(InitializeLabels)
+        local f = GetFramerate()
+        local s = CalculateStats(f, f > 0 and (1 / f) or 0)
+        UpdateDisplay(s, updateFrame.currentMemory)
+    end)
 end
 
 -- Create simple minimap button
