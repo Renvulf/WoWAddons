@@ -1,0 +1,9 @@
+## Interface: 110105
+## Title: FPS Monitor
+## Notes: Displays advanced FPS statistics with a draggable minimap button
+## Author: Renvulf
+## Version: 1.7.0
+## SavedVariables: FPSMonitorDB
+## SavedVariablesPerCharacter: FPSPerCharDB
+## IconTexture: Interface\AddOns\FPSMonitor\FPS1.tga
+FPSMonitor.lua
