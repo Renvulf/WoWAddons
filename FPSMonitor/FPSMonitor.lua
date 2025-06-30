@@ -27,6 +27,85 @@ local function IsAddonLoaded(addon)
     return false
 end
 
+-- Slash command for graph options
+SLASH_FPSGRAPH1 = "/fpsgraph"
+SlashCmdList["FPSGRAPH"] = function(msg)
+    msg = msg and msg:lower() or ""
+    if msg == "toggle" or msg == "" then
+        FPSMonitorDB.graph.enabled = not FPSMonitorDB.graph.enabled
+        if FPSMonitorDB.graph.enabled then
+            if not graphFrame then pcall(CreateGraphFrame) end
+            if graphFrame then graphFrame:Show() end
+            print("FPSMonitor: graph enabled")
+        else
+            if graphFrame then graphFrame:Hide() end
+            print("FPSMonitor: graph disabled")
+        end
+    end
+end
+
+-- Create FPS graph frame
+local function CreateGraphFrame()
+    if graphFrame then return end
+    graphFrame = CreateFrame("Frame", "FPSMonitorGraph", UIParent, BackdropTemplateMixin and "BackdropTemplate")
+    graphFrame:SetSize(FPSMonitorDB.graph.w or 220, FPSMonitorDB.graph.h or 100)
+    local gpos = FPSMonitorDB.graph.pos or { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -10 }
+    graphFrame:SetPoint(gpos.point, UIParent, gpos.relativePoint, gpos.x, gpos.y)
+    graphFrame:SetBackdrop({ bgFile = "Interface/Tooltips/UI-Tooltip-Background", edgeFile = "Interface/Tooltips/UI-Tooltip-Border", edgeSize = 8 })
+    graphFrame:SetBackdropColor(0, 0, 0, 0.4)
+    graphFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
+    graphFrame:EnableMouse(true)
+    graphFrame:SetMovable(true)
+    graphFrame:SetResizable(true)
+    graphFrame:SetMinResize(120, 60)
+    graphFrame:SetClampedToScreen(true)
+    graphFrame:RegisterForDrag("LeftButton")
+    graphFrame:SetScript("OnDragStart", graphFrame.StartMoving)
+    graphFrame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, rp, x, y = self:GetPoint()
+        FPSMonitorDB.graph.pos = { point = point, relativePoint = rp, x = x, y = y }
+        FPSMonitorDB.graph.w = self:GetWidth()
+        FPSMonitorDB.graph.h = self:GetHeight()
+    end)
+    -- Resizer handle
+    local sizer = CreateFrame("Frame", nil, graphFrame)
+    sizer:SetSize(16, 16)
+    sizer:SetPoint("BOTTOMRIGHT")
+    sizer:EnableMouse(true)
+    sizer:SetScript("OnMouseDown", function() graphFrame:StartSizing("BOTTOMRIGHT") end)
+    sizer:SetScript("OnMouseUp", function()
+        graphFrame:StopMovingOrSizing()
+        local point, _, rp, x, y = graphFrame:GetPoint()
+        FPSMonitorDB.graph.pos = { point = point, relativePoint = rp, x = x, y = y }
+        FPSMonitorDB.graph.w = graphFrame:GetWidth()
+        FPSMonitorDB.graph.h = graphFrame:GetHeight()
+    end)
+    sizer:SetCursor("SizeNWSE")
+    graphFrame.sizer = sizer
+
+    graphFrame.title = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    graphFrame.title:SetPoint("TOPLEFT", 4, -4)
+    SetFontSafe(graphFrame.title, 12, "OUTLINE")
+    graphFrame.title:SetText("FPS Graph")
+
+    -- Pre-create line objects for reuse
+    for i = 1, graphMaxSamples - 1 do
+        graphLines[i] = graphFrame:CreateLine(nil, "ARTWORK")
+    end
+
+    for i = 1, 3 do
+        graphGrid[i] = graphFrame:CreateLine(nil, "BACKGROUND")
+        graphLabels[i] = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        SetFontSafe(graphLabels[i], 10)
+    end
+    graphGrid.now = graphFrame:CreateLine(nil, "BACKGROUND")
+
+    if not FPSMonitorDB.graph.enabled then
+        graphFrame:Hide()
+    end
+end
+
 local function LoadAddOnSafe(addon)
     if type(UIParentLoadAddOn) == "function" then
         return UIParentLoadAddOn(addon)
@@ -74,6 +153,12 @@ local defaultConfig = {
     updateInterval = 0.5,
     sampleInterval = 60,
     memoryUpdateInterval = 5,
+    graph = {
+        enabled = true,
+        w = 220,
+        h = 100,
+        pos = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -10 },
+    },
 }
 
 -- Default font used for the display. If the custom font fails to load we fall
@@ -124,6 +209,16 @@ local displayFrame
 local minimapButton
 local optionsPanel
 local updateFrame -- frame used for periodic updates; declared early so slash commands can reference it safely
+local graphFrame
+local graphLines = {}
+local graphGrid = {}
+local graphLabels = {}
+local graphHistory = {}
+local graphIndex = 1
+local graphCount = 0
+local graphMaxSamples = 200
+local graphUpdateThrottle = 0.05
+local graphElapsed = 0
 
 -- Reposition minimap button around the minimap based on stored angle
 local function UpdateMinimapButtonPosition(angle)
@@ -204,6 +299,28 @@ local function ValidateConfig()
     if type(FPSMonitorDB.memoryUpdateInterval) ~= "number" or FPSMonitorDB.memoryUpdateInterval <= 0 then
         FPSMonitorDB.memoryUpdateInterval = defaultConfig.memoryUpdateInterval
     end
+    if type(FPSMonitorDB.graph) ~= "table" then
+        FPSMonitorDB.graph = CopyTable(defaultConfig.graph)
+    else
+        if type(FPSMonitorDB.graph.enabled) ~= "boolean" then
+            FPSMonitorDB.graph.enabled = defaultConfig.graph.enabled
+        end
+        if type(FPSMonitorDB.graph.w) ~= "number" then
+            FPSMonitorDB.graph.w = defaultConfig.graph.w
+        end
+        if type(FPSMonitorDB.graph.h) ~= "number" then
+            FPSMonitorDB.graph.h = defaultConfig.graph.h
+        end
+        if type(FPSMonitorDB.graph.pos) ~= "table" then
+            FPSMonitorDB.graph.pos = CopyTable(defaultConfig.graph.pos)
+        else
+            local g = FPSMonitorDB.graph.pos
+            if type(g.point) ~= "string" then g.point = defaultConfig.graph.pos.point end
+            if type(g.relativePoint) ~= "string" then g.relativePoint = defaultConfig.graph.pos.relativePoint end
+            if type(g.x) ~= "number" then g.x = defaultConfig.graph.pos.x end
+            if type(g.y) ~= "number" then g.y = defaultConfig.graph.pos.y end
+        end
+    end
 end
 
 -- Insert a value into a sorted array while keeping its size limited. Used by
@@ -271,6 +388,12 @@ local function AddSample(dt)
         if fps < sessionMinFPS then sessionMinFPS = fps end
         if fps > sessionMaxFPS then sessionMaxFPS = fps end
     end
+
+    -- Track samples for the FPS graph
+    graphHistory[graphIndex] = fps
+    graphIndex = graphIndex + 1
+    if graphIndex > graphMaxSamples then graphIndex = 1 end
+    if graphCount < graphMaxSamples then graphCount = graphCount + 1 end
 end
 
 -- Compute stats from history
@@ -369,6 +492,91 @@ local function UpdateDisplay(stats, memory)
         if displayFrame.values[i] then
             displayFrame.values[i]:SetText(values[i])
         end
+    end
+end
+
+-- Draw the scrolling FPS graph
+local function UpdateGraph()
+    if not graphFrame or not graphFrame:IsShown() or graphCount < 2 then return end
+
+    local width = graphFrame:GetWidth() - 4
+    local height = graphFrame:GetHeight() - 20
+    if width <= 0 or height <= 0 then return end
+
+    local minFPS, maxFPS = math.huge, 0
+    for i = 1, graphCount do
+        local idx = (graphIndex - graphCount + i - 1) % graphMaxSamples + 1
+        local fps = graphHistory[idx]
+        if fps < minFPS then minFPS = fps end
+        if fps > maxFPS then maxFPS = fps end
+    end
+    if maxFPS == minFPS then maxFPS = minFPS + 1 end
+    local range = maxFPS - minFPS
+
+    local stepX = width / (graphMaxSamples - 1)
+    local prevX, prevY
+    for i = 1, graphCount do
+        local idx = (graphIndex - graphCount + i - 1) % graphMaxSamples + 1
+        local fps = graphHistory[idx]
+        local x = (i - 1) * stepX + 2
+        local y = ((fps - minFPS) / range) * height + 2
+        if prevX then
+            local line = graphLines[i - 1]
+            if line then
+                line:SetStartPoint("BOTTOMLEFT", prevX, prevY)
+                line:SetEndPoint("BOTTOMLEFT", x, y)
+            end
+        end
+        prevX, prevY = x, y
+    end
+
+    -- Hide unused lines
+    for i = graphCount, graphMaxSamples - 1 do
+        if graphLines[i] then graphLines[i]:Hide() end
+    end
+
+    local colorR, colorG, colorB = 0, 1, 0
+    local lastFPS = graphHistory[(graphIndex - 1 - 1) % graphMaxSamples + 1]
+    if lastFPS < 15 then
+        colorR, colorG, colorB = 1, 0, 0
+    elseif lastFPS < 30 then
+        colorR, colorG, colorB = 1, 0.5, 0
+    end
+    for i = 1, graphCount - 1 do
+        local line = graphLines[i]
+        if line then
+            line:SetColorTexture(colorR, colorG, colorB, 1)
+            line:SetThickness(1.5)
+            line:Show()
+        end
+    end
+
+    -- Grid lines and labels
+    for i = 1, 3 do
+        local frac = i * 0.25
+        local y = frac * height + 2
+        local line = graphGrid[i]
+        if line then
+            line:SetStartPoint("BOTTOMLEFT", 2, y)
+            line:SetEndPoint("BOTTOMRIGHT", -2, y)
+            line:SetColorTexture(0.5, 0.5, 0.5, 0.4)
+            line:SetThickness(1)
+            line:Show()
+        end
+        local label = graphLabels[i]
+        if label then
+            label:SetPoint("BOTTOMLEFT", graphFrame, "BOTTOMLEFT", 4, y)
+            label:SetText(string.format("%.0f", minFPS + frac * range))
+            label:Show()
+        end
+    end
+
+    if graphGrid.now then
+        graphGrid.now:SetStartPoint("BOTTOMRIGHT", -2, 2)
+        graphGrid.now:SetEndPoint("TOPRIGHT", -2, height + 2)
+        graphGrid.now:SetColorTexture(0.5, 0.5, 0.5, 0.4)
+        graphGrid.now:SetThickness(1)
+        graphGrid.now:Show()
     end
 end
 
@@ -676,6 +884,21 @@ local function CreateOptionsPanel()
     memorySlider:SetValue(memoryUpdateInterval)
     memorySlider.text:SetText("Memory update: " .. memoryUpdateInterval .. "s")
 
+    local graphCheck = CreateFrame("CheckButton", nil, optionsPanel, "InterfaceOptionsCheckButtonTemplate")
+    graphCheck:SetPoint("TOPLEFT", memorySlider, "BOTTOMLEFT", 0, -30)
+    graphCheck.Text:SetText("Enable FPS graph")
+    graphCheck:SetChecked(FPSMonitorDB.graph.enabled)
+    graphCheck:SetScript("OnClick", function(self)
+        local show = self:GetChecked()
+        FPSMonitorDB.graph.enabled = show
+        if show then
+            if not graphFrame then CreateGraphFrame() end
+            graphFrame:Show()
+        elseif graphFrame then
+            graphFrame:Hide()
+        end
+    end)
+
     -- Register the options panel with whichever API is available
     if Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory then
         optionsPanel.category = Settings.RegisterCanvasLayoutCategory(optionsPanel, optionsPanel.name)
@@ -783,6 +1006,7 @@ SlashCmdList["FPSMON"] = function(msg)
         print("/fpsmon config - open configuration (or right-click minimap icon)")
         print("/fpsmon reset - reset session statistics")
         print("/fpsmon resetall - reset all statistics")
+        print("/fpsgraph toggle - toggle FPS graph")
         return
     end
 
@@ -809,6 +1033,15 @@ updateFrame:SetScript("OnUpdate", function(self, elapsed)
 
     if capturing then
         AddSample(elapsed)
+    end
+
+    -- Throttled graph updates
+    if FPSMonitorDB.graph.enabled then
+        graphElapsed = graphElapsed + elapsed
+        if graphElapsed >= graphUpdateThrottle then
+            graphElapsed = 0
+            UpdateGraph()
+        end
     end
 
     self.memT = (self.memT or 0) + elapsed
@@ -843,10 +1076,16 @@ local function OnEvent(_, event, arg1)
             pcall(LoadAddOnSafe, "Blizzard_Settings")
         end
         pcall(CreateOptionsPanel)
+        if FPSMonitorDB.graph.enabled then
+            pcall(CreateGraphFrame)
+        end
         updateFrame:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_LOGIN" then
         if not FPSMonitorDB.minimap.hide then
             pcall(CreateMinimapButton)
+        end
+        if FPSMonitorDB.graph.enabled and not graphFrame then
+            pcall(CreateGraphFrame)
         end
     elseif event == "PLAYER_ENTERING_WORLD" then
         -- Delay sample collection for a short period to avoid skewing
