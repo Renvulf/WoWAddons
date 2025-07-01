@@ -205,18 +205,20 @@ function CreateGraphFrame()
     }
 
     graphFrame.metricChecks = {}
+    local labelInset = 60 -- distance from the right edge
     for i, info in ipairs(metricInfo) do
         -- Use UICheckButtonTemplate for retail clients
         local chk = CreateFrame("CheckButton", nil, graphFrame, "UICheckButtonTemplate")
         chk:SetSize(20, 20)
-        chk:SetPoint("TOPRIGHT", -4, -16 * i - 4)
+        -- Anchor checkbox slightly inside the frame so it isn't clipped
+        chk:SetPoint("TOPRIGHT", graphFrame, "TOPRIGHT", -labelInset, -16 * i - 4)
         -- Hide the built-in label to avoid clipping
         if chk.Text then chk.Text:Hide() end
 
-        -- Full width label next to the checkbox
+        -- Label aligned to the frame's right edge
         local lbl = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        lbl:SetPoint("LEFT", chk, "RIGHT", 4, 0)
-        lbl:SetJustifyH("LEFT")
+        lbl:SetPoint("TOPRIGHT", graphFrame, "TOPRIGHT", -4, -16 * i - 4)
+        lbl:SetJustifyH("RIGHT")
         lbl:SetText(info.label)
         lbl:SetTextColor(unpack(info.color))
 
@@ -1333,6 +1335,21 @@ local function OnEvent(_, event, arg1)
         -- Validate saved variables on startup. This also merges any new
         -- defaults that may have been added between versions.
         ValidateConfig()
+        -- Seed graph history with initial values to avoid extreme spikes
+        do
+            local initialFPS = GetFramerate() or 0
+            local initialFrameTime = initialFPS > 0 and (1000 / initialFPS) or 0
+            local _, _, homeLat, worldLat = GetNetStats()
+            local initLatency = (homeLat and worldLat) and ((homeLat + worldLat) / 2) or 0
+            for i = 1, graphMaxSamples do
+                graphHistory.frameTime[i] = initialFrameTime
+                graphHistory.fps[i] = initialFPS
+                graphHistory.memory[i] = updateFrame and updateFrame.currentMemory or 0
+                graphHistory.latency[i] = initLatency
+            end
+            graphCount = graphMaxSamples
+            graphIndex = 1
+        end
         sampleInterval = FPSMonitorDB.sampleInterval or sampleInterval
         updateInterval = FPSMonitorDB.updateInterval or updateInterval
         memoryUpdateInterval = FPSMonitorDB.memoryUpdateInterval or memoryUpdateInterval
