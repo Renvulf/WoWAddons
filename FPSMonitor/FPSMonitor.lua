@@ -34,7 +34,7 @@ SlashCmdList["FPSGRAPH"] = function(msg)
     if msg == "toggle" or msg == "" then
         FPSMonitorDB.graph.enabled = not FPSMonitorDB.graph.enabled
         if FPSMonitorDB.graph.enabled then
-            if not graphFrame then pcall(CreateGraphFrame) end
+            if not graphFrame then CreateGraphFrame() end
             if graphFrame then graphFrame:Show() end
             print("FPSMonitor: graph enabled")
         else
@@ -1060,16 +1060,15 @@ local function OnEvent(_, event, arg1)
         memoryUpdateInterval = FPSMonitorDB.memoryUpdateInterval or memoryUpdateInterval
         -- Initialize configuration panel and graph frame
         pcall(CreateOptionsPanel)
-        if FPSMonitorDB.graph.enabled then
-            pcall(CreateGraphFrame)
-        end
+        -- Ensure the graph enabled flag defaults to true on first run
+        FPSMonitorDB.graph.enabled = FPSMonitorDB.graph.enabled == nil and true or FPSMonitorDB.graph.enabled
         updateFrame:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_LOGIN" then
         if not FPSMonitorDB.minimap.hide then
             pcall(CreateMinimapButton)
         end
         if FPSMonitorDB.graph.enabled and not graphFrame then
-            pcall(CreateGraphFrame)
+            CreateGraphFrame()
         end
     elseif event == "PLAYER_ENTERING_WORLD" then
         -- Delay sample collection for a short period to avoid skewing
