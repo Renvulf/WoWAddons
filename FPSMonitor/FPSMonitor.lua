@@ -83,10 +83,20 @@ SlashCmdList["FPSGRAPH"] = function(msg)
         FPSMonitorDB.graph.enabled = not FPSMonitorDB.graph.enabled
         if FPSMonitorDB.graph.enabled then
             if not graphFrame then CreateGraphFrame() end
-            if graphFrame then graphFrame:Show() end
+            if graphFrame then
+                graphFrame:Show()
+                if graphFrame.masterCheck then
+                    graphFrame.masterCheck:SetChecked(true)
+                end
+            end
             print("FPSMonitor: graph enabled")
         else
-            if graphFrame then graphFrame:Hide() end
+            if graphFrame then
+                graphFrame:Hide()
+                if graphFrame.masterCheck then
+                    graphFrame.masterCheck:SetChecked(false)
+                end
+            end
             print("FPSMonitor: graph disabled")
         end
     elseif msg == "help" then
@@ -196,8 +206,41 @@ function CreateGraphFrame()
     graphGrid.now = graphFrame:CreateLine(nil, "BACKGROUND")
     graphFrame.legend = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     SetFontSafe(graphFrame.legend, 10)
-    graphFrame.legend:SetPoint("TOPRIGHT", -4, -4)
+    graphFrame.legend:SetPoint("TOPLEFT", 100, -4)
     graphFrame.legend:SetText("FPS (G) | ms (B) | Mem (M) | Lat (Y)")
+
+    -- Master checkbox to quickly toggle the graph
+    local master = CreateFrame("CheckButton", nil, graphFrame, "InterfaceOptionsCheckButtonTemplate")
+    master:SetPoint("TOPLEFT", 4, -4)
+    master.Text:SetText("Enable Graph")
+    master:SetChecked(FPSMonitorDB.graph.enabled)
+    master:SetScript("OnClick", function(self)
+        FPSMonitorDB.graph.enabled = self:GetChecked()
+        graphFrame:SetShown(FPSMonitorDB.graph.enabled)
+    end)
+    graphFrame.masterCheck = master
+
+    -- Per-metric checkboxes aligned along the right edge
+    local metricInfo = {
+        { key = "showFPS",       label = "FPS",        color = {0,1,0} },
+        { key = "showFrameTime", label = "Frame Time", color = {0,0.75,1} },
+        { key = "showMemory",    label = "Memory",     color = {1,0,1} },
+        { key = "showLatency",   label = "Latency",    color = {1,1,0} },
+    }
+
+    graphFrame.metricChecks = {}
+    for i, info in ipairs(metricInfo) do
+        local chk = CreateFrame("CheckButton", nil, graphFrame, "InterfaceOptionsCheckButtonTemplate")
+        chk:SetPoint("TOPRIGHT", -4, -16 * i - 4)
+        chk.Text:SetText(info.label)
+        chk.Text:SetTextColor(info.color[1], info.color[2], info.color[3])
+        chk:SetChecked(FPSMonitorDB.graph[info.key])
+        chk:SetScript("OnClick", function(self)
+            FPSMonitorDB.graph[info.key] = self:GetChecked()
+            UpdateGraph()
+        end)
+        graphFrame.metricChecks[i] = chk
+    end
 
     graphFrame:SetScript("OnEnter", function(self)
         local idx = (graphIndex - 1 - 1) % graphMaxSamples + 1
@@ -266,6 +309,10 @@ local defaultConfig = {
         h = 100,
         timeWindow = 60,
         pos = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -10 },
+        showFPS = true,
+        showFrameTime = true,
+        showMemory = true,
+        showLatency = true,
     },
 }
 -- Labels used for the statistic display.  Keeping this table
@@ -404,6 +451,18 @@ local function ValidateConfig()
             if type(g.relativePoint) ~= "string" then g.relativePoint = defaultConfig.graph.pos.relativePoint end
             if type(g.x) ~= "number" then g.x = defaultConfig.graph.pos.x end
             if type(g.y) ~= "number" then g.y = defaultConfig.graph.pos.y end
+        end
+        if type(FPSMonitorDB.graph.showFPS) ~= "boolean" then
+            FPSMonitorDB.graph.showFPS = defaultConfig.graph.showFPS
+        end
+        if type(FPSMonitorDB.graph.showFrameTime) ~= "boolean" then
+            FPSMonitorDB.graph.showFrameTime = defaultConfig.graph.showFrameTime
+        end
+        if type(FPSMonitorDB.graph.showMemory) ~= "boolean" then
+            FPSMonitorDB.graph.showMemory = defaultConfig.graph.showMemory
+        end
+        if type(FPSMonitorDB.graph.showLatency) ~= "boolean" then
+            FPSMonitorDB.graph.showLatency = defaultConfig.graph.showLatency
         end
     end
 
@@ -590,7 +649,7 @@ end
 local function UpdateGraph()
     if not graphFrame or not graphFrame:IsShown() or graphCount < 2 then return end
 
-    local width, height = graphFrame:GetWidth() - 4, graphFrame:GetHeight() - 20
+    local width, height = graphFrame:GetWidth() - 68, graphFrame:GetHeight() - 20
     if width <= 0 or height <= 0 then return end
 
     local sampleCount = graphCount < graphMaxSamples and graphCount or graphMaxSamples
@@ -599,11 +658,34 @@ local function UpdateGraph()
     local stepX = (width - 4) / (sampleCount - 1)
 
     local metrics = {
-        { data = graphHistory.fps,     lines = graphLines.fps,     color = {0,1,0},   thick = 1.5 },
-        { data = graphHistory.frameTime, lines = graphLines.frameTime, color = {0,0.75,1}, thick = 1.5 },
-        { data = graphHistory.memory,  lines = graphLines.memory,  color = {1,0,1},   thick = 1 },
-        { data = graphHistory.latency, lines = graphLines.latency, color = {1,1,0},   thick = 1 },
+        { data = graphHistory.fps,       lines = graphLines.fps,       color = {0,1,0},     thick = 1.5, flag = FPSMonitorDB.graph.showFPS },
+        { data = graphHistory.frameTime, lines = graphLines.frameTime, color = {0,0.75,1}, thick = 1.5, flag = FPSMonitorDB.graph.showFrameTime },
+        { data = graphHistory.memory,    lines = graphLines.memory,    color = {1,0,1},   thick = 1,   flag = FPSMonitorDB.graph.showMemory },
+        { data = graphHistory.latency,   lines = graphLines.latency,   color = {1,1,0},   thick = 1,   flag = FPSMonitorDB.graph.showLatency },
     }
+
+    local enabledMetrics = {}
+    for _, m in ipairs(metrics) do
+        if m.flag then
+            table.insert(enabledMetrics, m)
+        else
+            -- hide any previously drawn lines when disabled
+            for i = 1, graphMaxSamples - 1 do
+                if m.lines[i] then m.lines[i]:Hide() end
+            end
+        end
+    end
+    metrics = enabledMetrics
+
+    -- Update legend text based on enabled series
+    if graphFrame.legend then
+        local legendParts = {}
+        if FPSMonitorDB.graph.showFPS then table.insert(legendParts, "FPS (G)") end
+        if FPSMonitorDB.graph.showFrameTime then table.insert(legendParts, "ms (B)") end
+        if FPSMonitorDB.graph.showMemory then table.insert(legendParts, "Mem (M)") end
+        if FPSMonitorDB.graph.showLatency then table.insert(legendParts, "Lat (Y)") end
+        graphFrame.legend:SetText(table.concat(legendParts, " | "))
+    end
 
     local minFPS, maxFPS = math.huge, -math.huge
     for i = 1, sampleCount do
@@ -1063,10 +1145,34 @@ local function CreateOptionsPanel()
         FPSMonitorDB.graph.enabled = self:GetChecked()
         if graphFrame then
             graphFrame:SetShown(FPSMonitorDB.graph.enabled)
+            if graphFrame.masterCheck then
+                graphFrame.masterCheck:SetChecked(FPSMonitorDB.graph.enabled)
+            end
         elseif FPSMonitorDB.graph.enabled then
             CreateGraphFrame()
         end
     end)
+
+    -- Per-metric visibility checkboxes
+    local metricChecks = {
+        { key = "showFPS", label = "Show FPS" },
+        { key = "showFrameTime", label = "Show Frame Time" },
+        { key = "showMemory", label = "Show Memory" },
+        { key = "showLatency", label = "Show Latency" },
+    }
+
+    local prev = graphCheck
+    for i, info in ipairs(metricChecks) do
+        local chk = CreateFrame("CheckButton", nil, optionsPanel.general, "InterfaceOptionsCheckButtonTemplate")
+        chk:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 20, i == 1 and -8 or -4)
+        chk.Text:SetText(info.label)
+        chk:SetChecked(FPSMonitorDB.graph[info.key])
+        chk:SetScript("OnClick", function(self)
+            FPSMonitorDB.graph[info.key] = self:GetChecked()
+            UpdateGraph()
+        end)
+        prev = chk
+    end
 
     -- Register the options panel with whichever API is available
     if Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory then
