@@ -323,7 +323,8 @@ function CreateGraphFrame()
     graphFrame.legend:SetText("FPS (G) | ms (B) | Jit (R) | Mem MB (M) | Lat ms (Y)")
 
 
-    -- Per-metric checkboxes aligned along the right edge
+    -- Per-metric checkboxes aligned along the right edge.
+    -- These controls were not removed; they let the user toggle each metric.
     local metricInfo = {
         { key = "showFPS",         label = "FPS",          color = {0,1,0} },
         { key = "showFrameTime",   label = "Frame Time",   color = {0,0.75,1} },
@@ -827,36 +828,34 @@ local function AddSample(dt)
     -- accurate instantaneous value for this purpose.
     local fps = GetFramerate()
     if not fps or fps <= 0 then return end
-    local memUsage = updateFrame and updateFrame.currentMemory or 0
-    local totalAddOn, luaMem, cpuUsage
+    -- Always gather memory and CPU stats regardless of graph visibility so the
+    -- display shows up-to-date values even when the graph is hidden.
+    local memUsage   = updateFrame and updateFrame.currentMemory or 0
+    local totalAddOn = updateFrame and updateFrame.currentTotalMem or 0
+    local luaMem     = updateFrame and updateFrame.currentLuaMem or 0
+    local cpuUsage   = updateFrame and updateFrame.currentCPU or 0
     local bandwidthIn, bandwidthOut, homeLat, worldLat = GetNetStats()
-    if graphFrame and graphFrame:IsShown() then
-        local now = GetTime()
-        if now - lastMemUpdate >= memInterval then
-            lastMemUpdate = now
-            if UpdateAddOnMemoryUsage then UpdateAddOnMemoryUsage() end
-            if UpdateAddOnCPUUsage then UpdateAddOnCPUUsage() end
-            memUsage = GetAddOnMemoryUsage(addonName) / 1024
-            cpuUsage = GetAddOnCPUUsage(addonName) or 0
-            local total = 0
-            for i = 1, GetNumAddOns() do
-                if IsAddOnLoaded(i) then
-                    total = total + GetAddOnMemoryUsage(i)
-                end
+
+    local now = GetTime()
+    if now - lastMemUpdate >= memInterval then
+        lastMemUpdate = now
+        if UpdateAddOnMemoryUsage then UpdateAddOnMemoryUsage() end
+        if UpdateAddOnCPUUsage    then UpdateAddOnCPUUsage()    end
+        memUsage = GetAddOnMemoryUsage(addonName) / 1024
+        cpuUsage = GetAddOnCPUUsage(addonName) or 0
+        local total = 0
+        for i = 1, GetNumAddOns() do
+            if IsAddOnLoaded(i) then
+                total = total + GetAddOnMemoryUsage(i)
             end
-            totalAddOn = total / 1024
-            luaMem = collectgarbage("count") / 1024
-            if updateFrame then
-                updateFrame.currentMemory = memUsage
-                updateFrame.currentTotalMem = totalAddOn
-                updateFrame.currentLuaMem = luaMem
-                updateFrame.currentCPU = cpuUsage
-            end
-        else
-            memUsage = updateFrame and updateFrame.currentMemory or memUsage
-            totalAddOn = updateFrame and updateFrame.currentTotalMem or totalAddOn
-            luaMem = updateFrame and updateFrame.currentLuaMem or luaMem
-            cpuUsage = updateFrame and updateFrame.currentCPU or cpuUsage
+        end
+        totalAddOn = total / 1024
+        luaMem     = collectgarbage("count") / 1024
+        if updateFrame then
+            updateFrame.currentMemory   = memUsage
+            updateFrame.currentTotalMem = totalAddOn
+            updateFrame.currentLuaMem   = luaMem
+            updateFrame.currentCPU      = cpuUsage
         end
     end
 
