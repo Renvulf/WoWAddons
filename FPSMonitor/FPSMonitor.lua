@@ -192,25 +192,6 @@ function CreateGraphFrame()
         end
     end
 
-    if FPSMonitorDB.graph.showPercentiles and graphGrid.p1 and graphGrid.p01 then
-        local fps = GetFramerate()
-        local stats = CalculateStats(fps, fps > 0 and (1 / fps) or 0)
-        local y1 = ((stats.low1 - minFPS) / fpsRange) * height + 2
-        local y01 = ((stats.low01 - minFPS) / fpsRange) * height + 2
-        graphGrid.p1:SetStartPoint("BOTTOMLEFT", 2, y1)
-        graphGrid.p1:SetEndPoint("BOTTOMRIGHT", -2, y1)
-        graphGrid.p1:SetColorTexture(1, 0, 0, 0.6)
-        graphGrid.p1:SetThickness(1)
-        graphGrid.p1:Show()
-        graphGrid.p01:SetStartPoint("BOTTOMLEFT", 2, y01)
-        graphGrid.p01:SetEndPoint("BOTTOMRIGHT", -2, y01)
-        graphGrid.p01:SetColorTexture(1, 0.5, 0, 0.6)
-        graphGrid.p01:SetThickness(1)
-        graphGrid.p01:Show()
-    else
-        if graphGrid.p1 then graphGrid.p1:Hide() end
-        if graphGrid.p01 then graphGrid.p01:Hide() end
-    end
 
     for i = 1, 3 do
         graphGrid.h[i] = graphFrame:CreateLine(nil, "BACKGROUND")
@@ -225,8 +206,16 @@ function CreateGraphFrame()
     end
 
     graphGrid.now = graphFrame:CreateLine(nil, "BACKGROUND")
-    graphGrid.p1 = graphFrame:CreateLine(nil, "OVERLAY")
+    graphGrid.p1  = graphFrame:CreateLine(nil, "OVERLAY")
     graphGrid.p01 = graphFrame:CreateLine(nil, "OVERLAY")
+    if FPSMonitorDB.graph.showPercentiles then
+        graphGrid.p1:SetColorTexture(1,0,0,0.6)
+        graphGrid.p1:SetThickness(1)
+        graphGrid.p01:SetColorTexture(1,0.5,0,0.6)
+        graphGrid.p01:SetThickness(1)
+        graphGrid.p1:Show()
+        graphGrid.p01:Show()
+    end
     graphFrame.legend = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     SetFontSafe(graphFrame.legend, 10)
     graphFrame.legend:SetPoint("TOPLEFT", 100, -4)
@@ -298,6 +287,25 @@ function CreateGraphFrame()
         GameTooltip:Show()
     end)
     graphFrame:SetScript("OnLeave", GameTooltip_Hide)
+    graphFrame:SetScript("OnMouseMove", function(self, x, y)
+        local width = self:GetWidth() - 68
+        local sampleCount = math.min(graphCount, graphMaxSamples)
+        local i = math.floor(((x - 2) / width) * (sampleCount - 1)) + 1
+        if i < 1 or i > sampleCount then return end
+        local idx = ((graphIndex - sampleCount - 1) % graphMaxSamples) + i
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+        GameTooltip:ClearLines()
+        GameTooltip:SetText(string.format("t = -%ds", graphTimeWindow - (i-1)*(graphTimeWindow/(sampleCount-1))))
+        GameTooltip:AddLine(string.format("FPS: %.1f", graphHistory.fps[idx]))
+        GameTooltip:AddLine(string.format("ms:  %.2f", graphHistory.frameTime[idx]))
+        GameTooltip:AddLine(string.format("Mem: %.2f MB", graphHistory.memory[idx]/1024))
+        GameTooltip:AddLine(string.format("Lat: %.0f / %.0f / %.0f",
+            graphHistory.latency[idx],
+            graphHistory.homeLatency[idx],
+            graphHistory.worldLatency[idx]
+        ))
+        GameTooltip:Show()
+    end)
 
     graphFrame:SetShown(FPSMonitorDB.graph.enabled)
 end
@@ -594,9 +602,9 @@ local function AddSample(dt)
     graphHistory.fps[graphIndex] = fps
     graphHistory.frameTime[graphIndex] = dt * 1000
 
-    graphHistory.memory[graphIndex] = updateFrame and updateFrame.currentMemory
-        or graphHistory.memory[(graphIndex - 2) % graphMaxSamples + 1]
-        or 0
+    local mem = updateFrame and updateFrame.currentMemory
+        or (GetAddOnMemoryUsage and GetAddOnMemoryUsage(addonName)) or 0
+    graphHistory.memory[graphIndex] = mem
 
     local _, _, homeLatency, worldLatency = GetNetStats()
     local lat = (homeLatency and worldLatency) and ((homeLatency + worldLatency) / 2) or nil
@@ -746,6 +754,13 @@ function UpdateGraph()
         end
     end
     metrics = enabledMetrics
+    -- ▸ if the user has unchecked _all_ series, bail out early
+    if #metrics == 0 then
+        if graphFrame.legend then
+            graphFrame.legend:SetText("no metrics selected")
+        end
+        return
+    end
 
     -- Update legend text based on enabled series
     if graphFrame.legend then
@@ -791,6 +806,21 @@ function UpdateGraph()
     if graphYMax ~= nil then maxFPS = graphYMax end
     if maxFPS == minFPS then maxFPS = minFPS + 1 end
     local fpsRange = maxFPS - minFPS
+    if FPSMonitorDB.graph.showPercentiles and graphGrid.p1 and graphGrid.p01 then
+        local fps = GetFramerate()
+        local stats = CalculateStats(fps, fps > 0 and (1 / fps) or 0)
+        local y1  = ((stats.low1 - minFPS) / fpsRange) * height + 2
+        local y01 = ((stats.low01 - minFPS) / fpsRange) * height + 2
+        graphGrid.p1:SetStartPoint("BOTTOMLEFT", 2, y1)
+        graphGrid.p1:SetEndPoint("BOTTOMRIGHT", -2, y1)
+        graphGrid.p1:Show()
+        graphGrid.p01:SetStartPoint("BOTTOMLEFT", 2, y01)
+        graphGrid.p01:SetEndPoint("BOTTOMRIGHT", -2, y01)
+        graphGrid.p01:Show()
+    else
+        if graphGrid.p1 then graphGrid.p1:Hide() end
+        if graphGrid.p01 then graphGrid.p01:Hide() end
+    end
 
     for _, m in ipairs(metrics) do
         local minVal, maxVal = math.huge, -math.huge
@@ -865,9 +895,10 @@ function UpdateGraph()
         end
         local label = graphLabels.v[i+1]
         if label then
-            local timeLabel = -graphTimeWindow + (graphTimeWindow/4)*i
+            local interval = graphTimeWindow / 4
+            local t = interval * (4 - i)
             label:SetPoint("BOTTOMLEFT", graphFrame, "BOTTOMLEFT", x-6, -10)
-            label:SetText(string.format("%ds", timeLabel))
+            label:SetText(string.format("%ds", t))
             label:Show()
         end
     end
@@ -878,6 +909,16 @@ function UpdateGraph()
         graphGrid.now:SetColorTexture(0.5, 0.5, 0.5, 0.4)
         graphGrid.now:SetThickness(1)
         graphGrid.now:Show()
+    end
+
+    local thresh = FPSMonitorDB.graph.alertThreshold or 0
+    if thresh > 0 then
+        local y = ((thresh - minFPS) / (maxFPS - minFPS)) * height + 2
+        local line = graphFrame:CreateLine(nil, "OVERLAY")
+        line:SetStartPoint("BOTTOMLEFT", 2, y)
+        line:SetEndPoint("BOTTOMRIGHT", -2, y)
+        line:SetColorTexture(1,0,0,0.6)
+        line:SetThickness(1)
     end
 end
 
