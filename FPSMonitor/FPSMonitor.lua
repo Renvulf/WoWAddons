@@ -191,7 +191,8 @@ end
 function CreateGraphFrame()
     if graphFrame then return end
     graphFrame = CreateFrame("Frame", "FPSMonitorGraph", displayFrame or UIParent, "BackdropTemplate")
-    graphFrame:SetSize(FPSMonitorDB.graph.w or 220, FPSMonitorDB.graph.h or 100)
+    -- Set initial size with additional width for metric checkboxes
+    graphFrame:SetSize(FPSMonitorDB.graph.w or 300, FPSMonitorDB.graph.h or 100)
     local gpos = FPSMonitorDB.graph.pos or { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -4 }
     if displayFrame then
         graphFrame:SetPoint("TOPLEFT", displayFrame, "BOTTOMLEFT", gpos.x, gpos.y)
@@ -221,9 +222,9 @@ function CreateGraphFrame()
             UpdateGraph()
         end
     end)
-    -- Ensure lines are clipped within the frame bounds
+    -- Allow checkboxes and axis labels to draw outside the graph
     if graphFrame.SetClipsChildren then
-        graphFrame:SetClipsChildren(true)
+        graphFrame:SetClipsChildren(false)
     end
     graphFrame:RegisterForDrag("LeftButton")
     graphFrame:SetScript("OnDragStart", graphFrame.StartMoving)
@@ -350,14 +351,15 @@ function CreateGraphFrame()
         -- Use UICheckButtonTemplate for retail clients
         local chk = CreateFrame("CheckButton", nil, graphFrame, "UICheckButtonTemplate")
         chk:SetSize(20, 20)
-        -- Anchor checkbox slightly outside the frame bounds to avoid overlap
-        chk:SetPoint("TOPLEFT", graphFrame, "TOPRIGHT", 16, -20 * i)
+        -- Anchor checkbox inside the right edge so it doesn't overlap axis labels
+        chk:SetPoint("TOPRIGHT", graphFrame, "TOPRIGHT", -16, -20 * i)
         -- Hide the built-in label to avoid clipping
         if chk.Text then chk.Text:Hide() end
 
         -- Label positioned next to the checkbox
         local lbl = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        lbl:SetPoint("LEFT", chk, "RIGHT", 6, 0)
+        -- Place label to the left of the checkbox within the graph frame
+        lbl:SetPoint("RIGHT", chk, "LEFT", -6, 0)
         lbl:SetJustifyH("LEFT")
         lbl:SetText(info.label)
         lbl:SetTextColor(unpack(info.color))
@@ -497,7 +499,8 @@ local defaultConfig = {
     graphUpdateThrottle = 0.1,
     graph = {
         enabled = true,
-        w = 220,
+        -- Increased default width to provide room for metric checkboxes
+        w = 300,
         h = 100,
         timeWindow = 60,
         pos = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -10 },
