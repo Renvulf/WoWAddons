@@ -748,20 +748,14 @@ local function CreateMinimapButton()
     minimapButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     minimapButton:SetScript("OnClick", function(_, btn)
         if btn == "RightButton" then
-            if not optionsPanel then
-                if not IsAddonLoaded("Blizzard_Settings") then
-                    pcall(LoadAddOnSafe, "Blizzard_Settings")
-                end
-                local ok = pcall(CreateOptionsPanel)
-                if not ok then
-                    print("FPSMonitor: failed to open options panel")
-                    return
-                end
-            end
-            if OpenConfigPanel then
-                OpenConfigPanel()
+            if not optionsPanel then CreateOptionsPanel() end
+            if Settings and Settings.OpenToCategory and optionsPanel.category then
+                Settings.OpenToCategory(optionsPanel.category)
+            elseif InterfaceOptionsFrame_OpenToCategory then
+                InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+                InterfaceOptionsFrame_OpenToCategory(optionsPanel)
             else
-                print("FPSMonitor: configuration panel unavailable")
+                optionsPanel:Show()
             end
             return
         end
@@ -795,136 +789,18 @@ end
 -- Configuration options panel
 local function CreateOptionsPanel()
     if optionsPanel then return end
-    -- Load Blizzard Settings to ensure UI templates are available
-    if not IsAddonLoaded("Blizzard_Settings") then
-        pcall(LoadAddOnSafe, "Blizzard_Settings")
+
+    -- Ensure the Retail Settings API is loaded
+    if not Settings then
+        LoadAddOn("Blizzard_Settings")
     end
 
     optionsPanel = CreateFrame("Frame", "FPSMonitorOptions", InterfaceOptionsFramePanelContainer or UIParent)
     optionsPanel.name = "FPS Monitor"
 
-    -- Determine if we should use the old tab layout (pre-Dragonflight clients)
-    local useOldTabs = not (Settings and Settings.RegisterCanvasLayoutCategory)
-
-    if useOldTabs then
-        -- Ensure the template exists on Retail by loading Blizzard_OptionsPanel
-        if not IsAddonLoaded("Blizzard_OptionsPanel") then
-            pcall(LoadAddOnSafe, "Blizzard_OptionsPanel")
-        end
-
-        -- Tabs --------------------------------------------------------------
-        -- Use explicit names so the template can find associated FontStrings.
-        local tab1 = CreateFrame("Button", "FPSMonitorOptionsTab1", optionsPanel, "OptionsFrameTabButtonTemplate")
-        tab1:SetID(1)
-        tab1:SetText("General")
-        tab1:SetPoint("TOPLEFT", optionsPanel, "TOPLEFT", 12, -8)
-
-        if not tab1.Text then
-            tab1.Text = _G[tab1:GetName() .. "Text"]
-        end
-        if not tab1.Text and tab1.GetFontString then
-            tab1.Text = tab1:GetFontString()
-        end
-        if not tab1.Text then
-            local fs = tab1:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            fs:SetAllPoints(tab1)
-            fs:SetText(tab1:GetText())
-            tab1.Text = fs
-        end
-
-        local tab2 = CreateFrame("Button", "FPSMonitorOptionsTab2", optionsPanel, "OptionsFrameTabButtonTemplate")
-        tab2:SetID(2)
-        tab2:SetText("Graph")
-        tab2:SetPoint("LEFT", tab1, "RIGHT", -8, 0)
-
-        if not tab2.Text then
-            tab2.Text = _G[tab2:GetName() .. "Text"]
-        end
-        if not tab2.Text and tab2.GetFontString then
-            tab2.Text = tab2:GetFontString()
-        end
-        if not tab2.Text then
-            local fs = tab2:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            fs:SetAllPoints(tab2)
-            fs:SetText(tab2:GetText())
-            tab2.Text = fs
-        end
-
-        PanelTemplates_SetNumTabs(optionsPanel, 2)
-        PanelTemplates_SetTab(optionsPanel, 1)
-
-        -- Containers for each tab ------------------------------------------
-        optionsPanel.general = CreateFrame("Frame", nil, optionsPanel)
-        optionsPanel.general:SetPoint("TOPLEFT", 0, -28)
-        optionsPanel.general:SetPoint("BOTTOMRIGHT")
-
-        optionsPanel.graphTab = CreateFrame("Frame", nil, optionsPanel)
-        optionsPanel.graphTab:SetAllPoints(optionsPanel.general)
-        optionsPanel.graphTab:Hide()
-    else
-        -- Single container when using the modern Settings UI
-        optionsPanel.general = CreateFrame("Frame", nil, optionsPanel)
-        optionsPanel.general:SetAllPoints(optionsPanel)
-    end
-
-    local function SelectTab(id)
-        optionsPanel.selectedTab = id
-        PanelTemplates_SetTab(optionsPanel, id)
-        optionsPanel.general:Hide()
-        optionsPanel.graphTab:Hide()
-        if id == 1 then
-            optionsPanel.general:Show()
-            if graphFrame and graphFrame:GetParent() == optionsPanel.graphTab then
-                graphFrame:SetMovable(true)
-                graphFrame:SetResizable(true)
-                if graphFrame.sizer then graphFrame.sizer:Show() end
-                local gpos = FPSMonitorDB.graph.pos or { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -10 }
-                graphFrame:SetParent(UIParent)
-                graphFrame:ClearAllPoints()
-                graphFrame:SetPoint(gpos.point, UIParent, gpos.relativePoint, gpos.x, gpos.y)
-                if not FPSMonitorDB.graph.enabled then
-                    graphFrame:Hide()
-                end
-            end
-        else
-            optionsPanel.graphTab:Show()
-            if FPSMonitorDB.graph.enabled then
-                if not graphFrame then pcall(CreateGraphFrame) end
-                if graphFrame then
-                    graphFrame:SetParent(optionsPanel.graphTab)
-                    graphFrame:SetPoint("TOPLEFT", 10, -10)
-                    graphFrame:SetMovable(false)
-                    graphFrame:SetResizable(false)
-                    if graphFrame.sizer then graphFrame.sizer:Hide() end
-                    graphFrame:Show()
-                end
-            end
-        end
-    end
-
-    if useOldTabs then
-        tab1:SetScript("OnClick", function() SelectTab(1) end)
-        tab2:SetScript("OnClick", function() SelectTab(2) end)
-
-        optionsPanel:SetScript("OnHide", function()
-            if graphFrame and graphFrame:GetParent() == optionsPanel.graphTab then
-                graphFrame:SetMovable(true)
-                graphFrame:SetResizable(true)
-                if graphFrame.sizer then graphFrame.sizer:Show() end
-                local gpos = FPSMonitorDB.graph.pos or { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -10 }
-                graphFrame:SetParent(UIParent)
-                graphFrame:ClearAllPoints()
-                graphFrame:SetPoint(gpos.point, UIParent, gpos.relativePoint, gpos.x, gpos.y)
-                if not FPSMonitorDB.graph.enabled then
-                    graphFrame:Hide()
-                end
-            end
-        end)
-
-        optionsPanel:SetScript("OnShow", function()
-            SelectTab(optionsPanel.selectedTab or 1)
-        end)
-    end
+    -- Single container for all controls
+    optionsPanel.general = CreateFrame("Frame", nil, optionsPanel)
+    optionsPanel.general:SetAllPoints(optionsPanel)
 
     --------------------------------------------------------------------
     -- General tab contents
@@ -1033,36 +909,20 @@ local function CreateOptionsPanel()
         InterfaceOptions_AddCategory(optionsPanel)
     end
 
-    -- Default to first tab when using the legacy tabs
-    if useOldTabs then
-        SelectTab(1)
-    end
 end
 
 -- Open configuration panel using whichever API is available
 local function OpenConfigPanel()
     if not optionsPanel then return end
 
-    -- Ensure the Blizzard settings UI is loaded when using the modern API.
-    if not Settings and not IsAddonLoaded("Blizzard_Settings") then
-        pcall(LoadAddOnSafe, "Blizzard_Settings")
-    end
-
     if Settings and Settings.OpenToCategory and optionsPanel.category then
-        -- Dragonflight settings system
-        local ok = pcall(Settings.OpenToCategory, optionsPanel.category)
-        if ok then return end
-    end
-
-    if InterfaceOptionsFrame_OpenToCategory then
-        -- Classic options system
+        Settings.OpenToCategory(optionsPanel.category)
+    elseif InterfaceOptionsFrame_OpenToCategory then
         InterfaceOptionsFrame_OpenToCategory(optionsPanel)
-        InterfaceOptionsFrame_OpenToCategory(optionsPanel) -- open twice for reliability
-        return
+        InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+    else
+        optionsPanel:Show()
     end
-
-    -- Fallback: show the panel directly
-    optionsPanel:Show()
 end
 
 
@@ -1118,11 +978,7 @@ SlashCmdList["FPSMON"] = function(msg)
         return
     elseif msg == "config" then
         if not optionsPanel then
-            -- Ensure the settings UI is available before creating the panel
-            if not IsAddonLoaded("Blizzard_Settings") then
-                pcall(LoadAddOnSafe, "Blizzard_Settings")
-            end
-            pcall(CreateOptionsPanel)
+            CreateOptionsPanel()
         end
         if OpenConfigPanel then
             OpenConfigPanel()
@@ -1202,13 +1058,7 @@ local function OnEvent(_, event, arg1)
         sampleInterval = FPSMonitorDB.sampleInterval or sampleInterval
         updateInterval = FPSMonitorDB.updateInterval or updateInterval
         memoryUpdateInterval = FPSMonitorDB.memoryUpdateInterval or memoryUpdateInterval
-        -- Ensure Blizzard UI templates are available before the options panel is created
-        if not IsAddonLoaded("Blizzard_OptionsPanel") then
-            pcall(LoadAddOnSafe, "Blizzard_OptionsPanel")
-        end
-        if not IsAddonLoaded("Blizzard_Settings") then
-            pcall(LoadAddOnSafe, "Blizzard_Settings")
-        end
+        -- Initialize configuration panel and graph frame
         pcall(CreateOptionsPanel)
         if FPSMonitorDB.graph.enabled then
             pcall(CreateGraphFrame)
