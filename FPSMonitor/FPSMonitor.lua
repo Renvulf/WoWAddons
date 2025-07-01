@@ -59,6 +59,18 @@ local function SetFontSafe(fs, size, flags)
     end
 end
 
+-- Graph related state and configuration
+local graphFrame
+local graphLines = {}
+local graphGrid = {}
+local graphLabels = {}
+local graphHistory = {}
+local graphIndex = 1
+local graphCount = 0
+local graphMaxSamples = 200
+local graphUpdateThrottle = 0.05
+local graphElapsed = 0
+
 -- Create FPS graph frame
 local function CreateGraphFrame()
     if graphFrame then return end
@@ -223,16 +235,6 @@ local displayFrame
 local minimapButton
 local optionsPanel
 local updateFrame -- frame used for periodic updates; declared early so slash commands can reference it safely
-local graphFrame
-local graphLines = {}
-local graphGrid = {}
-local graphLabels = {}
-local graphHistory = {}
-local graphIndex = 1
-local graphCount = 0
-local graphMaxSamples = 200
-local graphUpdateThrottle = 0.05
-local graphElapsed = 0
 
 -- Reposition minimap button around the minimap based on stored angle
 local function UpdateMinimapButtonPosition(angle)
