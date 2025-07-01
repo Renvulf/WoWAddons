@@ -808,11 +808,21 @@ local function CreateOptionsPanel()
     tab1:SetID(1)
     tab1:SetText("General")
     tab1:SetPoint("TOPLEFT", optionsPanel, "TOPLEFT", 12, -8)
+    -- Ensure compatibility with changes to the template in newer clients
+    -- by explicitly caching the font string used for the tab text.  Without
+    -- this some versions of the template do not provide a `Text` field which
+    -- causes PanelTemplates functions to error.
+    if not tab1.Text and tab1.GetFontString then
+        tab1.Text = tab1:GetFontString()
+    end
 
     local tab2 = CreateFrame("Button", nil, optionsPanel, "OptionsFrameTabButtonTemplate")
     tab2:SetID(2)
     tab2:SetText("Graph")
     tab2:SetPoint("LEFT", tab1, "RIGHT", -8, 0)
+    if not tab2.Text and tab2.GetFontString then
+        tab2.Text = tab2:GetFontString()
+    end
 
     PanelTemplates_SetNumTabs(optionsPanel, 2)
     PanelTemplates_SetTab(optionsPanel, 1)
