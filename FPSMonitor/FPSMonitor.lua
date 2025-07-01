@@ -239,7 +239,11 @@ function CreateGraphFrame()
         chk:SetChecked(FPSMonitorDB.graph[info.key])
         chk:SetScript("OnClick", function(self)
             FPSMonitorDB.graph[info.key] = self:GetChecked()
-            UpdateGraph()
+            if C_Timer and C_Timer.After then
+                C_Timer.After(graphUpdateThrottle, UpdateGraph)
+            else
+                UpdateGraph()
+            end
         end)
         graphFrame.metricChecks[i] = chk
     end
@@ -648,7 +652,7 @@ local function UpdateDisplay(stats, memory)
 end
 
 -- Draw the scrolling FPS graph
-local function UpdateGraph()
+function UpdateGraph()
     if not graphFrame or not graphFrame:IsShown() or graphCount < 2 then return end
 
     local width, height = graphFrame:GetWidth() - 68, graphFrame:GetHeight() - 20
@@ -686,6 +690,7 @@ local function UpdateGraph()
         if FPSMonitorDB.graph.showFrameTime then table.insert(legendParts, "ms (B)") end
         if FPSMonitorDB.graph.showMemory then table.insert(legendParts, "Mem (M)") end
         if FPSMonitorDB.graph.showLatency then table.insert(legendParts, "Lat (Y)") end
+        if #legendParts == 0 then legendParts = {"none"} end
         graphFrame.legend:SetText(table.concat(legendParts, " | "))
     end
 
@@ -1171,7 +1176,11 @@ local function CreateOptionsPanel()
         chk:SetChecked(FPSMonitorDB.graph[info.key])
         chk:SetScript("OnClick", function(self)
             FPSMonitorDB.graph[info.key] = self:GetChecked()
-            UpdateGraph()
+            if C_Timer and C_Timer.After then
+                C_Timer.After(graphUpdateThrottle, UpdateGraph)
+            else
+                UpdateGraph()
+            end
         end)
         prev = chk
     end
