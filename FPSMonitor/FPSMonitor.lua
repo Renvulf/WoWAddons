@@ -44,6 +44,21 @@ SlashCmdList["FPSGRAPH"] = function(msg)
     end
 end
 
+-- Default font used for the display. If the custom font fails to load we fall
+-- back to STANDARD_TEXT_FONT to avoid any errors.
+-- Use standard addon path delimiters with backslashes. Double backslashes are
+-- required in Lua string literals to represent a single backslash.
+local FONT_PATH = "Interface\\AddOns\\FPSMonitor\\Pepsi.ttf"
+
+-- Helper to safely apply a font to a FontString
+local function SetFontSafe(fs, size, flags)
+    if fs and fs.SetFont then
+        if not fs:SetFont(FONT_PATH, size, flags) then
+            fs:SetFont(STANDARD_TEXT_FONT, size, flags)
+        end
+    end
+end
+
 -- Create FPS graph frame
 local function CreateGraphFrame()
     if graphFrame then return end
@@ -175,22 +190,6 @@ local defaultConfig = {
         pos = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -10 },
     },
 }
-
--- Default font used for the display. If the custom font fails to load we fall
--- back to STANDARD_TEXT_FONT to avoid any errors.
--- Use standard addon path delimiters with backslashes. Double backslashes are
--- required in Lua string literals to represent a single backslash.
-local FONT_PATH = "Interface\\AddOns\\FPSMonitor\\Pepsi.ttf"
-
--- Helper to safely apply a font to a FontString
-local function SetFontSafe(fs, size, flags)
-    if fs and fs.SetFont then
-        if not fs:SetFont(FONT_PATH, size, flags) then
-            fs:SetFont(STANDARD_TEXT_FONT, size, flags)
-        end
-    end
-end
-
 -- Labels used for the statistic display.  Keeping this table
 -- at file scope allows reusing it whenever the display is
 -- (re)initialized.
