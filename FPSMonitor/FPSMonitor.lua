@@ -29,8 +29,10 @@ local math_atan2 = math.atan2
 local math_atan  = math.atan
 local TAU        = math.pi * 2
 
--- forward-declare so closures can see them
-local UpdateGraphConfig, CreateGraphFrame
+-- Forward declare functions referenced before their definitions so
+-- Lua's lexical scoping rules won't cause nil lookups when these
+-- functions are used inside closures.
+local UpdateGraph, UpdateGraphConfig, CreateGraphFrame
 function UpdateGraphConfig()
     graphTimeWindow = FPSMonitorDB.graph.timeWindow or 60
     graphMaxSamples = math_floor(graphTimeWindow / graphUpdateThrottle)
