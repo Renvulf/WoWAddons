@@ -804,7 +804,11 @@ local function CreateOptionsPanel()
     optionsPanel.name = "FPS Monitor"
 
     -- Tabs --------------------------------------------------------------
-    local tab1 = CreateFrame("Button", nil, optionsPanel, "OptionsFrameTabButtonTemplate")
+    -- Use explicit names for tabs so the template's OnLoad script can locate
+    -- the accompanying FontString and assign the `Text` field.  Without named
+    -- frames some client versions trigger an error inside
+    -- PanelTemplates_TabResize because `self.Text` is nil.
+    local tab1 = CreateFrame("Button", "FPSMonitorOptionsTab1", optionsPanel, "OptionsFrameTabButtonTemplate")
     tab1:SetID(1)
     tab1:SetText("General")
     tab1:SetPoint("TOPLEFT", optionsPanel, "TOPLEFT", 12, -8)
@@ -816,7 +820,7 @@ local function CreateOptionsPanel()
         tab1.Text = tab1:GetFontString()
     end
 
-    local tab2 = CreateFrame("Button", nil, optionsPanel, "OptionsFrameTabButtonTemplate")
+    local tab2 = CreateFrame("Button", "FPSMonitorOptionsTab2", optionsPanel, "OptionsFrameTabButtonTemplate")
     tab2:SetID(2)
     tab2:SetText("Graph")
     tab2:SetPoint("LEFT", tab1, "RIGHT", -8, 0)
