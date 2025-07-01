@@ -57,7 +57,14 @@ local function CreateGraphFrame()
     graphFrame:EnableMouse(true)
     graphFrame:SetMovable(true)
     graphFrame:SetResizable(true)
-    graphFrame:SetMinResize(120, 60)
+    -- Set minimum resize bounds using the API available for this client version
+    if graphFrame.SetResizeBounds then
+        -- Retail 10.0+ clients replaced SetMinResize with SetResizeBounds
+        graphFrame:SetResizeBounds(120, 60)
+    elseif graphFrame.SetMinResize then
+        -- Fallback for older clients (Classic or pre-10.0 Retail)
+        graphFrame:SetMinResize(120, 60)
+    end
     graphFrame:SetClampedToScreen(true)
     graphFrame:RegisterForDrag("LeftButton")
     graphFrame:SetScript("OnDragStart", graphFrame.StartMoving)
