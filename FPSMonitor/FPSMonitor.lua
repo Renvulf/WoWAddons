@@ -515,39 +515,56 @@ end
 local function UpdateGraph()
     if not graphFrame or not graphFrame:IsShown() or graphCount < 2 then return end
 
-    local width = graphFrame:GetWidth() - 4
-    local height = graphFrame:GetHeight() - 20
+    local width, height = graphFrame:GetWidth() - 4, graphFrame:GetHeight() - 20
     if width <= 0 or height <= 0 then return end
 
+    -- Determine how many valid samples we have
+    local sampleCount = graphCount < graphMaxSamples and graphCount or graphMaxSamples
+    local startIndex
+    if graphCount < graphMaxSamples then
+        startIndex = 1
+    else
+        startIndex = (graphIndex - sampleCount - 1) % graphMaxSamples + 1
+    end
+
+    -- Find min/max safely
     local minFPS, maxFPS = math.huge, 0
-    for i = 1, graphCount do
-        local idx = (graphIndex - graphCount + i - 1) % graphMaxSamples + 1
+    for i = 1, sampleCount do
+        local idx = startIndex + i - 1
+        if idx > graphMaxSamples then idx = idx - graphMaxSamples end
         local fps = graphHistory[idx]
-        if fps < minFPS then minFPS = fps end
-        if fps > maxFPS then maxFPS = fps end
+        if fps then
+            if fps < minFPS then minFPS = fps end
+            if fps > maxFPS then maxFPS = fps end
+        end
     end
     if maxFPS == minFPS then maxFPS = minFPS + 1 end
     local range = maxFPS - minFPS
 
-    local stepX = width / (graphMaxSamples - 1)
+    -- Draw each line
+    local stepX = (width - 4) / (sampleCount - 1)
     local prevX, prevY
-    for i = 1, graphCount do
-        local idx = (graphIndex - graphCount + i - 1) % graphMaxSamples + 1
+    for i = 1, sampleCount do
+        local idx = startIndex + i - 1
+        if idx > graphMaxSamples then idx = idx - graphMaxSamples end
         local fps = graphHistory[idx]
-        local x = (i - 1) * stepX + 2
-        local y = ((fps - minFPS) / range) * height + 2
-        if prevX then
-            local line = graphLines[i - 1]
-            if line then
-                line:SetStartPoint("BOTTOMLEFT", prevX, prevY)
-                line:SetEndPoint("BOTTOMLEFT", x, y)
+        if fps then
+            local x = (i - 1) * stepX + 2
+            local y = ((fps - minFPS) / range) * height + 2
+            if prevX then
+                local line = graphLines[i - 1]
+                if line then
+                    line:SetStartPoint("BOTTOMLEFT", prevX, prevY)
+                    line:SetEndPoint("BOTTOMLEFT", x, y)
+                    line:Show()
+                end
             end
+            prevX, prevY = x, y
         end
-        prevX, prevY = x, y
     end
 
-    -- Hide unused lines
-    for i = graphCount, graphMaxSamples - 1 do
+    -- Hide the rest
+    for i = sampleCount + 1, graphMaxSamples do
         if graphLines[i] then graphLines[i]:Hide() end
     end
 
@@ -907,13 +924,11 @@ local function CreateOptionsPanel()
     graphCheck.Text:SetText("Enable FPS graph")
     graphCheck:SetChecked(FPSMonitorDB.graph.enabled)
     graphCheck:SetScript("OnClick", function(self)
-        local show = self:GetChecked()
-        FPSMonitorDB.graph.enabled = show
-        if show then
-            if not graphFrame then CreateGraphFrame() end
-            graphFrame:Show()
-        elseif graphFrame then
-            graphFrame:Hide()
+        FPSMonitorDB.graph.enabled = self:GetChecked()
+        if graphFrame then
+            graphFrame:SetShown(FPSMonitorDB.graph.enabled)
+        elseif FPSMonitorDB.graph.enabled then
+            CreateGraphFrame()
         end
     end)
 
