@@ -513,7 +513,8 @@ local function UpdateGraph()
     if maxFPS == minFPS then maxFPS = minFPS + 1 end
     local range = maxFPS - minFPS
 
-    local stepX = width / (graphMaxSamples - 1)
+    -- Use full width when the history buffer hasn't filled yet
+    local stepX = width / math.max(graphCount - 1, 1)
     local prevX, prevY
     for i = 1, graphCount do
         local idx = (graphIndex - graphCount + i - 1) % graphMaxSamples + 1
