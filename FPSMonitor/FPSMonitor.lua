@@ -142,6 +142,10 @@ function CreateGraphFrame()
         graphFrame:SetMinResize(120, 60)
     end
     graphFrame:SetClampedToScreen(true)
+    -- Ensure lines are clipped within the frame bounds
+    if graphFrame.SetClipsChildren then
+        graphFrame:SetClipsChildren(true)
+    end
     graphFrame:RegisterForDrag("LeftButton")
     graphFrame:SetScript("OnDragStart", graphFrame.StartMoving)
     graphFrame:SetScript("OnDragStop", function(self)
@@ -722,7 +726,9 @@ function UpdateGraph()
             local val = m.data[idx]
             if val then
                 local x = (i - 1) * stepX + 2
+                -- Scale value within the graph height and clamp to avoid drawing past the frame
                 local y = ((val - minVal) / range) * height + 2
+                if y < 2 then y = 2 elseif y > height + 2 then y = height + 2 end
                 if prevX then
                     local line = m.lines[i - 1]
                     if line then
@@ -904,7 +910,8 @@ local function CreateDisplayFrame()
 
     -- graph toggle on main display
     local graphToggle = CreateFrame("CheckButton", nil, displayFrame, "InterfaceOptionsCheckButtonTemplate")
-    graphToggle:SetPoint("TOPRIGHT", displayFrame, "TOPRIGHT", -10, -30)
+    -- Place the checkbox at the bottom left so it does not overlap text
+    graphToggle:SetPoint("BOTTOMLEFT", displayFrame, "BOTTOMLEFT", 8, 8)
     graphToggle.Text:SetText("Show Graph")
     graphToggle:SetChecked(FPSMonitorDB.graph.enabled)
     graphToggle:SetScript("OnClick", function(self)
