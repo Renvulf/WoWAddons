@@ -11,10 +11,17 @@ local graphFrame
 local graphLines = { fps = {}, frameTime = {}, memory = {}, latency = {}, homeLatency = {}, worldLatency = {} }
 local graphGrid = { h = {}, v = {}, now = nil, p1 = nil, p01 = nil }
 local graphLabels = { h = {}, v = {} }
-local graphHistory = { fps = {}, frameTime = {}, memory = {}, latency = {}, homeLatency = {}, worldLatency = {} }
-local graphIndex = 1
-local graphCount = 0
-local graphMaxSamples = 200
+local graphHistory = {
+    times = {},
+    fps = {},
+    frameTime = {},
+    memory = {},
+    latency = {},
+    homeLatency = {},
+    worldLatency = {},
+}
+local graphStart = 1       -- first valid index in the history
+local graphCount = 0       -- number of samples currently stored
 local graphTimeWindow = 60
 local graphUpdateThrottle = 0.05
 local graphElapsed = 0
@@ -37,11 +44,17 @@ local TAU        = math.pi * 2
 local UpdateGraph, UpdateGraphConfig, CreateGraphFrame
 function UpdateGraphConfig()
     graphTimeWindow = FPSMonitorDB.graph.timeWindow or 60
-    graphMaxSamples = math_floor(graphTimeWindow / graphUpdateThrottle)
-    if graphMaxSamples < 2 then graphMaxSamples = 2 end
-    graphHistory = { fps = {}, frameTime = {}, memory = {}, latency = {}, homeLatency = {}, worldLatency = {} }
+    graphHistory = {
+        times = {},
+        fps = {},
+        frameTime = {},
+        memory = {},
+        latency = {},
+        homeLatency = {},
+        worldLatency = {},
+    }
     graphLines = { fps = {}, frameTime = {}, memory = {}, latency = {}, homeLatency = {}, worldLatency = {} }
-    graphIndex = 1
+    graphStart = 1
     graphCount = 0
     graphYMin = FPSMonitorDB.graph.yMin
     graphYMax = FPSMonitorDB.graph.yMax
@@ -185,12 +198,7 @@ function CreateGraphFrame()
     SetFontSafe(graphFrame.title, 12, "OUTLINE")
     graphFrame.title:SetText("FPS Graph")
 
-    -- Pre-create line objects for each metric
-    for metric, tbl in pairs(graphLines) do
-        for i = 1, graphMaxSamples - 1 do
-            tbl[i] = graphFrame:CreateLine(nil, "ARTWORK")
-        end
-    end
+    -- Line objects will be created on demand in UpdateGraph()
 
 
     for i = 1, 3 do
@@ -208,6 +216,9 @@ function CreateGraphFrame()
     graphGrid.now = graphFrame:CreateLine(nil, "BACKGROUND")
     graphGrid.p1  = graphFrame:CreateLine(nil, "OVERLAY")
     graphGrid.p01 = graphFrame:CreateLine(nil, "OVERLAY")
+    graphFrame.alertLine = graphFrame:CreateLine(nil, "OVERLAY")
+    graphFrame.alertLine:SetColorTexture(1,0,0,0.6)
+    graphFrame.alertLine:SetThickness(1)
     if FPSMonitorDB.graph.showPercentiles then
         graphGrid.p1:SetColorTexture(1,0,0,0.6)
         graphGrid.p1:SetThickness(1)
@@ -263,7 +274,7 @@ function CreateGraphFrame()
     end
 
     graphFrame:SetScript("OnEnter", function(self)
-        local idx = (graphIndex - 1 - 1) % graphMaxSamples + 1
+        local idx = graphStart + graphCount - 1
         GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
         GameTooltip:SetText("FPS Graph")
         if graphHistory.fps[idx] then
@@ -289,10 +300,10 @@ function CreateGraphFrame()
     graphFrame:SetScript("OnLeave", GameTooltip_Hide)
     graphFrame:SetScript("OnMouseMove", function(self, x, y)
         local width = self:GetWidth() - 68
-        local sampleCount = math.min(graphCount, graphMaxSamples)
+        local sampleCount = graphCount
         local i = math.floor(((x - 2) / width) * (sampleCount - 1)) + 1
         if i < 1 or i > sampleCount then return end
-        local idx = ((graphIndex - sampleCount - 1) % graphMaxSamples) + i
+        local idx = graphStart + i - 1
         GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
         GameTooltip:ClearLines()
         GameTooltip:SetText(string.format("t = -%ds", graphTimeWindow - (i-1)*(graphTimeWindow/(sampleCount-1))))
@@ -338,6 +349,7 @@ local defaultConfig = {
     updateInterval = 0.5,
     sampleInterval = 60,
     memoryUpdateInterval = 5,
+    graphUpdateThrottle = 0.05,
     graph = {
         enabled = true,
         w = 220,
@@ -470,6 +482,9 @@ local function ValidateConfig()
     if type(FPSMonitorDB.memoryUpdateInterval) ~= "number" or FPSMonitorDB.memoryUpdateInterval <= 0 then
         FPSMonitorDB.memoryUpdateInterval = defaultConfig.memoryUpdateInterval
     end
+    if type(FPSMonitorDB.graphUpdateThrottle) ~= "number" or FPSMonitorDB.graphUpdateThrottle <= 0 then
+        FPSMonitorDB.graphUpdateThrottle = defaultConfig.graphUpdateThrottle
+    end
     if type(FPSMonitorDB.graph) ~= "table" then
         FPSMonitorDB.graph = CopyTable(defaultConfig.graph)
     else
@@ -598,28 +613,61 @@ local function AddSample(dt)
         if fps > sessionMaxFPS then sessionMaxFPS = fps end
     end
 
-    -- Track samples for the FPS graph
-    graphHistory.fps[graphIndex] = fps
-    graphHistory.frameTime[graphIndex] = dt * 1000
+    -- Track samples for the FPS graph using a time-based sliding window
+    local now = GetTime()
+    local index = graphStart + graphCount
+    graphHistory.times[index] = now
+    graphHistory.fps[index] = fps
+    graphHistory.frameTime[index] = dt * 1000
 
     local mem = updateFrame and updateFrame.currentMemory
         or (GetAddOnMemoryUsage and GetAddOnMemoryUsage(addonName)) or 0
-    graphHistory.memory[graphIndex] = mem
+    graphHistory.memory[index] = mem
 
     local _, _, homeLatency, worldLatency = GetNetStats()
     local lat = (homeLatency and worldLatency) and ((homeLatency + worldLatency) / 2) or nil
-    graphHistory.latency[graphIndex] = lat
-        or graphHistory.latency[(graphIndex - 2) % graphMaxSamples + 1]
-        or 0
-    graphHistory.homeLatency[graphIndex] = homeLatency
-        or graphHistory.homeLatency[(graphIndex - 2) % graphMaxSamples + 1]
-        or 0
-    graphHistory.worldLatency[graphIndex] = worldLatency
-        or graphHistory.worldLatency[(graphIndex - 2) % graphMaxSamples + 1]
-        or 0
-    graphIndex = graphIndex + 1
-    if graphIndex > graphMaxSamples then graphIndex = 1 end
-    if graphCount < graphMaxSamples then graphCount = graphCount + 1 end
+    -- fall back to previous value if API returns nil
+    graphHistory.latency[index] = lat or graphHistory.latency[index - 1] or 0
+    graphHistory.homeLatency[index] = homeLatency or graphHistory.homeLatency[index - 1] or 0
+    graphHistory.worldLatency[index] = worldLatency or graphHistory.worldLatency[index - 1] or 0
+
+    graphCount = graphCount + 1
+
+    -- Remove samples older than the configured time window
+    local cutoff = now - graphTimeWindow
+    while graphCount > 0 and graphHistory.times[graphStart] and graphHistory.times[graphStart] < cutoff do
+        graphHistory.times[graphStart] = nil
+        graphHistory.fps[graphStart] = nil
+        graphHistory.frameTime[graphStart] = nil
+        graphHistory.memory[graphStart] = nil
+        graphHistory.latency[graphStart] = nil
+        graphHistory.homeLatency[graphStart] = nil
+        graphHistory.worldLatency[graphStart] = nil
+        graphStart = graphStart + 1
+        graphCount = graphCount - 1
+    end
+
+    -- Reindex occasionally to avoid huge numeric keys
+    if graphStart > 1000 then
+        for i = graphStart, graphStart + graphCount - 1 do
+            local newIdx = i - graphStart + 1
+            graphHistory.times[newIdx] = graphHistory.times[i]
+            graphHistory.fps[newIdx] = graphHistory.fps[i]
+            graphHistory.frameTime[newIdx] = graphHistory.frameTime[i]
+            graphHistory.memory[newIdx] = graphHistory.memory[i]
+            graphHistory.latency[newIdx] = graphHistory.latency[i]
+            graphHistory.homeLatency[newIdx] = graphHistory.homeLatency[i]
+            graphHistory.worldLatency[newIdx] = graphHistory.worldLatency[i]
+            graphHistory.times[i] = nil
+            graphHistory.fps[i] = nil
+            graphHistory.frameTime[i] = nil
+            graphHistory.memory[i] = nil
+            graphHistory.latency[i] = nil
+            graphHistory.homeLatency[i] = nil
+            graphHistory.worldLatency[i] = nil
+        end
+        graphStart = 1
+    end
 end
 
 -- Compute stats from history
@@ -728,8 +776,8 @@ function UpdateGraph()
     local width, height = graphFrame:GetWidth() - 68, graphFrame:GetHeight() - 20
     if width <= 0 or height <= 0 then return end
 
-    local sampleCount = graphCount < graphMaxSamples and graphCount or graphMaxSamples
-    local startIndex = graphCount < graphMaxSamples and 1 or (graphIndex - sampleCount - 1) % graphMaxSamples + 1
+    local sampleCount = graphCount
+    local startIndex = graphStart
 
     local stepX = (width - 4) / (sampleCount - 1)
 
@@ -748,7 +796,7 @@ function UpdateGraph()
             table.insert(enabledMetrics, m)
         else
             -- hide any previously drawn lines when disabled
-            for i = 1, graphMaxSamples - 1 do
+            for i = 1, #m.lines do
                 if m.lines[i] then m.lines[i]:Hide() end
             end
         end
@@ -781,7 +829,6 @@ function UpdateGraph()
         local prev
         for i = 1, sampleCount do
             local idx = startIndex + i - 1
-            if idx > graphMaxSamples then idx = idx - graphMaxSamples end
             local v = m.data[idx]
             if alpha > 0 then
                 if prev == nil then prev = v or 0 end
@@ -790,6 +837,15 @@ function UpdateGraph()
                 m.plot[i] = prev
             else
                 m.plot[i] = v
+            end
+        end
+        -- Fill gaps so lines don't break when values are nil
+        local last = m.plot[1] or 0
+        for i = 1, #m.plot do
+            if not m.plot[i] then
+                m.plot[i] = last
+            else
+                last = m.plot[i]
             end
         end
     end
@@ -848,18 +904,20 @@ function UpdateGraph()
                 if y < 2 then y = 2 elseif y > height + 2 then y = height + 2 end
                 if prevX then
                     local line = m.lines[i - 1]
-                    if line then
-                        line:SetStartPoint("BOTTOMLEFT", prevX, prevY)
-                        line:SetEndPoint("BOTTOMLEFT", x, y)
-                        line:SetColorTexture(m.color[1], m.color[2], m.color[3], 1)
-                        line:SetThickness(m.thick)
-                        line:Show()
+                    if not line then
+                        line = graphFrame:CreateLine(nil, "ARTWORK")
+                        m.lines[i - 1] = line
                     end
+                    line:SetStartPoint("BOTTOMLEFT", prevX, prevY)
+                    line:SetEndPoint("BOTTOMLEFT", x, y)
+                    line:SetColorTexture(m.color[1], m.color[2], m.color[3], 1)
+                    line:SetThickness(m.thick)
+                    line:Show()
                 end
                 prevX, prevY = x, y
             end
         end
-        for i = sampleCount, graphMaxSamples - 1 do
+        for i = sampleCount, #m.lines do
             if m.lines[i] then m.lines[i]:Hide() end
         end
     end
@@ -912,13 +970,13 @@ function UpdateGraph()
     end
 
     local thresh = FPSMonitorDB.graph.alertThreshold or 0
-    if thresh > 0 then
+    if thresh > 0 and graphFrame.alertLine then
         local y = ((thresh - minFPS) / (maxFPS - minFPS)) * height + 2
-        local line = graphFrame:CreateLine(nil, "OVERLAY")
-        line:SetStartPoint("BOTTOMLEFT", 2, y)
-        line:SetEndPoint("BOTTOMRIGHT", -2, y)
-        line:SetColorTexture(1,0,0,0.6)
-        line:SetThickness(1)
+        graphFrame.alertLine:SetStartPoint("BOTTOMLEFT", 2, y)
+        graphFrame.alertLine:SetEndPoint("BOTTOMRIGHT", -2, y)
+        graphFrame.alertLine:Show()
+    elseif graphFrame.alertLine then
+        graphFrame.alertLine:Hide()
     end
 end
 
@@ -1280,8 +1338,29 @@ local function CreateOptionsPanel()
     memorySlider:SetValue(memoryUpdateInterval)
     memorySlider.text:SetText("Memory update: " .. memoryUpdateInterval .. "s")
 
+    local throttleSlider = CreateFrame("Slider", nil, optionsPanel.general, "OptionsSliderTemplate")
+    throttleSlider:SetPoint("TOPLEFT", memorySlider, "BOTTOMLEFT", 0, -40)
+    throttleSlider:SetMinMaxValues(0.01, 0.5)
+    throttleSlider:SetValueStep(0.01)
+    throttleSlider:SetObeyStepOnDrag(true)
+    throttleSlider:SetWidth(200)
+    throttleSlider:SetValue(graphUpdateThrottle)
+    _G[throttleSlider:GetName() .. "Low"]:SetText("0.01")
+    _G[throttleSlider:GetName() .. "High"]:SetText("0.5")
+    local throttleText = throttleSlider:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    throttleText:SetPoint("TOP", throttleSlider, "BOTTOM", 0, -2)
+    throttleSlider.text = throttleText
+    throttleSlider:SetScript("OnValueChanged", function(self, value)
+        value = math.floor(value * 100 + 0.5) / 100
+        self.text:SetText("Graph update: " .. value .. "s")
+        FPSMonitorDB.graphUpdateThrottle = value
+        graphUpdateThrottle = value
+    end)
+    throttleSlider:SetValue(graphUpdateThrottle)
+    throttleSlider.text:SetText("Graph update: " .. graphUpdateThrottle .. "s")
+
     local graphCheck = CreateFrame("CheckButton", nil, optionsPanel.general, "UICheckButtonTemplate")
-    graphCheck:SetPoint("TOPLEFT", memorySlider, "BOTTOMLEFT", 0, -30)
+    graphCheck:SetPoint("TOPLEFT", throttleSlider, "BOTTOMLEFT", 0, -30)
     if graphCheck.Text then graphCheck.Text:SetText("Enable FPS graph") end
     graphCheck:SetChecked(FPSMonitorDB.graph.enabled)
     graphCheck:SetScript("OnClick", function(self)
@@ -1572,9 +1651,6 @@ updateFrame:SetScript("OnUpdate", function(self, elapsed)
         local currentFPS = GetFramerate()
         local stats = CalculateStats(currentFPS, elapsed)
         UpdateDisplay(stats, self.currentMemory)
-        if stats.current < (FPSMonitorDB.graph.alertThreshold or 0) then
-            print("|cffff0000FPS LOW!|r")
-        end
     end
 end)
 
@@ -1584,26 +1660,29 @@ local function OnEvent(_, event, arg1)
         -- Validate saved variables on startup. This also merges any new
         -- defaults that may have been added between versions.
         ValidateConfig()
+        captureStartTime = GetTime() + captureDelay
+        capturing = false
         -- Seed graph history with initial values to avoid extreme spikes
         do
+            local now = GetTime()
             local initialFPS = GetFramerate() or 0
             local initialFrameTime = initialFPS > 0 and (1000 / initialFPS) or 0
             local _, _, homeLat, worldLat = GetNetStats()
             local initLatency = (homeLat and worldLat) and ((homeLat + worldLat) / 2) or 0
-            for i = 1, graphMaxSamples do
-                graphHistory.frameTime[i] = initialFrameTime
-                graphHistory.fps[i] = initialFPS
-                graphHistory.memory[i] = updateFrame and updateFrame.currentMemory or 0
-                graphHistory.latency[i] = initLatency
-                graphHistory.homeLatency[i] = homeLat or 0
-                graphHistory.worldLatency[i] = worldLat or 0
-            end
-            graphCount = graphMaxSamples
-            graphIndex = 1
+            graphHistory.times[1] = now
+            graphHistory.frameTime[1] = initialFrameTime
+            graphHistory.fps[1] = initialFPS
+            graphHistory.memory[1] = updateFrame and updateFrame.currentMemory or 0
+            graphHistory.latency[1] = initLatency
+            graphHistory.homeLatency[1] = homeLat or 0
+            graphHistory.worldLatency[1] = worldLat or 0
+            graphStart = 1
+            graphCount = 1
         end
         sampleInterval = FPSMonitorDB.sampleInterval or sampleInterval
         updateInterval = FPSMonitorDB.updateInterval or updateInterval
         memoryUpdateInterval = FPSMonitorDB.memoryUpdateInterval or memoryUpdateInterval
+        graphUpdateThrottle = FPSMonitorDB.graphUpdateThrottle or graphUpdateThrottle
         if UpdateAddOnMemoryUsage and GetAddOnMemoryUsage then
             UpdateAddOnMemoryUsage()
             updateFrame.currentMemory = GetAddOnMemoryUsage(addonName)
