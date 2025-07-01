@@ -9,8 +9,9 @@ local addonName = ...
 -- Graph related state and configuration
 local graphFrame
 local graphLines = { fps = {}, frameTime = {}, jitter = {}, memory = {}, latency = {}, homeLatency = {}, worldLatency = {} }
-local graphGrid = { h = {}, hRight = {}, v = {}, now = nil, p1 = nil, p01 = nil }
-local graphLabels = { h = {}, hRight = {}, v = {} }
+-- Separate right-side axes for latency and memory
+local graphGrid = { h = {}, hRightLat = {}, hRightMem = {}, v = {}, now = nil, p1 = nil, p01 = nil }
+local graphLabels = { h = {}, hRightLat = {}, hRightMem = {}, v = {} }
 local graphHistory = {
     times = {},
     fps = {},
@@ -94,7 +95,8 @@ end
 -- ValidateConfig().  Default values are defined in `defaultConfig` below.
 local sampleInterval = 60 -- seconds to keep frame history for average and percentiles
 local updateInterval = 0.5 -- seconds between display updates
-local memoryUpdateInterval = 5 -- seconds between memory usage checks
+-- seconds between memory usage checks (match graph update throttle for smoother values)
+local memoryUpdateInterval = 0.05
 local captureDelay = 5 -- seconds to wait after loading screens before collecting samples
 
 -- Local references to frequently used globals for slight performance gain
@@ -219,7 +221,7 @@ function CreateGraphFrame()
     graphFrame.sizer = sizer
 
     graphFrame.title = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    graphFrame.title:SetPoint("TOPLEFT", 4, -4)
+    graphFrame.title:SetPoint("TOPLEFT", graphFrame, "TOPLEFT", 4, -4)
     SetFontSafe(graphFrame.title, 12, "OUTLINE")
     graphFrame.title:SetText(string.format("FPS Graph (Last %ds)", graphTimeWindow))
 
@@ -237,9 +239,12 @@ function CreateGraphFrame()
         graphGrid.h[i] = graphFrame:CreateLine(nil, "BACKGROUND")
         graphLabels.h[i] = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         SetFontSafe(graphLabels.h[i], 10)
-        graphGrid.hRight[i] = graphFrame:CreateLine(nil, "BACKGROUND")
-        graphLabels.hRight[i] = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        SetFontSafe(graphLabels.hRight[i], 10)
+        graphGrid.hRightLat[i] = graphFrame:CreateLine(nil, "BACKGROUND")
+        graphLabels.hRightLat[i] = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        SetFontSafe(graphLabels.hRightLat[i], 10)
+        graphGrid.hRightMem[i] = graphFrame:CreateLine(nil, "BACKGROUND")
+        graphLabels.hRightMem[i] = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        SetFontSafe(graphLabels.hRightMem[i], 10)
     end
 
     for i = 1, 5 do
@@ -264,7 +269,7 @@ function CreateGraphFrame()
     end
     graphFrame.legend = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     SetFontSafe(graphFrame.legend, 10)
-    graphFrame.legend:SetPoint("TOPLEFT", 100, -4)
+    graphFrame.legend:SetPoint("TOPLEFT", graphFrame, "TOPLEFT", 4, -20)
     graphFrame.legend:SetText("FPS (G) | ms (B) | Jit (R) | Mem MB (M) | Lat ms (Y)")
 
 
@@ -323,7 +328,7 @@ function CreateGraphFrame()
             GameTooltip:AddLine(string.format("Jitter: %.2f ms", graphHistory.jitter[idx]))
         end
         if graphHistory.memory[idx] then
-            GameTooltip:AddLine(string.format("Mem: %.2f MB", graphHistory.memory[idx] / 1024))
+            GameTooltip:AddLine(string.format("Mem: %.2f MB", graphHistory.memory[idx]))
         end
         if graphHistory.latency[idx] then
             GameTooltip:AddLine(string.format("Latency: %.0f ms", graphHistory.latency[idx]))
@@ -349,7 +354,7 @@ function CreateGraphFrame()
         GameTooltip:AddLine(string.format("FPS: %.1f", graphHistory.fps[idx]))
         GameTooltip:AddLine(string.format("ms:  %.2f", graphHistory.frameTime[idx]))
         GameTooltip:AddLine(string.format("Jit: %.2f", graphHistory.jitter[idx] or 0))
-        GameTooltip:AddLine(string.format("Mem: %.2f MB", graphHistory.memory[idx]/1024))
+        GameTooltip:AddLine(string.format("Mem: %.2f MB", graphHistory.memory[idx]))
         GameTooltip:AddLine(string.format("Lat: %.0f / %.0f / %.0f",
             graphHistory.latency[idx],
             graphHistory.homeLatency[idx],
@@ -388,7 +393,8 @@ local defaultConfig = {
     },
     updateInterval = 0.5,
     sampleInterval = 60,
-    memoryUpdateInterval = 5,
+    -- Update addon memory usage as often as graph updates for smoother line
+    memoryUpdateInterval = 0.05,
     graphUpdateThrottle = 0.05,
     graph = {
         enabled = true,
@@ -695,9 +701,10 @@ local function AddSample(dt)
     if variance < 0 then variance = 0 end
     graphHistory.jitter[index] = math_sqrt(variance) * 1000
 
+    -- Memory is tracked in megabytes for consistency with axis labels
     local mem = 0
     if GetAddOnMemoryUsage then
-        mem = GetAddOnMemoryUsage(addonName)
+        mem = GetAddOnMemoryUsage(addonName) / 1024
     elseif updateFrame and updateFrame.currentMemory then
         mem = updateFrame.currentMemory
     end
@@ -817,15 +824,15 @@ local function ColorizeFPS(fps)
     end
 end
 
--- Colorize memory usage (kilobytes) for quick visual feedback
+-- Colorize memory usage (megabytes) for quick visual feedback
 local function ColorizeMemory(mem)
     if not mem then return "N/A" end
-    if mem >= 51200 then -- 50 MB+
-        return string.format("|cffff0000%.2f MB|r", mem / 1024)
-    elseif mem >= 20480 then -- 20 MB+
-        return string.format("|cffffff00%.2f MB|r", mem / 1024)
+    if mem >= 50 then -- 50 MB+
+        return string.format("|cffff0000%.2f MB|r", mem)
+    elseif mem >= 20 then -- 20 MB+
+        return string.format("|cffffff00%.2f MB|r", mem)
     else
-        return string.format("|cff00ff00%.2f MB|r", mem / 1024)
+        return string.format("|cff00ff00%.2f MB|r", mem)
     end
 end
 
@@ -964,7 +971,8 @@ function UpdateGraph()
         if graphGrid.p01 then graphGrid.p01:Hide() end
     end
 
-    local rightMin, rightMax = math.huge, -math.huge
+    local rightLatMin, rightLatMax = math.huge, -math.huge
+    local rightMemMin, rightMemMax = math.huge, -math.huge
     for _, m in ipairs(metrics) do
         local minVal, maxVal = math.huge, -math.huge
         for i = 1, sampleCount do
@@ -1019,9 +1027,12 @@ function UpdateGraph()
         for i = sampleCount, graphSampleResolution - 1 do
             if m.lines[i] then m.lines[i]:Hide() end
         end
-        if m.key == "memory" or m.key == "latency" or m.key == "homeLatency" or m.key == "worldLatency" then
-            if minVal < rightMin then rightMin = minVal end
-            if maxVal > rightMax then rightMax = maxVal end
+        if m.key == "memory" then
+            if minVal < rightMemMin then rightMemMin = minVal end
+            if maxVal > rightMemMax then rightMemMax = maxVal end
+        elseif m.key == "latency" or m.key == "homeLatency" or m.key == "worldLatency" then
+            if minVal < rightLatMin then rightLatMin = minVal end
+            if maxVal > rightLatMax then rightLatMax = maxVal end
         end
     end
 
@@ -1044,13 +1055,13 @@ function UpdateGraph()
         end
     end
 
-    if rightMin < math.huge then
-        local rangeR = rightMax - rightMin
+    if rightLatMin < math.huge then
+        local rangeR = rightLatMax - rightLatMin
         if rangeR == 0 then rangeR = 1 end
         for i = 1, 3 do
             local frac = i * 0.25
             local y = frac * height + 2
-            local line = graphGrid.hRight[i]
+            local line = graphGrid.hRightLat[i]
             if line then
                 line:SetStartPoint("BOTTOMLEFT", 2, y)
                 line:SetEndPoint("BOTTOMRIGHT", -2, y)
@@ -1058,17 +1069,45 @@ function UpdateGraph()
                 line:SetThickness(1)
                 line:Show()
             end
-            local label = graphLabels.hRight[i]
+            local label = graphLabels.hRightLat[i]
             if label then
-                label:SetPoint("BOTTOMRIGHT", graphFrame, "BOTTOMRIGHT", -4, y)
-                label:SetText(string.format("%.0f", rightMin + frac * rangeR))
+                label:SetPoint("BOTTOMRIGHT", graphFrame, "BOTTOMRIGHT", -32, y)
+                label:SetText(string.format("%.0f", rightLatMin + frac * rangeR))
                 label:Show()
             end
         end
     else
         for i = 1, 3 do
-            if graphGrid.hRight[i] then graphGrid.hRight[i]:Hide() end
-            if graphLabels.hRight[i] then graphLabels.hRight[i]:Hide() end
+            if graphGrid.hRightLat[i] then graphGrid.hRightLat[i]:Hide() end
+            if graphLabels.hRightLat[i] then graphLabels.hRightLat[i]:Hide() end
+        end
+    end
+
+    if rightMemMin < math.huge then
+        local rangeM = rightMemMax - rightMemMin
+        if rangeM == 0 then rangeM = 1 end
+        for i = 1, 3 do
+            local frac = i * 0.25
+            local y = frac * height + 2
+            local line = graphGrid.hRightMem[i]
+            if line then
+                line:SetStartPoint("BOTTOMLEFT", 2, y)
+                line:SetEndPoint("BOTTOMRIGHT", -2, y)
+                line:SetColorTexture(0.5, 0.5, 0.5, 0.2)
+                line:SetThickness(1)
+                line:Show()
+            end
+            local label = graphLabels.hRightMem[i]
+            if label then
+                label:SetPoint("BOTTOMRIGHT", graphFrame, "BOTTOMRIGHT", -4, y)
+                label:SetText(string.format("%.1f", rightMemMin + frac * rangeM))
+                label:Show()
+            end
+        end
+    else
+        for i = 1, 3 do
+            if graphGrid.hRightMem[i] then graphGrid.hRightMem[i]:Hide() end
+            if graphLabels.hRightMem[i] then graphLabels.hRightMem[i]:Hide() end
         end
     end
 
@@ -1086,7 +1125,7 @@ function UpdateGraph()
         if label then
             local interval = graphTimeWindow / 4
             local t = interval * (4 - i)
-            label:SetPoint("BOTTOMLEFT", graphFrame, "BOTTOMLEFT", x-6, -10)
+            label:SetPoint("TOPLEFT", graphFrame, "BOTTOMLEFT", x-6, 2)
             label:SetText(string.format("%ds", t))
             label:Show()
         end
@@ -1243,6 +1282,14 @@ local function CreateDisplayFrame()
         else
             if graphFrame then graphFrame:Hide() end
         end
+    end)
+
+    -- Allow pausing the graph updates
+    local pauseChk = CreateFrame("CheckButton", nil, displayFrame, "UICheckButtonTemplate")
+    pauseChk:SetPoint("BOTTOMLEFT", displayFrame, "BOTTOMLEFT", 8, 32)
+    if pauseChk.Text then pauseChk.Text:SetText("Pause Graph") end
+    pauseChk:SetScript("OnClick", function(self)
+        graphPaused = self:GetChecked()
     end)
 
     -- Populate with initial values so text is visible immediately
@@ -1450,18 +1497,18 @@ local function CreateOptionsPanel()
 
     local memorySlider = CreateFrame("Slider", nil, optionsPanel.general, "OptionsSliderTemplate")
     memorySlider:SetPoint("TOPLEFT", windowSlider, "BOTTOMLEFT", 0, -40)
-    memorySlider:SetMinMaxValues(1, 30)
-    memorySlider:SetValueStep(1)
+    memorySlider:SetMinMaxValues(0.05, 30)
+    memorySlider:SetValueStep(0.05)
     memorySlider:SetObeyStepOnDrag(true)
     memorySlider:SetWidth(200)
     memorySlider:SetValue(memoryUpdateInterval)
-    _G[memorySlider:GetName() .. "Low"]:SetText("1")
+    _G[memorySlider:GetName() .. "Low"]:SetText("0.05")
     _G[memorySlider:GetName() .. "High"]:SetText("30")
     local memoryText = memorySlider:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     memoryText:SetPoint("TOP", memorySlider, "BOTTOM", 0, -2)
     memorySlider.text = memoryText
     memorySlider:SetScript("OnValueChanged", function(self, value)
-        value = math.floor(value + 0.5)
+        value = math.floor(value * 100 + 0.5) / 100
         self.text:SetText("Memory update: " .. value .. "s")
         FPSMonitorDB.memoryUpdateInterval = value
         memoryUpdateInterval = value
@@ -1636,7 +1683,7 @@ local function CreateOptionsPanel()
 
     local pctChk = CreateFrame("CheckButton", nil, optionsPanel.general, "UICheckButtonTemplate")
     pctChk:SetPoint("TOPLEFT", worldChk, "BOTTOMLEFT", 0, -4)
-    if pctChk.Text then pctChk.Text:SetText("Show percentiles") end
+    if pctChk.Text then pctChk.Text:SetText("Show 1% / 0.1% lows") end
     pctChk:SetChecked(FPSMonitorDB.graph.showPercentiles)
     pctChk:SetScript("OnClick", function(self)
         FPSMonitorDB.graph.showPercentiles = self:GetChecked()
@@ -1802,7 +1849,8 @@ updateFrame:SetScript("OnUpdate", function(self, elapsed)
         self.memT = 0
         if UpdateAddOnMemoryUsage and GetAddOnMemoryUsage then
             UpdateAddOnMemoryUsage()
-            self.currentMemory = GetAddOnMemoryUsage(addonName)
+            -- Store memory usage in MB for display and graph
+            self.currentMemory = GetAddOnMemoryUsage(addonName) / 1024
         end
     end
 
@@ -1846,7 +1894,7 @@ local function OnEvent(_, event, arg1)
         graphUpdateThrottle = FPSMonitorDB.graphUpdateThrottle or graphUpdateThrottle
         if UpdateAddOnMemoryUsage and GetAddOnMemoryUsage then
             UpdateAddOnMemoryUsage()
-            updateFrame.currentMemory = GetAddOnMemoryUsage(addonName)
+            updateFrame.currentMemory = GetAddOnMemoryUsage(addonName) / 1024
         end
         -- Initialize configuration panel and graph frame
         pcall(CreateOptionsPanel)
