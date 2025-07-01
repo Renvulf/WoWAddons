@@ -76,7 +76,8 @@ local function CreateGraphFrame()
         FPSMonitorDB.graph.h = self:GetHeight()
     end)
     -- Resizer handle
-    local sizer = CreateFrame("Frame", nil, graphFrame)
+    -- Use a Button instead of a Frame so SetCursor is available on all clients.
+    local sizer = CreateFrame("Button", nil, graphFrame)
     sizer:SetSize(16, 16)
     sizer:SetPoint("BOTTOMRIGHT")
     sizer:EnableMouse(true)
@@ -88,7 +89,14 @@ local function CreateGraphFrame()
         FPSMonitorDB.graph.w = graphFrame:GetWidth()
         FPSMonitorDB.graph.h = graphFrame:GetHeight()
     end)
-    sizer:SetCursor("SizeNWSE")
+    -- The SetCursor method may not exist on very old clients; fall back to the
+    -- global cursor API in that case.
+    if sizer.SetCursor then
+        sizer:SetCursor("SizeNWSE")
+    else
+        sizer:SetScript("OnEnter", function() SetCursor("SizeNWSE") end)
+        sizer:SetScript("OnLeave", function() ResetCursor() end)
+    end
     graphFrame.sizer = sizer
 
     graphFrame.title = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
