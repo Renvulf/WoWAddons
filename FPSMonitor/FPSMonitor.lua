@@ -8,13 +8,14 @@ local addonName = ...
 
 -- Graph related state and configuration
 local graphFrame
-local graphLines = { fps = {}, frameTime = {}, memory = {}, latency = {}, homeLatency = {}, worldLatency = {} }
-local graphGrid = { h = {}, v = {}, now = nil, p1 = nil, p01 = nil }
-local graphLabels = { h = {}, v = {} }
+local graphLines = { fps = {}, frameTime = {}, jitter = {}, memory = {}, latency = {}, homeLatency = {}, worldLatency = {} }
+local graphGrid = { h = {}, hRight = {}, v = {}, now = nil, p1 = nil, p01 = nil }
+local graphLabels = { h = {}, hRight = {}, v = {} }
 local graphHistory = {
     times = {},
     fps = {},
     frameTime = {},
+    jitter = {},
     memory = {},
     latency = {},
     homeLatency = {},
@@ -28,6 +29,14 @@ local graphSampleResolution = 200
 local graphElapsed = 0
 local graphYMin
 local graphYMax
+local graphYMinFrameTime
+local graphYMaxFrameTime
+local graphYMinMemory
+local graphYMaxMemory
+local graphYMinLatency
+local graphYMaxLatency
+local graphYMinJitter
+local graphYMaxJitter
 local graphPaused = false
 
 -- Local references to frequently used math functions
@@ -52,20 +61,32 @@ function UpdateGraphConfig()
         times = {},
         fps = {},
         frameTime = {},
+        jitter = {},
         memory = {},
         latency = {},
         homeLatency = {},
         worldLatency = {},
     }
-    graphLines = { fps = {}, frameTime = {}, memory = {}, latency = {}, homeLatency = {}, worldLatency = {} }
+    graphLines = { fps = {}, frameTime = {}, jitter = {}, memory = {}, latency = {}, homeLatency = {}, worldLatency = {} }
     graphStart = 1
     graphCount = 0
     graphYMin = FPSMonitorDB.graph.yMin
     graphYMax = FPSMonitorDB.graph.yMax
+    graphYMinFrameTime = FPSMonitorDB.graph.yMinFrameTime
+    graphYMaxFrameTime = FPSMonitorDB.graph.yMaxFrameTime
+    graphYMinMemory = FPSMonitorDB.graph.yMinMemory
+    graphYMaxMemory = FPSMonitorDB.graph.yMaxMemory
+    graphYMinLatency = FPSMonitorDB.graph.yMinLatency
+    graphYMaxLatency = FPSMonitorDB.graph.yMaxLatency
+    graphYMinJitter = FPSMonitorDB.graph.yMinJitter
+    graphYMaxJitter = FPSMonitorDB.graph.yMaxJitter
     if graphFrame then
         graphFrame:Hide()
         graphFrame = nil
         CreateGraphFrame()
+    end
+    if graphFrame and graphFrame.title then
+        graphFrame.title:SetText(string.format("FPS Graph (Last %ds)", graphTimeWindow))
     end
 end
 
@@ -200,11 +221,11 @@ function CreateGraphFrame()
     graphFrame.title = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     graphFrame.title:SetPoint("TOPLEFT", 4, -4)
     SetFontSafe(graphFrame.title, 12, "OUTLINE")
-    graphFrame.title:SetText("FPS Graph")
+    graphFrame.title:SetText(string.format("FPS Graph (Last %ds)", graphTimeWindow))
 
     -- Preallocate line objects for each metric to avoid runtime allocations
     do
-        local keys = {"fps","frameTime","memory","latency","homeLatency","worldLatency"}
+        local keys = {"fps","frameTime","jitter","memory","latency","homeLatency","worldLatency"}
         for _, key in ipairs(keys) do
             graphLines[key] = {}
             for i = 1, graphSampleResolution - 1 do
@@ -216,6 +237,9 @@ function CreateGraphFrame()
         graphGrid.h[i] = graphFrame:CreateLine(nil, "BACKGROUND")
         graphLabels.h[i] = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         SetFontSafe(graphLabels.h[i], 10)
+        graphGrid.hRight[i] = graphFrame:CreateLine(nil, "BACKGROUND")
+        graphLabels.hRight[i] = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        SetFontSafe(graphLabels.hRight[i], 10)
     end
 
     for i = 1, 5 do
@@ -241,13 +265,14 @@ function CreateGraphFrame()
     graphFrame.legend = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     SetFontSafe(graphFrame.legend, 10)
     graphFrame.legend:SetPoint("TOPLEFT", 100, -4)
-    graphFrame.legend:SetText("FPS (G) | ms (B) | Mem (M) | Lat (Y)")
+    graphFrame.legend:SetText("FPS (G) | ms (B) | Jit (R) | Mem MB (M) | Lat ms (Y)")
 
 
     -- Per-metric checkboxes aligned along the right edge
     local metricInfo = {
         { key = "showFPS",         label = "FPS",          color = {0,1,0} },
         { key = "showFrameTime",   label = "Frame Time",   color = {0,0.75,1} },
+        { key = "showJitter",      label = "Jitter",       color = {1,0,0} },
         { key = "showMemory",      label = "Memory",       color = {1,0,1} },
         { key = "showLatency",     label = "Latency",      color = {1,1,0} },
         { key = "showHomeLatency", label = "Home Lat",    color = {1,0.5,0} },
@@ -294,6 +319,9 @@ function CreateGraphFrame()
         if graphHistory.frameTime[idx] then
             GameTooltip:AddLine(string.format("Frame: %.2f ms", graphHistory.frameTime[idx]))
         end
+        if graphHistory.jitter[idx] then
+            GameTooltip:AddLine(string.format("Jitter: %.2f ms", graphHistory.jitter[idx]))
+        end
         if graphHistory.memory[idx] then
             GameTooltip:AddLine(string.format("Mem: %.2f MB", graphHistory.memory[idx] / 1024))
         end
@@ -320,6 +348,7 @@ function CreateGraphFrame()
         GameTooltip:SetText(string.format("t = -%ds", graphTimeWindow - (i-1)*(graphTimeWindow/(sampleCount-1))))
         GameTooltip:AddLine(string.format("FPS: %.1f", graphHistory.fps[idx]))
         GameTooltip:AddLine(string.format("ms:  %.2f", graphHistory.frameTime[idx]))
+        GameTooltip:AddLine(string.format("Jit: %.2f", graphHistory.jitter[idx] or 0))
         GameTooltip:AddLine(string.format("Mem: %.2f MB", graphHistory.memory[idx]/1024))
         GameTooltip:AddLine(string.format("Lat: %.0f / %.0f / %.0f",
             graphHistory.latency[idx],
@@ -369,10 +398,19 @@ local defaultConfig = {
         pos = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -10 },
         showFPS = true,
         showFrameTime = true,
+        showJitter = false,
         showMemory = true,
         showLatency = true,
         yMin = nil,
         yMax = nil,
+        yMinFrameTime = nil,
+        yMaxFrameTime = nil,
+        yMinMemory = nil,
+        yMaxMemory = nil,
+        yMinLatency = nil,
+        yMaxLatency = nil,
+        yMinJitter = nil,
+        yMaxJitter = nil,
         smoothing = 0,
         showHomeLatency = false,
         showWorldLatency = false,
@@ -530,6 +568,9 @@ local function ValidateConfig()
         if type(FPSMonitorDB.graph.showMemory) ~= "boolean" then
             FPSMonitorDB.graph.showMemory = defaultConfig.graph.showMemory
         end
+        if type(FPSMonitorDB.graph.showJitter) ~= "boolean" then
+            FPSMonitorDB.graph.showJitter = defaultConfig.graph.showJitter
+        end
         if type(FPSMonitorDB.graph.showLatency) ~= "boolean" then
             FPSMonitorDB.graph.showLatency = defaultConfig.graph.showLatency
         end
@@ -538,6 +579,16 @@ local function ValidateConfig()
         end
         if type(FPSMonitorDB.graph.yMax) ~= "number" and FPSMonitorDB.graph.yMax ~= nil then
             FPSMonitorDB.graph.yMax = defaultConfig.graph.yMax
+        end
+        for _,k in ipairs({"FrameTime","Memory","Latency","Jitter"}) do
+            local minKey = "yMin"..k
+            local maxKey = "yMax"..k
+            if type(FPSMonitorDB.graph[minKey]) ~= "number" and FPSMonitorDB.graph[minKey] ~= nil then
+                FPSMonitorDB.graph[minKey] = defaultConfig.graph[minKey]
+            end
+            if type(FPSMonitorDB.graph[maxKey]) ~= "number" and FPSMonitorDB.graph[maxKey] ~= nil then
+                FPSMonitorDB.graph[maxKey] = defaultConfig.graph[maxKey]
+            end
         end
         if type(FPSMonitorDB.graph.smoothing) ~= "number" then
             FPSMonitorDB.graph.smoothing = defaultConfig.graph.smoothing
@@ -633,7 +684,16 @@ local function AddSample(dt)
     local index = graphStart + graphCount
     graphHistory.times[index] = now
     graphHistory.fps[index] = fps
-    graphHistory.frameTime[index] = dt * 1000
+    if fps and fps > 0 then
+        graphHistory.frameTime[index] = (1 / fps) * 1000
+    else
+        graphHistory.frameTime[index] = graphHistory.frameTime[index - 1] or 0
+    end
+    local count = historyCount
+    local meanDT = sumDT / count
+    local variance = (sumDTSquared / count) - meanDT * meanDT
+    if variance < 0 then variance = 0 end
+    graphHistory.jitter[index] = math_sqrt(variance) * 1000
 
     local mem = 0
     if GetAddOnMemoryUsage then
@@ -658,6 +718,7 @@ local function AddSample(dt)
         graphHistory.times[graphStart] = nil
         graphHistory.fps[graphStart] = nil
         graphHistory.frameTime[graphStart] = nil
+        graphHistory.jitter[graphStart] = nil
         graphHistory.memory[graphStart] = nil
         graphHistory.latency[graphStart] = nil
         graphHistory.homeLatency[graphStart] = nil
@@ -673,6 +734,7 @@ local function AddSample(dt)
             graphHistory.times[newIdx] = graphHistory.times[i]
             graphHistory.fps[newIdx] = graphHistory.fps[i]
             graphHistory.frameTime[newIdx] = graphHistory.frameTime[i]
+            graphHistory.jitter[newIdx] = graphHistory.jitter[i]
             graphHistory.memory[newIdx] = graphHistory.memory[i]
             graphHistory.latency[newIdx] = graphHistory.latency[i]
             graphHistory.homeLatency[newIdx] = graphHistory.homeLatency[i]
@@ -680,6 +742,7 @@ local function AddSample(dt)
             graphHistory.times[i] = nil
             graphHistory.fps[i] = nil
             graphHistory.frameTime[i] = nil
+            graphHistory.jitter[i] = nil
             graphHistory.memory[i] = nil
             graphHistory.latency[i] = nil
             graphHistory.homeLatency[i] = nil
@@ -803,12 +866,13 @@ function UpdateGraph()
     local stepX = (width - 4) / (sampleCount - 1)
 
     local metrics = {
-        { data = graphHistory.fps,         lines = graphLines.fps,         color = {0,1,0},   thick = 1.5, flag = FPSMonitorDB.graph.showFPS },
-        { data = graphHistory.frameTime,   lines = graphLines.frameTime,   color = {0,0.75,1}, thick = 1.5, flag = FPSMonitorDB.graph.showFrameTime },
-        { data = graphHistory.memory,      lines = graphLines.memory,      color = {1,0,1}, thick = 1,   flag = FPSMonitorDB.graph.showMemory },
-        { data = graphHistory.latency,     lines = graphLines.latency,     color = {1,1,0}, thick = 1,   flag = FPSMonitorDB.graph.showLatency },
-        { data = graphHistory.homeLatency, lines = graphLines.homeLatency, color = {1,0.5,0}, thick = 1, flag = FPSMonitorDB.graph.showHomeLatency },
-        { data = graphHistory.worldLatency,lines = graphLines.worldLatency,color = {1,0.8,0}, thick = 1, flag = FPSMonitorDB.graph.showWorldLatency },
+        { key = "fps",        data = graphHistory.fps,         lines = graphLines.fps,         color = {0,1,0},   thick = 1.5, flag = FPSMonitorDB.graph.showFPS },
+        { key = "frameTime",  data = graphHistory.frameTime,   lines = graphLines.frameTime,   color = {0,0.75,1}, thick = 1.5, flag = FPSMonitorDB.graph.showFrameTime },
+        { key = "jitter",     data = graphHistory.jitter,      lines = graphLines.jitter,      color = {1,0,0}, thick = 1,   flag = FPSMonitorDB.graph.showJitter },
+        { key = "memory",     data = graphHistory.memory,      lines = graphLines.memory,      color = {1,0,1}, thick = 1,   flag = FPSMonitorDB.graph.showMemory },
+        { key = "latency",    data = graphHistory.latency,     lines = graphLines.latency,     color = {1,1,0}, thick = 1,   flag = FPSMonitorDB.graph.showLatency },
+        { key = "homeLatency",data = graphHistory.homeLatency, lines = graphLines.homeLatency, color = {1,0.5,0}, thick = 1, flag = FPSMonitorDB.graph.showHomeLatency },
+        { key = "worldLatency",data = graphHistory.worldLatency,lines = graphLines.worldLatency,color = {1,0.8,0}, thick = 1, flag = FPSMonitorDB.graph.showWorldLatency },
     }
 
     local enabledMetrics = {}
@@ -836,8 +900,9 @@ function UpdateGraph()
         local legendParts = {}
         if FPSMonitorDB.graph.showFPS then table.insert(legendParts, "FPS (G)") end
         if FPSMonitorDB.graph.showFrameTime then table.insert(legendParts, "ms (B)") end
-        if FPSMonitorDB.graph.showMemory then table.insert(legendParts, "Mem (M)") end
-        if FPSMonitorDB.graph.showLatency then table.insert(legendParts, "Lat (Y)") end
+        if FPSMonitorDB.graph.showJitter then table.insert(legendParts, "Jit ms (R)") end
+        if FPSMonitorDB.graph.showMemory then table.insert(legendParts, "Mem MB (M)") end
+        if FPSMonitorDB.graph.showLatency then table.insert(legendParts, "Lat ms (Y)") end
         if FPSMonitorDB.graph.showHomeLatency then table.insert(legendParts, "Home (O)") end
         if FPSMonitorDB.graph.showWorldLatency then table.insert(legendParts, "World (O)") end
         if #legendParts == 0 then legendParts = {"none"} end
@@ -899,6 +964,7 @@ function UpdateGraph()
         if graphGrid.p01 then graphGrid.p01:Hide() end
     end
 
+    local rightMin, rightMax = math.huge, -math.huge
     for _, m in ipairs(metrics) do
         local minVal, maxVal = math.huge, -math.huge
         for i = 1, sampleCount do
@@ -908,8 +974,22 @@ function UpdateGraph()
                 if v > maxVal then maxVal = v end
             end
         end
-        if graphYMin ~= nil then minVal = graphYMin end
-        if graphYMax ~= nil then maxVal = graphYMax end
+        if m.key == "fps" then
+            if graphYMin ~= nil then minVal = graphYMin end
+            if graphYMax ~= nil then maxVal = graphYMax end
+        elseif m.key == "frameTime" then
+            if graphYMinFrameTime ~= nil then minVal = graphYMinFrameTime end
+            if graphYMaxFrameTime ~= nil then maxVal = graphYMaxFrameTime end
+        elseif m.key == "jitter" then
+            if graphYMinJitter ~= nil then minVal = graphYMinJitter end
+            if graphYMaxJitter ~= nil then maxVal = graphYMaxJitter end
+        elseif m.key == "memory" then
+            if graphYMinMemory ~= nil then minVal = graphYMinMemory end
+            if graphYMaxMemory ~= nil then maxVal = graphYMaxMemory end
+        else -- latency metrics
+            if graphYMinLatency ~= nil then minVal = graphYMinLatency end
+            if graphYMaxLatency ~= nil then maxVal = graphYMaxLatency end
+        end
         if not minVal or not maxVal then
             minVal, maxVal = 0, 1
         elseif maxVal == minVal then
@@ -939,6 +1019,10 @@ function UpdateGraph()
         for i = sampleCount, graphSampleResolution - 1 do
             if m.lines[i] then m.lines[i]:Hide() end
         end
+        if m.key == "memory" or m.key == "latency" or m.key == "homeLatency" or m.key == "worldLatency" then
+            if minVal < rightMin then rightMin = minVal end
+            if maxVal > rightMax then rightMax = maxVal end
+        end
     end
 
     for i = 1, 3 do
@@ -957,6 +1041,34 @@ function UpdateGraph()
             label:SetPoint("BOTTOMLEFT", graphFrame, "BOTTOMLEFT", 4, y)
             label:SetText(string.format("%.0f", minFPS + frac * fpsRange))
             label:Show()
+        end
+    end
+
+    if rightMin < math.huge then
+        local rangeR = rightMax - rightMin
+        if rangeR == 0 then rangeR = 1 end
+        for i = 1, 3 do
+            local frac = i * 0.25
+            local y = frac * height + 2
+            local line = graphGrid.hRight[i]
+            if line then
+                line:SetStartPoint("BOTTOMLEFT", 2, y)
+                line:SetEndPoint("BOTTOMRIGHT", -2, y)
+                line:SetColorTexture(0.5, 0.5, 0.5, 0.2)
+                line:SetThickness(1)
+                line:Show()
+            end
+            local label = graphLabels.hRight[i]
+            if label then
+                label:SetPoint("BOTTOMRIGHT", graphFrame, "BOTTOMRIGHT", -4, y)
+                label:SetText(string.format("%.0f", rightMin + frac * rangeR))
+                label:Show()
+            end
+        end
+    else
+        for i = 1, 3 do
+            if graphGrid.hRight[i] then graphGrid.hRight[i]:Hide() end
+            if graphLabels.hRight[i] then graphLabels.hRight[i]:Hide() end
         end
     end
 
@@ -1441,42 +1553,50 @@ local function CreateOptionsPanel()
     end
 
     -- Y-axis bounds
-    local yMinBox = CreateFrame("EditBox", nil, optionsPanel.general, "InputBoxTemplate")
-    yMinBox:SetSize(60, 20)
-    yMinBox:SetAutoFocus(false)
-    yMinBox:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 20, -8)
-    if FPSMonitorDB.graph.yMin then yMinBox:SetNumber(FPSMonitorDB.graph.yMin) end
-    local yMinLabel = optionsPanel.general:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    yMinLabel:SetPoint("LEFT", yMinBox, "RIGHT", 4, 0)
-    yMinLabel:SetText("Y-Axis Min")
-    yMinBox:SetScript("OnEnterPressed", function(self)
-        local n = tonumber(self:GetText())
-        FPSMonitorDB.graph.yMin = n
-        if self:GetText() == "" then FPSMonitorDB.graph.yMin = nil end
-        UpdateGraphConfig()
-    end)
-    yMinBox:SetScript("OnEditFocusLost", yMinBox:GetScript("OnEnterPressed"))
+    local function CreateBoundsBoxes(label, keyMin, keyMax, anchor)
+        local boxMin = CreateFrame("EditBox", nil, optionsPanel.general, "InputBoxTemplate")
+        boxMin:SetSize(60,20)
+        boxMin:SetAutoFocus(false)
+        boxMin:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 20, -8)
+        if FPSMonitorDB.graph[keyMin] then boxMin:SetNumber(FPSMonitorDB.graph[keyMin]) end
+        local lblMin = optionsPanel.general:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        lblMin:SetPoint("LEFT", boxMin, "RIGHT", 4, 0)
+        lblMin:SetText(label .. " Min")
+        boxMin:SetScript("OnEnterPressed", function(self)
+            local n = tonumber(self:GetText())
+            FPSMonitorDB.graph[keyMin] = n
+            if self:GetText() == "" then FPSMonitorDB.graph[keyMin] = nil end
+            UpdateGraphConfig()
+        end)
+        boxMin:SetScript("OnEditFocusLost", boxMin:GetScript("OnEnterPressed"))
 
-    local yMaxBox = CreateFrame("EditBox", nil, optionsPanel.general, "InputBoxTemplate")
-    yMaxBox:SetSize(60, 20)
-    yMaxBox:SetAutoFocus(false)
-    yMaxBox:SetPoint("LEFT", yMinLabel, "RIGHT", 20, 0)
-    if FPSMonitorDB.graph.yMax then yMaxBox:SetNumber(FPSMonitorDB.graph.yMax) end
-    local yMaxLabel = optionsPanel.general:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    yMaxLabel:SetPoint("LEFT", yMaxBox, "RIGHT", 4, 0)
-    yMaxLabel:SetText("Y-Axis Max")
-    yMaxBox:SetScript("OnEnterPressed", function(self)
-        local n = tonumber(self:GetText())
-        FPSMonitorDB.graph.yMax = n
-        if self:GetText() == "" then FPSMonitorDB.graph.yMax = nil end
-        UpdateGraphConfig()
-    end)
-    yMaxBox:SetScript("OnEditFocusLost", yMaxBox:GetScript("OnEnterPressed"))
+        local boxMax = CreateFrame("EditBox", nil, optionsPanel.general, "InputBoxTemplate")
+        boxMax:SetSize(60,20)
+        boxMax:SetAutoFocus(false)
+        boxMax:SetPoint("LEFT", lblMin, "RIGHT", 20, 0)
+        if FPSMonitorDB.graph[keyMax] then boxMax:SetNumber(FPSMonitorDB.graph[keyMax]) end
+        local lblMax = optionsPanel.general:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        lblMax:SetPoint("LEFT", boxMax, "RIGHT", 4, 0)
+        lblMax:SetText(label .. " Max")
+        boxMax:SetScript("OnEnterPressed", function(self)
+            local n = tonumber(self:GetText())
+            FPSMonitorDB.graph[keyMax] = n
+            if self:GetText() == "" then FPSMonitorDB.graph[keyMax] = nil end
+            UpdateGraphConfig()
+        end)
+        boxMax:SetScript("OnEditFocusLost", boxMax:GetScript("OnEnterPressed"))
+        return boxMax
+    end
 
+    local yMinBox = CreateBoundsBoxes("FPS", "yMin", "yMax", prev)
     prev = yMinBox
+    prev = CreateBoundsBoxes("Frame", "yMinFrameTime", "yMaxFrameTime", prev)
+    prev = CreateBoundsBoxes("Memory", "yMinMemory", "yMaxMemory", prev)
+    prev = CreateBoundsBoxes("Latency", "yMinLatency", "yMaxLatency", prev)
+    prev = CreateBoundsBoxes("Jitter", "yMinJitter", "yMaxJitter", prev)
     
     local smoothingSlider = CreateFrame("Slider", nil, optionsPanel.general, "OptionsSliderTemplate")
-    smoothingSlider:SetPoint("TOPLEFT", yMinBox, "BOTTOMLEFT", 0, -30)
+    smoothingSlider:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -30)
     smoothingSlider:SetMinMaxValues(0, 1)
     smoothingSlider:SetValueStep(0.05)
     smoothingSlider:SetObeyStepOnDrag(true)
