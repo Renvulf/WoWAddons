@@ -6,9 +6,31 @@
 -- We only need the name for event filtering so discard the second value.
 local addonName = ...
 
--- forward-declare so closures can see these
-local UpdateGraphConfig
-local CreateGraphFrame
+-- Graph related state and configuration
+local graphFrame
+local graphLines = { fps = {}, frameTime = {}, memory = {}, latency = {} }
+local graphGrid = { h = {}, v = {}, now = nil }
+local graphLabels = { h = {}, v = {} }
+local graphHistory = { fps = {}, frameTime = {}, memory = {}, latency = {} }
+local graphIndex = 1
+local graphCount = 0
+local graphMaxSamples = 200
+local graphTimeWindow = 60
+local graphUpdateThrottle = 0.05
+local graphElapsed = 0
+
+-- Local references to frequently used math functions
+local math_sqrt  = math.sqrt
+local math_floor = math.floor
+local math_max   = math.max
+local math_cos   = math.cos
+local math_sin   = math.sin
+local math_atan2 = math.atan2
+local math_atan  = math.atan
+local TAU        = math.pi * 2
+
+-- forward-declare so closures can see them
+local UpdateGraphConfig, CreateGraphFrame
 function UpdateGraphConfig()
     graphTimeWindow = FPSMonitorDB.graph.timeWindow or 60
     graphMaxSamples = math_floor(graphTimeWindow / graphUpdateThrottle)
@@ -87,19 +109,6 @@ local function SetFontSafe(fs, size, flags)
         end
     end
 end
-
--- Graph related state and configuration
-local graphFrame
-local graphLines = { fps = {}, frameTime = {}, memory = {}, latency = {} }
-local graphGrid = { h = {}, v = {}, now = nil }
-local graphLabels = { h = {}, v = {} }
-local graphHistory = { fps = {}, frameTime = {}, memory = {}, latency = {} }
-local graphIndex = 1
-local graphCount = 0
-local graphMaxSamples = 200
-local graphTimeWindow = 60
-local graphUpdateThrottle = 0.05
-local graphElapsed = 0
 
 -- Create FPS graph frame
 function CreateGraphFrame()
@@ -222,15 +231,6 @@ local function LoadAddOnSafe(addon)
         return C_AddOns.LoadAddOn(addon)
     end
 end
-
-local math_sqrt = math.sqrt
-local math_floor = math.floor
-local math_max = math.max
-local math_cos = math.cos
-local math_sin = math.sin
-local math_atan2 = math.atan2
-local math_atan = math.atan
-local TAU = math.pi * 2
 
 local function NormalizeAngle(angle)
     angle = angle % TAU
