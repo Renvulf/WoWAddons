@@ -60,14 +60,6 @@ local GetFramerate = GetFramerate
 local GetTime = GetTime
 local CreateFrame = CreateFrame
 -- Compatibility helpers for APIs that changed between client versions
-local function IsAddonLoaded(addon)
-    if type(IsAddOnLoaded) == "function" then
-        return IsAddOnLoaded(addon)
-    elseif C_AddOns and C_AddOns.IsAddOnLoaded then
-        return C_AddOns.IsAddOnLoaded(addon)
-    end
-    return false
-end
 
 -- Slash command for graph options
 SLASH_FPSGRAPH1 = "/fpsgraph"
@@ -119,7 +111,7 @@ end
 -- Create FPS graph frame
 function CreateGraphFrame()
     if graphFrame then return end
-    graphFrame = CreateFrame("Frame", "FPSMonitorGraph", displayFrame or UIParent, BackdropTemplateMixin and "BackdropTemplate")
+    graphFrame = CreateFrame("Frame", "FPSMonitorGraph", displayFrame or UIParent, "BackdropTemplate")
     graphFrame:SetSize(FPSMonitorDB.graph.w or 220, FPSMonitorDB.graph.h or 100)
     local gpos = FPSMonitorDB.graph.pos or { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -4 }
     if displayFrame then
@@ -133,14 +125,8 @@ function CreateGraphFrame()
     graphFrame:EnableMouse(true)
     graphFrame:SetMovable(true)
     graphFrame:SetResizable(true)
-    -- Set minimum resize bounds using the API available for this client version
-    if graphFrame.SetResizeBounds then
-        -- Retail 10.0+ clients replaced SetMinResize with SetResizeBounds
-        graphFrame:SetResizeBounds(120, 60)
-    elseif graphFrame.SetMinResize then
-        -- Fallback for older clients (Classic or pre-10.0 Retail)
-        graphFrame:SetMinResize(120, 60)
-    end
+    -- Set minimum resize bounds
+    graphFrame:SetResizeBounds(120, 60)
     graphFrame:SetClampedToScreen(true)
     -- Ensure lines are clipped within the frame bounds
     if graphFrame.SetClipsChildren then
@@ -220,10 +206,20 @@ function CreateGraphFrame()
 
     graphFrame.metricChecks = {}
     for i, info in ipairs(metricInfo) do
-        local chk = CreateFrame("CheckButton", nil, graphFrame, "InterfaceOptionsCheckButtonTemplate")
+        -- Use UICheckButtonTemplate for retail clients
+        local chk = CreateFrame("CheckButton", nil, graphFrame, "UICheckButtonTemplate")
+        chk:SetSize(20, 20)
         chk:SetPoint("TOPRIGHT", -4, -16 * i - 4)
-        chk.Text:SetText(info.label)
-        chk.Text:SetTextColor(info.color[1], info.color[2], info.color[3])
+        -- Hide the built-in label to avoid clipping
+        if chk.Text then chk.Text:Hide() end
+
+        -- Full width label next to the checkbox
+        local lbl = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        lbl:SetPoint("LEFT", chk, "RIGHT", 4, 0)
+        lbl:SetJustifyH("LEFT")
+        lbl:SetText(info.label)
+        lbl:SetTextColor(unpack(info.color))
+
         chk:SetChecked(FPSMonitorDB.graph[info.key])
         chk:SetScript("OnClick", function(self)
             FPSMonitorDB.graph[info.key] = self:GetChecked()
@@ -257,16 +253,6 @@ function CreateGraphFrame()
     graphFrame:SetScript("OnLeave", GameTooltip_Hide)
 
     graphFrame:SetShown(FPSMonitorDB.graph.enabled)
-end
-
-local function LoadAddOnSafe(addon)
-    if type(UIParentLoadAddOn) == "function" then
-        return UIParentLoadAddOn(addon)
-    elseif type(LoadAddOn) == "function" then
-        return LoadAddOn(addon)
-    elseif C_AddOns and C_AddOns.LoadAddOn then
-        return C_AddOns.LoadAddOn(addon)
-    end
 end
 
 local function NormalizeAngle(angle)
@@ -532,9 +518,16 @@ local function AddSample(dt)
     -- Track samples for the FPS graph
     graphHistory.fps[graphIndex] = fps
     graphHistory.frameTime[graphIndex] = dt * 1000
-    graphHistory.memory[graphIndex] = updateFrame and updateFrame.currentMemory or 0
+
+    graphHistory.memory[graphIndex] = updateFrame and updateFrame.currentMemory
+        or graphHistory.memory[(graphIndex - 2) % graphMaxSamples + 1]
+        or 0
+
     local _, _, homeLatency, worldLatency = GetNetStats()
-    graphHistory.latency[graphIndex] = (homeLatency + worldLatency) / 2
+    local lat = (homeLatency and worldLatency) and ((homeLatency + worldLatency) / 2) or nil
+    graphHistory.latency[graphIndex] = lat
+        or graphHistory.latency[(graphIndex - 2) % graphMaxSamples + 1]
+        or 0
     graphIndex = graphIndex + 1
     if graphIndex > graphMaxSamples then graphIndex = 1 end
     if graphCount < graphMaxSamples then graphCount = graphCount + 1 end
@@ -850,8 +843,8 @@ end
 -- Create movable display frame
 local function CreateDisplayFrame()
     if displayFrame then return end
-    -- Use BackdropTemplate for compatibility with modern client versions
-    displayFrame = CreateFrame("Frame", "FPSMonitorDisplay", UIParent, BackdropTemplateMixin and "BackdropTemplate")
+    -- Use BackdropTemplate on modern clients
+    displayFrame = CreateFrame("Frame", "FPSMonitorDisplay", UIParent, "BackdropTemplate")
     -- Slightly taller to leave room for the buttons
     -- so they don't overlap the statistic text
     -- Increase height slightly to leave room for additional controls
@@ -909,10 +902,10 @@ local function CreateDisplayFrame()
     InitializeLabels()
 
     -- graph toggle on main display
-    local graphToggle = CreateFrame("CheckButton", nil, displayFrame, "InterfaceOptionsCheckButtonTemplate")
+    local graphToggle = CreateFrame("CheckButton", nil, displayFrame, "UICheckButtonTemplate")
     -- Place the checkbox at the bottom left so it does not overlap text
     graphToggle:SetPoint("BOTTOMLEFT", displayFrame, "BOTTOMLEFT", 8, 8)
-    graphToggle.Text:SetText("Show Graph")
+    if graphToggle.Text then graphToggle.Text:SetText("Show Graph") end
     graphToggle:SetChecked(FPSMonitorDB.graph.enabled)
     graphToggle:SetScript("OnClick", function(self)
         FPSMonitorDB.graph.enabled = self:GetChecked()
@@ -998,9 +991,6 @@ local function CreateMinimapButton()
             if not optionsPanel then CreateOptionsPanel() end
             if Settings and Settings.OpenToCategory and optionsPanel.category then
                 Settings.OpenToCategory(optionsPanel.category)
-            elseif InterfaceOptionsFrame_OpenToCategory then
-                InterfaceOptionsFrame_OpenToCategory(optionsPanel)
-                InterfaceOptionsFrame_OpenToCategory(optionsPanel)
             else
                 optionsPanel:Show()
             end
@@ -1038,8 +1028,8 @@ local function CreateOptionsPanel()
     if optionsPanel then return end
 
     -- Ensure the Retail Settings API is loaded
-    if not Settings then
-        LoadAddOn("Blizzard_Settings")
+    if not Settings and C_AddOns and C_AddOns.LoadAddOn then
+        C_AddOns.LoadAddOn("Blizzard_Settings")
     end
 
     optionsPanel = CreateFrame("Frame", "FPSMonitorOptions", InterfaceOptionsFramePanelContainer or UIParent)
@@ -1055,9 +1045,9 @@ local function CreateOptionsPanel()
     title:SetPoint("TOPLEFT", 16, -16)
     title:SetText("FPS Monitor")
 
-    local minimapCheck = CreateFrame("CheckButton", nil, optionsPanel.general, "InterfaceOptionsCheckButtonTemplate")
+    local minimapCheck = CreateFrame("CheckButton", nil, optionsPanel.general, "UICheckButtonTemplate")
     minimapCheck:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
-    minimapCheck.Text:SetText("Show minimap button")
+    if minimapCheck.Text then minimapCheck.Text:SetText("Show minimap button") end
     minimapCheck:SetChecked(not FPSMonitorDB.minimap.hide)
     minimapCheck:SetScript("OnClick", function(self)
         local show = self:GetChecked()
@@ -1155,9 +1145,9 @@ local function CreateOptionsPanel()
     memorySlider:SetValue(memoryUpdateInterval)
     memorySlider.text:SetText("Memory update: " .. memoryUpdateInterval .. "s")
 
-    local graphCheck = CreateFrame("CheckButton", nil, optionsPanel.general, "InterfaceOptionsCheckButtonTemplate")
+    local graphCheck = CreateFrame("CheckButton", nil, optionsPanel.general, "UICheckButtonTemplate")
     graphCheck:SetPoint("TOPLEFT", memorySlider, "BOTTOMLEFT", 0, -30)
-    graphCheck.Text:SetText("Enable FPS graph")
+    if graphCheck.Text then graphCheck.Text:SetText("Enable FPS graph") end
     graphCheck:SetChecked(FPSMonitorDB.graph.enabled)
     graphCheck:SetScript("OnClick", function(self)
         FPSMonitorDB.graph.enabled = self:GetChecked()
@@ -1178,9 +1168,9 @@ local function CreateOptionsPanel()
 
     local prev = graphCheck
     for i, info in ipairs(metricChecks) do
-        local chk = CreateFrame("CheckButton", nil, optionsPanel.general, "InterfaceOptionsCheckButtonTemplate")
+        local chk = CreateFrame("CheckButton", nil, optionsPanel.general, "UICheckButtonTemplate")
         chk:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 20, i == 1 and -8 or -4)
-        chk.Text:SetText(info.label)
+        if chk.Text then chk.Text:SetText(info.label) end
         chk:SetChecked(FPSMonitorDB.graph[info.key])
         chk:SetScript("OnClick", function(self)
             FPSMonitorDB.graph[info.key] = self:GetChecked()
@@ -1193,12 +1183,10 @@ local function CreateOptionsPanel()
         prev = chk
     end
 
-    -- Register the options panel with whichever API is available
+    -- Register the options panel using the Settings API
     if Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory then
         optionsPanel.category = Settings.RegisterCanvasLayoutCategory(optionsPanel, optionsPanel.name)
         Settings.RegisterAddOnCategory(optionsPanel.category)
-    elseif InterfaceOptions_AddCategory then
-        InterfaceOptions_AddCategory(optionsPanel)
     end
 
 end
@@ -1209,9 +1197,6 @@ local function OpenConfigPanel()
 
     if Settings and Settings.OpenToCategory and optionsPanel.category then
         Settings.OpenToCategory(optionsPanel.category)
-    elseif InterfaceOptionsFrame_OpenToCategory then
-        InterfaceOptionsFrame_OpenToCategory(optionsPanel)
-        InterfaceOptionsFrame_OpenToCategory(optionsPanel)
     else
         optionsPanel:Show()
     end
@@ -1351,6 +1336,10 @@ local function OnEvent(_, event, arg1)
         sampleInterval = FPSMonitorDB.sampleInterval or sampleInterval
         updateInterval = FPSMonitorDB.updateInterval or updateInterval
         memoryUpdateInterval = FPSMonitorDB.memoryUpdateInterval or memoryUpdateInterval
+        if UpdateAddOnMemoryUsage and GetAddOnMemoryUsage then
+            UpdateAddOnMemoryUsage()
+            updateFrame.currentMemory = GetAddOnMemoryUsage(addonName)
+        end
         -- Initialize configuration panel and graph frame
         pcall(CreateOptionsPanel)
         -- Ensure the graph enabled flag defaults to true on first run
