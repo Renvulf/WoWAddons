@@ -323,7 +323,8 @@ function CreateGraphFrame()
     graphFrame.legend:SetText("FPS (G) | ms (B) | Jit (R) | Mem MB (M) | Lat ms (Y)")
 
 
-    -- Per-metric checkboxes aligned along the right edge
+    -- Per-metric checkboxes aligned along the right edge.
+    -- These controls were not removed; they let the user toggle each metric.
     local metricInfo = {
         { key = "showFPS",         label = "FPS",          color = {0,1,0} },
         { key = "showFrameTime",   label = "Frame Time",   color = {0,0.75,1} },
