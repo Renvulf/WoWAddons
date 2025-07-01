@@ -6,6 +6,24 @@
 -- We only need the name for event filtering so discard the second value.
 local addonName = ...
 
+-- forward-declare so closures can see these
+local UpdateGraphConfig
+local CreateGraphFrame
+function UpdateGraphConfig()
+    graphTimeWindow = FPSMonitorDB.graph.timeWindow or 60
+    graphMaxSamples = math_floor(graphTimeWindow / graphUpdateThrottle)
+    if graphMaxSamples < 2 then graphMaxSamples = 2 end
+    graphHistory = { fps = {}, frameTime = {}, memory = {}, latency = {} }
+    graphLines = { fps = {}, frameTime = {}, memory = {}, latency = {} }
+    graphIndex = 1
+    graphCount = 0
+    if graphFrame then
+        graphFrame:Hide()
+        graphFrame = nil
+        CreateGraphFrame()
+    end
+end
+
 -- These runtime variables are loaded from the saved configuration in
 -- ValidateConfig().  Default values are defined in `defaultConfig` below.
 local sampleInterval = 60 -- seconds to keep frame history for average and percentiles
@@ -84,7 +102,7 @@ local graphUpdateThrottle = 0.05
 local graphElapsed = 0
 
 -- Create FPS graph frame
-local function CreateGraphFrame()
+function CreateGraphFrame()
     if graphFrame then return end
     graphFrame = CreateFrame("Frame", "FPSMonitorGraph", displayFrame or UIParent, BackdropTemplateMixin and "BackdropTemplate")
     graphFrame:SetSize(FPSMonitorDB.graph.w or 220, FPSMonitorDB.graph.h or 100)
@@ -390,22 +408,6 @@ local function ValidateConfig()
     end
 
     UpdateGraphConfig()
-end
-
--- Update graph parameters based on current settings
-local function UpdateGraphConfig()
-    graphTimeWindow = FPSMonitorDB.graph.timeWindow or 60
-    graphMaxSamples = math_floor(graphTimeWindow / graphUpdateThrottle)
-    if graphMaxSamples < 2 then graphMaxSamples = 2 end
-    graphHistory = { fps = {}, frameTime = {}, memory = {}, latency = {} }
-    graphLines = { fps = {}, frameTime = {}, memory = {}, latency = {} }
-    graphIndex = 1
-    graphCount = 0
-    if graphFrame then
-        graphFrame:Hide()
-        graphFrame = nil
-        CreateGraphFrame()
-    end
 end
 
 -- Insert a value into a sorted array while keeping its size limited. Used by
@@ -1006,6 +1008,7 @@ local function CreateOptionsPanel()
         self.text:SetText("Sample window: " .. value .. "s")
         FPSMonitorDB.sampleInterval = value
         sampleInterval = value
+        ValidateConfig()        -- repopulates sums, history and graph buffers
     end)
     sampleSlider:SetValue(sampleInterval)
     sampleSlider.text:SetText("Sample window: " .. sampleInterval .. "s")
