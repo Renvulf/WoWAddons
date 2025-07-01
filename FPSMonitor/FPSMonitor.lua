@@ -1002,15 +1002,41 @@ end
 local function CalculateStats(currentFPS, currentDT)
     local count = historyCount
     if count == 0 then
+        -- Safely grab whatever values we can for the very first frame
+        local memUsage    = (GetAddOnMemoryUsage and GetAddOnMemoryUsage(addonName) / 1024) or 0
+        local totalMem    = 0
+        if GetNumAddOns and IsAddOnLoaded and GetAddOnMemoryUsage then
+            for i = 1, GetNumAddOns() do
+                if IsAddOnLoaded(i) then
+                    totalMem = totalMem + GetAddOnMemoryUsage(i)
+                end
+            end
+            totalMem = totalMem / 1024
+        end
+        local luaM        = (collectgarbage and collectgarbage("count") / 1024) or 0
+        local cpuUsage    = (GetAddOnCPUUsage and GetAddOnCPUUsage(addonName)) or 0
+        local _, _, homeL, worldL = GetNetStats()
+        homeL = homeL or 0
+        worldL = worldL or 0
+
+        -- Return a fully populated table so format() never receives nil
         return {
-            current = currentFPS,
-            average = currentFPS,
-            min = currentFPS,
-            max = currentFPS,
-            low1 = currentFPS,
-            low01 = currentFPS,
-            frameTime = currentDT * 1000,
-            jitter = 0,
+            current      = currentFPS,
+            average      = currentFPS,
+            min          = currentFPS,
+            max          = currentFPS,
+            low1         = currentFPS,
+            low01        = currentFPS,
+            low5         = currentFPS,
+            median       = currentFPS,
+            frameTime    = currentDT * 1000,
+            jitter       = 0,
+            memory       = memUsage,
+            totalMemory  = totalMem,
+            luaMemory    = luaM,
+            homeLatency  = homeL,
+            worldLatency = worldL,
+            cpu          = cpuUsage,
         }
     end
 
