@@ -87,17 +87,11 @@ SlashCmdList["FPSGRAPH"] = function(msg)
             if not graphFrame then CreateGraphFrame() end
             if graphFrame then
                 graphFrame:Show()
-                if graphFrame.masterCheck then
-                    graphFrame.masterCheck:SetChecked(true)
-                end
             end
             print("FPSMonitor: graph enabled")
         else
             if graphFrame then
                 graphFrame:Hide()
-                if graphFrame.masterCheck then
-                    graphFrame.masterCheck:SetChecked(false)
-                end
             end
             print("FPSMonitor: graph disabled")
         end
@@ -211,16 +205,6 @@ function CreateGraphFrame()
     graphFrame.legend:SetPoint("TOPLEFT", 100, -4)
     graphFrame.legend:SetText("FPS (G) | ms (B) | Mem (M) | Lat (Y)")
 
-    -- Master checkbox to quickly toggle the graph
-    local master = CreateFrame("CheckButton", nil, graphFrame, "InterfaceOptionsCheckButtonTemplate")
-    master:SetPoint("TOPLEFT", 4, -4)
-    master.Text:SetText("Enable Graph")
-    master:SetChecked(FPSMonitorDB.graph.enabled)
-    master:SetScript("OnClick", function(self)
-        FPSMonitorDB.graph.enabled = self:GetChecked()
-        graphFrame:SetShown(FPSMonitorDB.graph.enabled)
-    end)
-    graphFrame.masterCheck = master
 
     -- Per-metric checkboxes aligned along the right edge
     local metricInfo = {
@@ -864,7 +848,8 @@ local function CreateDisplayFrame()
     displayFrame = CreateFrame("Frame", "FPSMonitorDisplay", UIParent, BackdropTemplateMixin and "BackdropTemplate")
     -- Slightly taller to leave room for the buttons
     -- so they don't overlap the statistic text
-    displayFrame:SetSize(220, 206)
+    -- Increase height slightly to leave room for additional controls
+    displayFrame:SetSize(220, 226)
     -- Position is restored from the saved configuration
     local pos = FPSMonitorDB.pos or defaultConfig.pos
     displayFrame:SetPoint(pos.point, UIParent, pos.relativePoint, pos.x, pos.y)
@@ -916,6 +901,25 @@ local function CreateDisplayFrame()
     displayFrame.labels = {}
     displayFrame.values = {}
     InitializeLabels()
+
+    -- graph toggle on main display
+    local graphToggle = CreateFrame("CheckButton", nil, displayFrame, "InterfaceOptionsCheckButtonTemplate")
+    graphToggle:SetPoint("TOPRIGHT", displayFrame, "TOPRIGHT", -10, -30)
+    graphToggle.Text:SetText("Show Graph")
+    graphToggle:SetChecked(FPSMonitorDB.graph.enabled)
+    graphToggle:SetScript("OnClick", function(self)
+        FPSMonitorDB.graph.enabled = self:GetChecked()
+        if FPSMonitorDB.graph.enabled then
+            if not graphFrame then CreateGraphFrame() end
+            graphFrame:SetParent(displayFrame)
+            graphFrame:ClearAllPoints()
+            local gpos = FPSMonitorDB.graph.pos
+            graphFrame:SetPoint("TOPLEFT", displayFrame, "BOTTOMLEFT", gpos.x, gpos.y)
+            graphFrame:Show()
+        else
+            if graphFrame then graphFrame:Hide() end
+        end
+    end)
 
     -- Populate with initial values so text is visible immediately
     local fps = GetFramerate()
@@ -1152,9 +1156,6 @@ local function CreateOptionsPanel()
         FPSMonitorDB.graph.enabled = self:GetChecked()
         if graphFrame then
             graphFrame:SetShown(FPSMonitorDB.graph.enabled)
-            if graphFrame.masterCheck then
-                graphFrame.masterCheck:SetChecked(FPSMonitorDB.graph.enabled)
-            end
         elseif FPSMonitorDB.graph.enabled then
             CreateGraphFrame()
         end
