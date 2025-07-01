@@ -799,14 +799,97 @@ local function CreateOptionsPanel()
     if not IsAddonLoaded("Blizzard_Settings") then
         pcall(LoadAddOnSafe, "Blizzard_Settings")
     end
+
     optionsPanel = CreateFrame("Frame", "FPSMonitorOptions", InterfaceOptionsFramePanelContainer or UIParent)
     optionsPanel.name = "FPS Monitor"
 
-    local title = optionsPanel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    -- Tabs --------------------------------------------------------------
+    local tab1 = CreateFrame("Button", nil, optionsPanel, "OptionsFrameTabButtonTemplate")
+    tab1:SetID(1)
+    tab1:SetText("General")
+    tab1:SetPoint("TOPLEFT", optionsPanel, "TOPLEFT", 12, -8)
+
+    local tab2 = CreateFrame("Button", nil, optionsPanel, "OptionsFrameTabButtonTemplate")
+    tab2:SetID(2)
+    tab2:SetText("Graph")
+    tab2:SetPoint("LEFT", tab1, "RIGHT", -8, 0)
+
+    PanelTemplates_SetNumTabs(optionsPanel, 2)
+    PanelTemplates_SetTab(optionsPanel, 1)
+
+    -- Containers for each tab ------------------------------------------
+    optionsPanel.general = CreateFrame("Frame", nil, optionsPanel)
+    optionsPanel.general:SetPoint("TOPLEFT", 0, -28)
+    optionsPanel.general:SetPoint("BOTTOMRIGHT")
+
+    optionsPanel.graphTab = CreateFrame("Frame", nil, optionsPanel)
+    optionsPanel.graphTab:SetAllPoints(optionsPanel.general)
+    optionsPanel.graphTab:Hide()
+
+    local function SelectTab(id)
+        optionsPanel.selectedTab = id
+        PanelTemplates_SetTab(optionsPanel, id)
+        optionsPanel.general:Hide()
+        optionsPanel.graphTab:Hide()
+        if id == 1 then
+            optionsPanel.general:Show()
+            if graphFrame and graphFrame:GetParent() == optionsPanel.graphTab then
+                graphFrame:SetMovable(true)
+                graphFrame:SetResizable(true)
+                if graphFrame.sizer then graphFrame.sizer:Show() end
+                local gpos = FPSMonitorDB.graph.pos or { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -10 }
+                graphFrame:SetParent(UIParent)
+                graphFrame:ClearAllPoints()
+                graphFrame:SetPoint(gpos.point, UIParent, gpos.relativePoint, gpos.x, gpos.y)
+                if not FPSMonitorDB.graph.enabled then
+                    graphFrame:Hide()
+                end
+            end
+        else
+            optionsPanel.graphTab:Show()
+            if FPSMonitorDB.graph.enabled then
+                if not graphFrame then pcall(CreateGraphFrame) end
+                if graphFrame then
+                    graphFrame:SetParent(optionsPanel.graphTab)
+                    graphFrame:SetPoint("TOPLEFT", 10, -10)
+                    graphFrame:SetMovable(false)
+                    graphFrame:SetResizable(false)
+                    if graphFrame.sizer then graphFrame.sizer:Hide() end
+                    graphFrame:Show()
+                end
+            end
+        end
+    end
+
+    tab1:SetScript("OnClick", function() SelectTab(1) end)
+    tab2:SetScript("OnClick", function() SelectTab(2) end)
+
+    optionsPanel:SetScript("OnHide", function()
+        if graphFrame and graphFrame:GetParent() == optionsPanel.graphTab then
+            graphFrame:SetMovable(true)
+            graphFrame:SetResizable(true)
+            if graphFrame.sizer then graphFrame.sizer:Show() end
+            local gpos = FPSMonitorDB.graph.pos or { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -10 }
+            graphFrame:SetParent(UIParent)
+            graphFrame:ClearAllPoints()
+            graphFrame:SetPoint(gpos.point, UIParent, gpos.relativePoint, gpos.x, gpos.y)
+            if not FPSMonitorDB.graph.enabled then
+                graphFrame:Hide()
+            end
+        end
+    end)
+
+    optionsPanel:SetScript("OnShow", function()
+        SelectTab(optionsPanel.selectedTab or 1)
+    end)
+
+    --------------------------------------------------------------------
+    -- General tab contents
+    local title = optionsPanel.general:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
     title:SetText("FPS Monitor")
 
-    local minimapCheck = CreateFrame("CheckButton", nil, optionsPanel, "InterfaceOptionsCheckButtonTemplate")
+    local minimapCheck = CreateFrame("CheckButton", nil, optionsPanel.general, "InterfaceOptionsCheckButtonTemplate")
     minimapCheck:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
     minimapCheck.Text:SetText("Show minimap button")
     minimapCheck:SetChecked(not FPSMonitorDB.minimap.hide)
@@ -815,13 +898,13 @@ local function CreateOptionsPanel()
         FPSMonitorDB.minimap.hide = not show
         if show then
             if not minimapButton then CreateMinimapButton() end
-            minimapButton:Show()
+            if minimapButton then minimapButton:Show() end
         elseif minimapButton then
             minimapButton:Hide()
         end
     end)
 
-    local updateSlider = CreateFrame("Slider", nil, optionsPanel, "OptionsSliderTemplate")
+    local updateSlider = CreateFrame("Slider", nil, optionsPanel.general, "OptionsSliderTemplate")
     updateSlider:SetPoint("TOPLEFT", minimapCheck, "BOTTOMLEFT", 0, -30)
     updateSlider:SetMinMaxValues(0.1, 2)
     updateSlider:SetValueStep(0.1)
@@ -842,7 +925,7 @@ local function CreateOptionsPanel()
     updateSlider:SetValue(updateInterval)
     updateSlider.text:SetText("Update interval: " .. updateInterval .. "s")
 
-    local sampleSlider = CreateFrame("Slider", nil, optionsPanel, "OptionsSliderTemplate")
+    local sampleSlider = CreateFrame("Slider", nil, optionsPanel.general, "OptionsSliderTemplate")
     sampleSlider:SetPoint("TOPLEFT", updateSlider, "BOTTOMLEFT", 0, -40)
     sampleSlider:SetMinMaxValues(10, 120)
     sampleSlider:SetValueStep(10)
@@ -863,7 +946,7 @@ local function CreateOptionsPanel()
     sampleSlider:SetValue(sampleInterval)
     sampleSlider.text:SetText("Sample window: " .. sampleInterval .. "s")
 
-    local memorySlider = CreateFrame("Slider", nil, optionsPanel, "OptionsSliderTemplate")
+    local memorySlider = CreateFrame("Slider", nil, optionsPanel.general, "OptionsSliderTemplate")
     memorySlider:SetPoint("TOPLEFT", sampleSlider, "BOTTOMLEFT", 0, -40)
     memorySlider:SetMinMaxValues(1, 30)
     memorySlider:SetValueStep(1)
@@ -884,7 +967,7 @@ local function CreateOptionsPanel()
     memorySlider:SetValue(memoryUpdateInterval)
     memorySlider.text:SetText("Memory update: " .. memoryUpdateInterval .. "s")
 
-    local graphCheck = CreateFrame("CheckButton", nil, optionsPanel, "InterfaceOptionsCheckButtonTemplate")
+    local graphCheck = CreateFrame("CheckButton", nil, optionsPanel.general, "InterfaceOptionsCheckButtonTemplate")
     graphCheck:SetPoint("TOPLEFT", memorySlider, "BOTTOMLEFT", 0, -30)
     graphCheck.Text:SetText("Enable FPS graph")
     graphCheck:SetChecked(FPSMonitorDB.graph.enabled)
@@ -906,6 +989,9 @@ local function CreateOptionsPanel()
     elseif InterfaceOptions_AddCategory then
         InterfaceOptions_AddCategory(optionsPanel)
     end
+
+    -- Default to first tab
+    SelectTab(1)
 end
 
 -- Open configuration panel using whichever API is available
@@ -1035,8 +1121,8 @@ updateFrame:SetScript("OnUpdate", function(self, elapsed)
         AddSample(elapsed)
     end
 
-    -- Throttled graph updates
-    if FPSMonitorDB.graph.enabled then
+    -- Throttled graph updates only when graph is visible
+    if graphFrame and graphFrame:IsShown() then
         graphElapsed = graphElapsed + elapsed
         if graphElapsed >= graphUpdateThrottle then
             graphElapsed = 0
