@@ -219,8 +219,8 @@ function CreateGraphFrame()
     if graphFrame.SetClipsChildren then
         graphFrame:SetClipsChildren(false)
     end
-    -- install our OnMouseMove *before* anything might try to GetScript it
-    graphFrame:SetScript("OnMouseMove", function(self, x, y)
+    -- safely hook OnMouseMove so it never errors if someone calls GetScript
+    graphFrame:HookScript("OnMouseMove", function(self, x, y)
         local width = self:GetWidth() - 68
         local sampleCount = graphCount
         local i = math.floor(((x - 2) / width) * (sampleCount - 1)) + 1
@@ -357,9 +357,10 @@ function CreateGraphFrame()
     graphFrame.metricChecks = {}
     local labelInset = 60 -- distance from the right edge
     for i, info in ipairs(metricInfo) do
-        -- Use UICheckButtonTemplate for retail clients
-        local chk = CreateFrame("CheckButton", nil, graphFrame, "UICheckButtonTemplate")
+        -- Use BackdropTemplate with UICheckButtonTemplate so the box renders correctly
+        local chk = CreateFrame("CheckButton", nil, graphFrame, "BackdropTemplate,UICheckButtonTemplate")
         chk:SetSize(20, 20)
+        chk:EnableMouse(true)
         -- Anchor checkbox slightly outside the frame bounds to avoid overlap
         chk:SetPoint("TOPRIGHT", graphFrame, "TOPRIGHT", -24, -20 * i)
         chk:Show()  -- ensure it’s visible
