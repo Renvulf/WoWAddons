@@ -222,6 +222,9 @@ function CreateGraphFrame()
     end
     graphFrame.sizer = sizer
 
+    -- throttle mouse move tooltip updates
+    local lastTooltipUpdate = 0
+
     graphFrame.title = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     graphFrame.title:SetPoint("TOPLEFT", graphFrame, "TOPLEFT", 4, -4)
     SetFontSafe(graphFrame.title, 12, "OUTLINE")
@@ -288,13 +291,12 @@ function CreateGraphFrame()
     }
 
     graphFrame.metricChecks = {}
-    local labelInset = 60 -- distance from the right edge
+    local labelInset = 4 -- distance outside the frame
     for i, info in ipairs(metricInfo) do
-        -- Use UICheckButtonTemplate for retail clients
         local chk = CreateFrame("CheckButton", nil, graphFrame, "UICheckButtonTemplate")
         chk:SetSize(20, 20)
-        -- Anchor checkbox slightly inside the frame so it isn't clipped
-        chk:SetPoint("TOPRIGHT", graphFrame, "TOPRIGHT", -labelInset, -16 * i - 4)
+        -- Place checkboxes just outside the graph so text never overlaps
+        chk:SetPoint("TOPLEFT", graphFrame, "TOPRIGHT", labelInset, -20 * i)
         -- Hide the built-in label to avoid clipping
         if chk.Text then chk.Text:Hide() end
 
@@ -373,8 +375,13 @@ function CreateGraphFrame()
     end)
     graphFrame:SetScript("OnLeave", GameTooltip_Hide)
     graphFrame:SetScript("OnMouseMove", function(self, x, y)
+        if not x or not y then return end
+        local now = GetTime()
+        if now - lastTooltipUpdate < 0.05 then return end
+        lastTooltipUpdate = now
         local width = self:GetWidth() - 68
         local sampleCount = graphCount
+        if sampleCount < 1 then return end
         local i = math.floor(((x - 2) / width) * (sampleCount - 1)) + 1
         if i < 1 or i > sampleCount then return end
         local idx = graphStart + i - 1
