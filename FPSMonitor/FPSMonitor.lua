@@ -215,8 +215,36 @@ function CreateGraphFrame()
             UpdateGraph()
         end
     end)
-    -- remove child-clipping so our checkboxes remain visible
-    -- if graphFrame.SetClipsChildren then graphFrame:SetClipsChildren(false) end
+    -- allow our checkbuttons to render even if they poke outside the frame
+    if graphFrame.SetClipsChildren then
+        graphFrame:SetClipsChildren(false)
+    end
+    -- set the mouse-move handler early so GetScript("OnMouseMove") always succeeds
+    graphFrame:SetScript("OnMouseMove", function(self, x, y)
+        local width = self:GetWidth() - 68
+        local sampleCount = graphCount
+        local i = math.floor(((x - 2) / width) * (sampleCount - 1)) + 1
+        if i < 1 or i > sampleCount then return end
+        local idx = graphStart + i - 1
+        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+        GameTooltip:ClearLines()
+        local latest = graphHistory.times[graphStart + graphCount - 1] or GetTime()
+        local secsAgo = latest - (graphHistory.times[idx] or latest)
+        GameTooltip:SetText(string.format("t = -%ds", math.floor(secsAgo)))
+        GameTooltip:AddLine(string.format("FPS: %.1f", graphHistory.fps[idx]))
+        GameTooltip:AddLine(string.format("ms:  %.2f", graphHistory.frameTime[idx]))
+        GameTooltip:AddLine(string.format("Jit: %.2f", graphHistory.jitter[idx] or 0))
+        GameTooltip:AddLine(string.format("Mem: %.2f MB", graphHistory.memory[idx]))
+        if graphHistory.totalMemory[idx] then
+            GameTooltip:AddLine(string.format("Tot: %.2f MB", graphHistory.totalMemory[idx]))
+        end
+        GameTooltip:AddLine(string.format("Lat: %.0f / %.0f / %.0f",
+            graphHistory.latency[idx],
+            graphHistory.homeLatency[idx],
+            graphHistory.worldLatency[idx]
+        ))
+        GameTooltip:Show()
+    end)
     graphFrame:RegisterForDrag("LeftButton")
     graphFrame:SetScript("OnDragStart", graphFrame.StartMoving)
     graphFrame:SetScript("OnDragStop", function(self)
@@ -333,7 +361,7 @@ function CreateGraphFrame()
         local chk = CreateFrame("CheckButton", nil, graphFrame, "UICheckButtonTemplate")
         chk:SetSize(20, 20)
         -- Anchor checkbox slightly outside the frame bounds to avoid overlap
-        chk:SetPoint("TOPRIGHT", graphFrame, "TOPRIGHT", -4, -20 * i)
+        chk:SetPoint("TOPRIGHT", graphFrame, "TOPRIGHT", -24, -20 * i)
         -- Hide the built-in label to avoid clipping
         if chk.Text then chk.Text:Hide() end
 
@@ -411,33 +439,6 @@ function CreateGraphFrame()
         GameTooltip:Show()
     end)
     graphFrame:SetScript("OnLeave", GameTooltip_Hide)
-    -- set the mouse-move handler
-    graphFrame:SetScript("OnMouseMove", function(self, x, y)
-        local width = self:GetWidth() - 68
-        local sampleCount = graphCount
-        local i = math.floor(((x - 2) / width) * (sampleCount - 1)) + 1
-        if i < 1 or i > sampleCount then return end
-        local idx = graphStart + i - 1
-        GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
-        GameTooltip:ClearLines()
-        local latest = graphHistory.times[graphStart + graphCount - 1] or GetTime()
-        local secsAgo = latest - (graphHistory.times[idx] or latest)
-        GameTooltip:SetText(string.format("t = -%ds", math.floor(secsAgo)))
-        GameTooltip:AddLine(string.format("FPS: %.1f", graphHistory.fps[idx]))
-        GameTooltip:AddLine(string.format("ms:  %.2f", graphHistory.frameTime[idx]))
-        GameTooltip:AddLine(string.format("Jit: %.2f", graphHistory.jitter[idx] or 0))
-        GameTooltip:AddLine(string.format("Mem: %.2f MB", graphHistory.memory[idx]))
-        if graphHistory.totalMemory[idx] then
-            GameTooltip:AddLine(string.format("Tot: %.2f MB", graphHistory.totalMemory[idx]))
-        end
-        GameTooltip:AddLine(string.format("Lat: %.0f / %.0f / %.0f",
-            graphHistory.latency[idx],
-            graphHistory.homeLatency[idx],
-            graphHistory.worldLatency[idx]
-        ))
-        GameTooltip:Show()
-    end)
-
     graphFrame:EnableMouseWheel(true)
     graphFrame:SetScript("OnMouseWheel", function(_, delta)
         local w = FPSMonitorDB.graph.timeWindow - delta * 5
