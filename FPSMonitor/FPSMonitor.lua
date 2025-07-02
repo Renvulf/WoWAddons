@@ -192,9 +192,11 @@ function CreateGraphFrame()
             UpdateGraph()
         end
     end)
-    -- enforce clipping so lines can’t escape the frame
+    -- Allow child frames, such as metric checkboxes, to render outside
+    -- the bounds of the graph frame. This keeps UI elements visible even
+    -- when positioned just outside the main graph area.
     if graphFrame.SetClipsChildren then
-        graphFrame:SetClipsChildren(true)
+        graphFrame:SetClipsChildren(false)
     end
     graphFrame:RegisterForDrag("LeftButton")
     graphFrame:SetScript("OnDragStart", graphFrame.StartMoving)
