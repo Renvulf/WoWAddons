@@ -216,13 +216,7 @@ function CreateGraphFrame()
         end
     end)
     -- remove child-clipping so our checkboxes remain visible
-<<<<<<< codex/fix-lua-world-of-warcraft-addon-issues
-    -- if graphFrame.SetClipsChildren then
-    --     graphFrame:SetClipsChildren(false)
-    -- end
-=======
     -- if graphFrame.SetClipsChildren then graphFrame:SetClipsChildren(false) end
->>>>>>> main
     graphFrame:RegisterForDrag("LeftButton")
     graphFrame:SetScript("OnDragStart", graphFrame.StartMoving)
     graphFrame:SetScript("OnDragStop", function(self)
