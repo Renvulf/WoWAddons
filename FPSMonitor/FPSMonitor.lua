@@ -215,10 +215,8 @@ function CreateGraphFrame()
             UpdateGraph()
         end
     end)
-    -- Ensure lines are clipped within the frame bounds
-    if graphFrame.SetClipsChildren then
-        graphFrame:SetClipsChildren(true)
-    end
+    -- remove child-clipping so our checkboxes remain visible
+    -- if graphFrame.SetClipsChildren then graphFrame:SetClipsChildren(false) end
     graphFrame:RegisterForDrag("LeftButton")
     graphFrame:SetScript("OnDragStart", graphFrame.StartMoving)
     graphFrame:SetScript("OnDragStop", function(self)
@@ -335,7 +333,7 @@ function CreateGraphFrame()
         local chk = CreateFrame("CheckButton", nil, graphFrame, "UICheckButtonTemplate")
         chk:SetSize(20, 20)
         -- Anchor checkbox slightly outside the frame bounds to avoid overlap
-        chk:SetPoint("TOPLEFT", graphFrame, "TOPRIGHT", 16, -20 * i)
+        chk:SetPoint("TOPRIGHT", graphFrame, "TOPRIGHT", -4, -20 * i)
         -- Hide the built-in label to avoid clipping
         if chk.Text then chk.Text:Hide() end
 
@@ -413,8 +411,8 @@ function CreateGraphFrame()
         GameTooltip:Show()
     end)
     graphFrame:SetScript("OnLeave", GameTooltip_Hide)
-    -- hook rather than overwrite, so we never call GetScript()
-    graphFrame:HookScript("OnMouseMove", function(self, x, y)
+    -- set the mouse-move handler
+    graphFrame:SetScript("OnMouseMove", function(self, x, y)
         local width = self:GetWidth() - 68
         local sampleCount = graphCount
         local i = math.floor(((x - 2) / width) * (sampleCount - 1)) + 1
