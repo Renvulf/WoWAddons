@@ -185,9 +185,9 @@ function CreateGraphFrame()
             UpdateGraph()
         end
     end)
-    -- Ensure lines are clipped within the frame bounds
+    -- Allow children (our checkboxes) to draw outside the graph bounds
     if graphFrame.SetClipsChildren then
-        graphFrame:SetClipsChildren(true)
+        graphFrame:SetClipsChildren(false)
     end
     graphFrame:RegisterForDrag("LeftButton")
     graphFrame:SetScript("OnDragStart", graphFrame.StartMoving)
@@ -295,8 +295,15 @@ function CreateGraphFrame()
     for i, info in ipairs(metricInfo) do
         local chk = CreateFrame("CheckButton", nil, graphFrame, "UICheckButtonTemplate")
         chk:SetSize(20, 20)
-        -- Place checkboxes just outside the graph so text never overlaps
-        chk:SetPoint("TOPLEFT", graphFrame, "TOPRIGHT", labelInset, -20 * i)
+        -- Place checkboxes just outside the graph. Use a vertical offset that
+        -- keeps all boxes within view for typical graph sizes.
+        chk:SetPoint(
+            "TOPLEFT",
+            graphFrame,
+            "TOPRIGHT",
+            labelInset,
+            -((i - 1) * 24 + 20)
+        )
         -- Hide the built-in label to avoid clipping
         if chk.Text then chk.Text:Hide() end
 
