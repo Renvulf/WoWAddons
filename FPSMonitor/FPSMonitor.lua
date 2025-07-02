@@ -205,7 +205,7 @@ function CreateGraphFrame()
     graphFrame:EnableMouse(true)
     graphFrame:SetMovable(true)
     graphFrame:SetResizable(true)
-    -- Set minimum resize bounds
+    -- make sure children outside the frame are visible
     graphFrame:SetResizeBounds(120, 60)
     graphFrame:SetClampedToScreen(true)
     graphFrame:SetScript("OnSizeChanged", function(self)
@@ -219,7 +219,7 @@ function CreateGraphFrame()
     if graphFrame.SetClipsChildren then
         graphFrame:SetClipsChildren(false)
     end
-    -- set the mouse-move handler early so GetScript("OnMouseMove") always succeeds
+    -- install our OnMouseMove *before* anything might try to GetScript it
     graphFrame:SetScript("OnMouseMove", function(self, x, y)
         local width = self:GetWidth() - 68
         local sampleCount = graphCount
@@ -362,6 +362,7 @@ function CreateGraphFrame()
         chk:SetSize(20, 20)
         -- Anchor checkbox slightly outside the frame bounds to avoid overlap
         chk:SetPoint("TOPRIGHT", graphFrame, "TOPRIGHT", -24, -20 * i)
+        chk:Show()  -- ensure it’s visible
         -- Hide the built-in label to avoid clipping
         if chk.Text then chk.Text:Hide() end
 
@@ -446,6 +447,7 @@ function CreateGraphFrame()
         UpdateGraphConfig()
     end)
 
+    -- now that everything's created, show the graph
     graphFrame:SetShown(FPSMonitorDB.graph.enabled)
 end
 
