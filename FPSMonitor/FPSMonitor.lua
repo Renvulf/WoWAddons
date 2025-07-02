@@ -778,7 +778,15 @@ local function AddSample(dt)
     graphHistory.jitter[index] = math_sqrt(variance) * 1000
 
     graphHistory.memory[index] = memUsage
-    graphHistory.totalMemory[index] = memUsage
+
+    -- calculate sum of all loaded-addon memory for the Total Mem series
+    local total = 0
+    for i = 1, GetNumAddOns() do
+        if IsAddOnLoaded(i) then
+            total = total + GetAddOnMemoryUsage(i)
+        end
+    end
+    graphHistory.totalMemory[index] = total / 1024
     if updateFrame then updateFrame.currentMemory = memUsage end
 
     local lat = (homeLat and worldLat) and ((homeLat + worldLat) / 2) or 0
@@ -1034,18 +1042,33 @@ function UpdateGraph()
     if maxFPS == minFPS then maxFPS = minFPS + 1 end
     local fpsRange = maxFPS - minFPS
     if FPSMonitorDB.graph.showPercentiles and graphGrid.p1 and graphGrid.p01 then
-        local fps = GetFramerate()
-        local stats = CalculateStats(fps, fps > 0 and (1 / fps) or 0)
-        local y1  = ((stats.low1 - minFPS) / fpsRange) * height + 2
-        local y01 = ((stats.low01 - minFPS) / fpsRange) * height + 2
-        graphGrid.p1:SetStartPoint("BOTTOMLEFT", 2, y1)
-        graphGrid.p1:SetEndPoint("BOTTOMRIGHT", -2, y1)
-        graphGrid.p1:Show()
-        graphGrid.p01:SetStartPoint("BOTTOMLEFT", 2, y01)
-        graphGrid.p01:SetEndPoint("BOTTOMRIGHT", -2, y01)
-        graphGrid.p01:Show()
+        local fps    = GetFramerate()
+        local stats  = CalculateStats(fps, fps > 0 and (1 / fps) or 0)
+        local bottom = 2
+        local top    = height + 2
+
+        -- raw positions relative to the graph
+        local y1raw  = ((stats.low1  - minFPS) / fpsRange) * height + bottom
+        local y01raw = ((stats.low01 - minFPS) / fpsRange) * height + bottom
+
+        -- only draw if inside the graph bounds
+        if y1raw >= bottom and y1raw <= top then
+            graphGrid.p1:SetStartPoint("BOTTOMLEFT", 2, y1raw)
+            graphGrid.p1:SetEndPoint("BOTTOMRIGHT", -2, y1raw)
+            graphGrid.p1:Show()
+        else
+            graphGrid.p1:Hide()
+        end
+
+        if y01raw >= bottom and y01raw <= top then
+            graphGrid.p01:SetStartPoint("BOTTOMLEFT", 2, y01raw)
+            graphGrid.p01:SetEndPoint("BOTTOMRIGHT", -2, y01raw)
+            graphGrid.p01:Show()
+        else
+            graphGrid.p01:Hide()
+        end
     else
-        if graphGrid.p1 then graphGrid.p1:Hide() end
+        if graphGrid.p1  then graphGrid.p1:Hide()  end
         if graphGrid.p01 then graphGrid.p01:Hide() end
     end
 
