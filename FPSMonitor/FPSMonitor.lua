@@ -6,6 +6,13 @@
 -- We only need the name for event filtering so discard the second value.
 local addonName = ...
 
+-- Compatibility shims for Retail's namespaced AddOn API
+local GetNumAddOns         = (C_AddOns and C_AddOns.GetNumAddOns)         or GetNumAddOns
+local IsAddOnLoaded        = (C_AddOns and C_AddOns.IsAddOnLoaded)        or IsAddOnLoaded
+local GetAddOnMemoryUsage  = (C_AddOns and C_AddOns.GetAddOnMemoryUsage)  or GetAddOnMemoryUsage
+local GetAddOnCPUUsage     = (C_AddOns and C_AddOns.GetAddOnCPUUsage)     or GetAddOnCPUUsage
+local GetAddOnInfo         = (C_AddOns and C_AddOns.GetAddOnInfo)         or GetAddOnInfo
+
 -- Graph related state and configuration
 local graphFrame
 local graphLines = { fps = {}, frameTime = {}, jitter = {}, memory = {}, latency = {}, homeLatency = {}, worldLatency = {}, totalMemory = {} }
