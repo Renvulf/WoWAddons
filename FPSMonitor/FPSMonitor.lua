@@ -33,8 +33,10 @@ local graphHistory = {
 local graphStart = 1       -- first valid index in the history
 local graphCount = 0       -- number of samples currently stored
 local graphTimeWindow = 60
-local graphUpdateThrottle = 0.05
-local graphSampleResolution = 200
+-- lower update frequency for better performance
+local graphUpdateThrottle = 0.1
+-- fewer line segments means fewer draw calls
+local graphSampleResolution = 100
 local graphElapsed = 0
 local graphYMin
 local graphYMax
@@ -47,6 +49,18 @@ local graphYMaxLatency
 local graphYMinJitter
 local graphYMaxJitter
 local graphPaused = false
+-- persistent axis ceilings to keep scales from shrinking
+local persistentMaxFPS = 0
+local persistentMaxFrameTime = 0
+local persistentMaxMemory = 0
+local persistentMaxLatency = 0
+local persistentMaxJitter = 0
+
+-- throttled memory sampling helpers
+local lastMemorySampleTime = 0
+local lastTotalMemorySampleTime = 0
+local cachedTotalMemory = 0
+local totalMemoryUpdateInterval = 1
 
 -- Local references to frequently used math functions
 local math_sqrt  = math.sqrt
@@ -65,7 +79,7 @@ local TAU        = math.pi * 2
 local UpdateGraph, UpdateGraphConfig, CreateGraphFrame
 function UpdateGraphConfig()
     graphTimeWindow = FPSMonitorDB.graph.timeWindow or 60
-    graphSampleResolution = FPSMonitorDB.graph.graphSampleResolution or 200
+    graphSampleResolution = FPSMonitorDB.graph.graphSampleResolution or 100
     graphHistory = {
         times = {},
         fps = {},
@@ -454,7 +468,8 @@ local defaultConfig = {
     sampleInterval = 60,
     -- Update addon memory usage as often as graph updates for smoother line
     memoryUpdateInterval = 0.05,
-    graphUpdateThrottle = 0.05,
+    -- throttle graph updates to reduce CPU usage
+    graphUpdateThrottle = 0.1,
     graph = {
         enabled = true,
         w = 220,
@@ -467,22 +482,25 @@ local defaultConfig = {
         showMemory = true,
         showTotalMemory = false,
         showLatency = true,
-        yMin = nil,
+        -- stick axes to zero by default
+        yMin = 0,
         yMax = nil,
-        yMinFrameTime = nil,
+        yMinFrameTime = 0,
         yMaxFrameTime = nil,
-        yMinMemory = nil,
+        yMinMemory = 0,
         yMaxMemory = nil,
-        yMinLatency = nil,
+        yMinLatency = 0,
         yMaxLatency = nil,
-        yMinJitter = nil,
+        yMinJitter = 0,
         yMaxJitter = nil,
         smoothing = 0,
         showHomeLatency = false,
         showWorldLatency = false,
-        showPercentiles = true,
+        -- disable percentiles by default for lower overhead
+        showPercentiles = false,
         alertThreshold = 30,
-        graphSampleResolution = 200,
+        -- fewer points reduces drawing cost
+        graphSampleResolution = 100,
         colorFPS = {0,1,0},
         thickFPS = 1.5,
         colorFrameTime = {0,0.75,1},
@@ -730,7 +748,17 @@ local function AddSample(dt)
     -- accurate instantaneous value for this purpose.
     local fps = GetFramerate()
     if not fps or fps <= 0 then return end
-    local memUsage = GetAddOnMemoryUsage(addonName) / 1024
+    local now = GetTime()
+    local memUsage = updateFrame and updateFrame.currentMemory or 0
+    if now - lastMemorySampleTime >= memoryUpdateInterval then
+        if UpdateAddOnMemoryUsage and GetAddOnMemoryUsage then
+            UpdateAddOnMemoryUsage()
+        end
+        memUsage = GetAddOnMemoryUsage(addonName) / 1024
+        if updateFrame then updateFrame.currentMemory = memUsage end
+        lastMemorySampleTime = now
+    end
+
     local _, _, homeLat, worldLat = GetNetStats()
 
     -- Update running sums used for quick statistics calculation
@@ -772,7 +800,6 @@ local function AddSample(dt)
     end
 
     -- Track samples for the FPS graph using a time-based sliding window
-    local now = GetTime()
     local index = graphStart + graphCount
     graphHistory.times[index] = now
     graphHistory.fps[index] = fps
@@ -790,14 +817,20 @@ local function AddSample(dt)
     graphHistory.memory[index] = memUsage
 
     -- calculate sum of all loaded-addon memory for the Total Mem series
-    local total = 0
-    for i = 1, GetNumAddOns() do
-        if IsAddOnLoaded(i) then
-            total = total + GetAddOnMemoryUsage(i)
+    if FPSMonitorDB.graph.showTotalMemory then
+        if now - lastTotalMemorySampleTime >= totalMemoryUpdateInterval then
+            if UpdateAddOnMemoryUsage then UpdateAddOnMemoryUsage() end
+            local total = 0
+            for i = 1, GetNumAddOns() do
+                if IsAddOnLoaded(i) then
+                    total = total + GetAddOnMemoryUsage(i)
+                end
+            end
+            cachedTotalMemory = total / 1024
+            lastTotalMemorySampleTime = now
         end
+        graphHistory.totalMemory[index] = cachedTotalMemory
     end
-    graphHistory.totalMemory[index] = total / 1024
-    if updateFrame then updateFrame.currentMemory = memUsage end
 
     local lat = (homeLat and worldLat) and ((homeLat + worldLat) / 2) or 0
     graphHistory.latency[index] = lat
@@ -1047,8 +1080,12 @@ function UpdateGraph()
             if v > maxFPS then maxFPS = v end
         end
     end
-    if graphYMin ~= nil then minFPS = graphYMin end
-    if graphYMax ~= nil then maxFPS = graphYMax end
+    -- lock graph bottom at zero and only expand upward
+    minFPS = 0
+    persistentMaxFPS = math_max(persistentMaxFPS, maxFPS)
+    maxFPS = persistentMaxFPS
+    graphYMax = persistentMaxFPS
+    graphYMin = 0
     if maxFPS == minFPS then maxFPS = minFPS + 1 end
     local fpsRange = maxFPS - minFPS
     if FPSMonitorDB.graph.showPercentiles and graphGrid.p1 and graphGrid.p01 then
@@ -1094,20 +1131,35 @@ function UpdateGraph()
             end
         end
         if m.key == "fps" then
-            if graphYMin ~= nil then minVal = graphYMin end
-            if graphYMax ~= nil then maxVal = graphYMax end
+            minVal = 0
+            persistentMaxFPS = math_max(persistentMaxFPS, maxVal)
+            maxVal = persistentMaxFPS
+            graphYMax = persistentMaxFPS
+            graphYMin = 0
         elseif m.key == "frameTime" then
-            if graphYMinFrameTime ~= nil then minVal = graphYMinFrameTime end
-            if graphYMaxFrameTime ~= nil then maxVal = graphYMaxFrameTime end
+            minVal = 0
+            persistentMaxFrameTime = math_max(persistentMaxFrameTime, maxVal)
+            maxVal = persistentMaxFrameTime
+            graphYMaxFrameTime = persistentMaxFrameTime
+            graphYMinFrameTime = 0
         elseif m.key == "jitter" then
-            if graphYMinJitter ~= nil then minVal = graphYMinJitter end
-            if graphYMaxJitter ~= nil then maxVal = graphYMaxJitter end
-        elseif m.key == "memory" then
-            if graphYMinMemory ~= nil then minVal = graphYMinMemory end
-            if graphYMaxMemory ~= nil then maxVal = graphYMaxMemory end
+            minVal = 0
+            persistentMaxJitter = math_max(persistentMaxJitter, maxVal)
+            maxVal = persistentMaxJitter
+            graphYMaxJitter = persistentMaxJitter
+            graphYMinJitter = 0
+        elseif m.key == "memory" or m.key == "totalMemory" then
+            minVal = 0
+            persistentMaxMemory = math_max(persistentMaxMemory, maxVal)
+            maxVal = persistentMaxMemory
+            graphYMaxMemory = persistentMaxMemory
+            graphYMinMemory = 0
         else -- latency metrics
-            if graphYMinLatency ~= nil then minVal = graphYMinLatency end
-            if graphYMaxLatency ~= nil then maxVal = graphYMaxLatency end
+            minVal = 0
+            persistentMaxLatency = math_max(persistentMaxLatency, maxVal)
+            maxVal = persistentMaxLatency
+            graphYMaxLatency = persistentMaxLatency
+            graphYMinLatency = 0
         end
         if not minVal or not maxVal then
             minVal, maxVal = 0, 1
