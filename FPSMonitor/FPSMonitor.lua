@@ -192,9 +192,9 @@ function CreateGraphFrame()
             UpdateGraph()
         end
     end)
-    -- Allow children (our checkboxes) to draw outside the graph bounds
+    -- enforce clipping so lines can’t escape the frame
     if graphFrame.SetClipsChildren then
-        graphFrame:SetClipsChildren(false)
+        graphFrame:SetClipsChildren(true)
     end
     graphFrame:RegisterForDrag("LeftButton")
     graphFrame:SetScript("OnDragStart", graphFrame.StartMoving)
@@ -276,8 +276,9 @@ function CreateGraphFrame()
         graphGrid.p1:SetThickness(1)
         graphGrid.p01:SetColorTexture(1,0.5,0,0.6)
         graphGrid.p01:SetThickness(1)
-        graphGrid.p1:Show()
-        graphGrid.p01:Show()
+        -- don’t show until properly positioned in UpdateGraph()
+        graphGrid.p1:Hide()
+        graphGrid.p01:Hide()
     end
     graphFrame.legend = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     SetFontSafe(graphFrame.legend, 10)
