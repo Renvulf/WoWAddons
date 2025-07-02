@@ -9,12 +9,14 @@ local addonName = ...
 -- Graph related state and configuration
 local graphFrame
 local graphLines = {
-    fps = {}, frameTime = {}, jitter = {}, memory = {}, latency = {},
-    homeLatency = {}, worldLatency = {}, totalMemory = {}, totalMem = {}, luaMem = {}, cpu = {},
-    bandwidthIn = {}, bandwidthOut = {}, netJitter = {}, frameDrops = {}
+    fps = {},
+    frameTime = {},
+    jitter = {},
+    memory = {},
+    latency = {},
 }
 -- Separate right-side axes for latency and memory
-local graphGrid = { h = {}, hRightLat = {}, hRightMem = {}, v = {}, now = nil, p1 = nil, p5 = nil, p01 = nil, pMed = nil }
+local graphGrid = { h = {}, hRightLat = {}, hRightMem = {}, v = {}, now = nil, p1 = nil, p01 = nil, pMed = nil }
 local graphLabels = { h = {}, hRightLat = {}, hRightMem = {}, v = {} }
 local graphHistory = {
     times = {},
@@ -22,23 +24,13 @@ local graphHistory = {
     frameTime = {},
     jitter = {},
     memory = {},
-    totalMemory = {},
-    totalMem = {},
-    luaMem = {},
-    cpu = {},
     latency = {},
-    homeLatency = {},
-    worldLatency = {},
-    bandwidthIn = {},
-    bandwidthOut = {},
-    netJitter = {},
-    frameDrops = {},
 }
 local graphStart = 1       -- first valid index in the history
 local graphCount = 0       -- number of samples currently stored
 local graphTimeWindow = 60
-local graphUpdateThrottle = 0.1
-local graphSampleResolution = 100
+local graphUpdateThrottle = 0.25
+local graphSampleResolution = 50
 local graphElapsed = 0
 local graphYMin
 local graphYMax
@@ -69,18 +61,12 @@ local TAU        = math.pi * 2
 local UpdateGraph, UpdateGraphConfig, CreateGraphFrame
 function UpdateGraphConfig()
     graphTimeWindow = FPSMonitorDB.graph.timeWindow or 60
-    graphSampleResolution = FPSMonitorDB.graph.graphSampleResolution or 100
+    graphSampleResolution = FPSMonitorDB.graph.graphSampleResolution or 50
     graphHistory = {
         times = {}, fps = {}, frameTime = {}, jitter = {},
-        memory = {}, totalMemory = {}, totalMem = {}, luaMem = {}, cpu = {},
-        latency = {}, homeLatency = {}, worldLatency = {},
-        bandwidthIn = {}, bandwidthOut = {}, netJitter = {}, frameDrops = {}
     }
     graphLines = {
         fps = {}, frameTime = {}, jitter = {}, memory = {}, latency = {},
-        homeLatency = {}, worldLatency = {}, totalMemory = {}, totalMem = {},
-        luaMem = {}, cpu = {}, bandwidthIn = {}, bandwidthOut = {},
-        netJitter = {}, frameDrops = {}
     }
     graphStart = 1
     graphCount = 0
@@ -109,7 +95,7 @@ end
 local sampleInterval = 60 -- seconds to keep frame history for average and percentiles
 local updateInterval = 0.5 -- seconds between display updates
 -- seconds between memory usage checks (match graph update throttle for smoother values)
-local memoryUpdateInterval = 0.05
+local memoryUpdateInterval = 0.25
 local lastMemUpdate = 0
 local memInterval = memoryUpdateInterval
 local captureDelay = 5 -- seconds to wait after loading screens before collecting samples
@@ -193,6 +179,8 @@ function CreateGraphFrame()
     graphFrame = CreateFrame("Frame", "FPSMonitorGraph", displayFrame or UIParent, "BackdropTemplate")
     -- Set initial size with additional width for metric checkboxes
     graphFrame:SetSize(FPSMonitorDB.graph.w or 300, FPSMonitorDB.graph.h or 100)
+    local extra = 80  -- room for checkboxes
+    graphFrame:SetWidth((FPSMonitorDB.graph.w or 300) + extra)
     local gpos = FPSMonitorDB.graph.pos or { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = 0, y = -4 }
     if displayFrame then
         graphFrame:SetPoint("TOPLEFT", displayFrame, "BOTTOMLEFT", gpos.x, gpos.y)
@@ -223,9 +211,9 @@ function CreateGraphFrame()
         end
     end)
     -- Allow checkboxes and axis labels to draw outside the graph
-    if graphFrame.SetClipsChildren then
-        graphFrame:SetClipsChildren(false)
-    end
+    -- if graphFrame.SetClipsChildren then
+    --     graphFrame:SetClipsChildren(false)
+    -- end
     graphFrame:RegisterForDrag("LeftButton")
     graphFrame:SetScript("OnDragStart", graphFrame.StartMoving)
     graphFrame:SetScript("OnDragStop", function(self)
@@ -270,7 +258,6 @@ function CreateGraphFrame()
 
     -- Preallocate line objects for each metric to avoid runtime allocations
     do
-        local keys = {"fps","frameTime","jitter","memory","latency","homeLatency","worldLatency","totalMemory","totalMem","luaMem","cpu"}
         for _, key in ipairs(keys) do
             graphLines[key] = {}
             for i = 1, graphSampleResolution - 1 do
@@ -298,7 +285,6 @@ function CreateGraphFrame()
 
     graphGrid.now = graphFrame:CreateLine(nil, "BACKGROUND")
     graphGrid.p1  = graphFrame:CreateLine(nil, "OVERLAY")
-    graphGrid.p5  = graphFrame:CreateLine(nil, "OVERLAY")
     graphGrid.p01 = graphFrame:CreateLine(nil, "OVERLAY")
     graphGrid.pMed = graphFrame:CreateLine(nil, "OVERLAY")
     graphFrame.alertLine = graphFrame:CreateLine(nil, "OVERLAY")
@@ -307,14 +293,11 @@ function CreateGraphFrame()
     if FPSMonitorDB.graph.showPercentiles then
         graphGrid.p1:SetColorTexture(1,0,0,0.6)
         graphGrid.p1:SetThickness(1)
-        graphGrid.p5:SetColorTexture(0,0.7,0,0.6)
-        graphGrid.p5:SetThickness(1)
         graphGrid.p01:SetColorTexture(1,0.5,0,0.6)
         graphGrid.p01:SetThickness(1)
         graphGrid.pMed:SetColorTexture(0,1,0,0.6)
         graphGrid.pMed:SetThickness(1)
         graphGrid.p1:Show()
-        if FPSMonitorDB.graph.showPercentile5 then graphGrid.p5:Show() end
         graphGrid.p01:Show()
         graphGrid.pMed:Show()
     end
@@ -327,22 +310,11 @@ function CreateGraphFrame()
     -- Per-metric checkboxes aligned along the right edge.
     -- These controls were not removed; they let the user toggle each metric.
     local metricInfo = {
-        { key = "showFPS",         label = "FPS",          color = {0,1,0} },
-        { key = "showFrameTime",   label = "Frame Time",   color = {0,0.75,1} },
-        { key = "showJitter",      label = "Jitter",       color = {1,0,0} },
-        { key = "showMemory",      label = "Memory",       color = {1,0,1} },
-        { key = "showTotalMemory", label = "Total Mem",   color = {0,1,1} },
-        { key = "showTotalMem",    label = "AllMem",      color = {1,0.8,0} },
-        { key = "showLuaMem",      label = "LuaMem",      color = {0,0.8,0} },
-        { key = "showLatency",     label = "Latency",      color = {1,1,0} },
-        { key = "showHomeLatency", label = "Home Lat",    color = {1,0.5,0} },
-        { key = "showWorldLatency",label = "World Lat",   color = {1,0.8,0} },
-        { key = "showCPU",         label = "CPU",         color = {1,0.5,0} },
-        { key = "showBandwidthIn",  label = "BW In",      color = {0,1,0.5} },
-        { key = "showBandwidthOut", label = "BW Out",     color = {0,0.7,1} },
-        { key = "showNetJitter",    label = "Net Jit",    color = {1,0.6,0} },
-        { key = "showFrameDrops",   label = "Drops",      color = {1,0,0.6} },
-        { key = "showPercentile5",  label = "5% Low",     color = {0.7,0.9,0} },
+        { key = "showFPS",       label = "FPS",        color = {0,1,0} },
+        { key = "showFrameTime", label = "Frame Time", color = {0,0.75,1} },
+        { key = "showJitter",    label = "Jitter",     color = {1,0,0} },
+        { key = "showMemory",    label = "Memory",     color = {1,0,1} },
+        { key = "showLatency",   label = "Latency",    color = {1,1,0} },
     }
 
     graphFrame.metricChecks = {}
@@ -351,15 +323,15 @@ function CreateGraphFrame()
         -- Use UICheckButtonTemplate for retail clients
         local chk = CreateFrame("CheckButton", nil, graphFrame, "UICheckButtonTemplate")
         chk:SetSize(20, 20)
-        -- Anchor checkbox inside the right edge so it doesn't overlap axis labels
-        chk:SetPoint("TOPRIGHT", graphFrame, "TOPRIGHT", -16, -20 * i)
+        -- Anchor checkbox outside the graph to the right
+        chk:SetPoint("TOPLEFT", graphFrame, "TOPRIGHT", 16, -20 * (i - 1) - 20)
         -- Hide the built-in label to avoid clipping
         if chk.Text then chk.Text:Hide() end
 
         -- Label positioned next to the checkbox
         local lbl = graphFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        -- Place label to the left of the checkbox within the graph frame
-        lbl:SetPoint("RIGHT", chk, "LEFT", -6, 0)
+        -- Place label to the right of the checkbox
+        lbl:SetPoint("LEFT", chk, "RIGHT", 4, 0)
         lbl:SetJustifyH("LEFT")
         lbl:SetText(info.label)
         lbl:SetTextColor(unpack(info.color))
@@ -392,17 +364,11 @@ function CreateGraphFrame()
         if graphHistory.memory[idx] then
             GameTooltip:AddLine(string.format("Mem: %.2f MB", graphHistory.memory[idx]))
         end
-        if graphHistory.totalMemory[idx] then
-            GameTooltip:AddLine(string.format("Total: %.2f MB", graphHistory.totalMemory[idx]))
         end
         if graphHistory.latency[idx] then
             GameTooltip:AddLine(string.format("Latency: %.0f ms", graphHistory.latency[idx]))
         end
-        if graphHistory.homeLatency[idx] then
-            GameTooltip:AddLine(string.format("Home: %.0f ms", graphHistory.homeLatency[idx]))
         end
-        if graphHistory.worldLatency[idx] then
-            GameTooltip:AddLine(string.format("World: %.0f ms", graphHistory.worldLatency[idx]))
         end
 
         -- show top addons by memory and CPU
@@ -446,13 +412,9 @@ function CreateGraphFrame()
         GameTooltip:AddLine(string.format("ms:  %.2f", graphHistory.frameTime[idx]))
         GameTooltip:AddLine(string.format("Jit: %.2f", graphHistory.jitter[idx] or 0))
         GameTooltip:AddLine(string.format("Mem: %.2f MB", graphHistory.memory[idx]))
-        if graphHistory.totalMemory[idx] then
-            GameTooltip:AddLine(string.format("Tot: %.2f MB", graphHistory.totalMemory[idx]))
         end
         GameTooltip:AddLine(string.format("Lat: %.0f / %.0f / %.0f",
             graphHistory.latency[idx],
-            graphHistory.homeLatency[idx],
-            graphHistory.worldLatency[idx]
         ))
         GameTooltip:Show()
     end)
@@ -494,9 +456,9 @@ local defaultConfig = {
     },
     updateInterval = 0.5,
     sampleInterval = 60,
-    -- Update addon memory usage as often as graph updates for smoother line
-    memoryUpdateInterval = 0.05,
-    graphUpdateThrottle = 0.1,
+    -- Throttles for graph and memory updates
+    memoryUpdateInterval = 0.25,
+    graphUpdateThrottle = 0.25,
     graph = {
         enabled = true,
         -- Increased default width to provide room for metric checkboxes
@@ -508,16 +470,7 @@ local defaultConfig = {
         showFrameTime = true,
         showJitter = false,
         showMemory = true,
-        showTotalMemory = false,
-        showTotalMem = false,
-        showLuaMem = false,
         showLatency = true,
-        showCPU = false,
-        showBandwidthIn = false,
-        showBandwidthOut = false,
-        showNetJitter = false,
-        showFrameDrops = false,
-        showPercentile5 = false,
         autoScale = true,
         timeTicks = 4,
         yMin = nil,
@@ -531,11 +484,9 @@ local defaultConfig = {
         yMinJitter = nil,
         yMaxJitter = nil,
         smoothing = 0,
-        showHomeLatency = false,
-        showWorldLatency = false,
         showPercentiles = true,
         alertThreshold = 30,
-        graphSampleResolution = 100,
+        graphSampleResolution = 50,
         colorFPS = {0,1,0},
         thickFPS = 1.5,
         colorFrameTime = {0,0.75,1},
@@ -544,20 +495,8 @@ local defaultConfig = {
         thickJitter = 1,
         colorMemory = {1,0,1},
         thickMemory = 1,
-        colorTotalMemory = {0,1,1},
-        thickTotalMemory = 1,
-        colorTotalMem = {1,0.8,0},
-        thickTotalMem = 1,
-        colorLuaMem = {0,0.8,0},
-        thickLuaMem = 1,
         colorLatency = {1,1,0},
         thickLatency = 1,
-        colorHomeLatency = {1,0.5,0},
-        thickHomeLatency = 1,
-        colorWorldLatency = {1,0.8,0},
-        thickWorldLatency = 1,
-        colorCPU = {1,0.5,0},
-        thickCPU = 1,
         hideInCombat = false,
     },
 }
@@ -716,8 +655,6 @@ local function ValidateConfig()
         if type(FPSMonitorDB.graph.showMemory) ~= "boolean" then
             FPSMonitorDB.graph.showMemory = defaultConfig.graph.showMemory
         end
-        if type(FPSMonitorDB.graph.showTotalMemory) ~= "boolean" then
-            FPSMonitorDB.graph.showTotalMemory = defaultConfig.graph.showTotalMemory
         end
         if type(FPSMonitorDB.graph.showJitter) ~= "boolean" then
             FPSMonitorDB.graph.showJitter = defaultConfig.graph.showJitter
@@ -725,29 +662,13 @@ local function ValidateConfig()
         if type(FPSMonitorDB.graph.showLatency) ~= "boolean" then
             FPSMonitorDB.graph.showLatency = defaultConfig.graph.showLatency
         end
-        if type(FPSMonitorDB.graph.showTotalMem) ~= "boolean" then
-            FPSMonitorDB.graph.showTotalMem = defaultConfig.graph.showTotalMem
         end
-        if type(FPSMonitorDB.graph.showLuaMem) ~= "boolean" then
-            FPSMonitorDB.graph.showLuaMem = defaultConfig.graph.showLuaMem
         end
-        if type(FPSMonitorDB.graph.showCPU) ~= "boolean" then
-            FPSMonitorDB.graph.showCPU = defaultConfig.graph.showCPU
         end
-        if type(FPSMonitorDB.graph.showBandwidthIn) ~= "boolean" then
-            FPSMonitorDB.graph.showBandwidthIn = defaultConfig.graph.showBandwidthIn
         end
-        if type(FPSMonitorDB.graph.showBandwidthOut) ~= "boolean" then
-            FPSMonitorDB.graph.showBandwidthOut = defaultConfig.graph.showBandwidthOut
         end
-        if type(FPSMonitorDB.graph.showNetJitter) ~= "boolean" then
-            FPSMonitorDB.graph.showNetJitter = defaultConfig.graph.showNetJitter
         end
-        if type(FPSMonitorDB.graph.showFrameDrops) ~= "boolean" then
-            FPSMonitorDB.graph.showFrameDrops = defaultConfig.graph.showFrameDrops
         end
-        if type(FPSMonitorDB.graph.showPercentile5) ~= "boolean" then
-            FPSMonitorDB.graph.showPercentile5 = defaultConfig.graph.showPercentile5
         end
         if type(FPSMonitorDB.graph.yMin) ~= "number" and FPSMonitorDB.graph.yMin ~= nil then
             FPSMonitorDB.graph.yMin = defaultConfig.graph.yMin
@@ -774,11 +695,7 @@ local function ValidateConfig()
         if type(FPSMonitorDB.graph.timeTicks) ~= "number" or FPSMonitorDB.graph.timeTicks <= 0 then
             FPSMonitorDB.graph.timeTicks = defaultConfig.graph.timeTicks
         end
-        if type(FPSMonitorDB.graph.showHomeLatency) ~= "boolean" then
-            FPSMonitorDB.graph.showHomeLatency = defaultConfig.graph.showHomeLatency
         end
-        if type(FPSMonitorDB.graph.showWorldLatency) ~= "boolean" then
-            FPSMonitorDB.graph.showWorldLatency = defaultConfig.graph.showWorldLatency
         end
         if type(FPSMonitorDB.graph.showPercentiles) ~= "boolean" then
             FPSMonitorDB.graph.showPercentiles = defaultConfig.graph.showPercentiles
@@ -792,11 +709,7 @@ local function ValidateConfig()
         if type(FPSMonitorDB.graph.hideInCombat) ~= "boolean" then
             FPSMonitorDB.graph.hideInCombat = defaultConfig.graph.hideInCombat
         end
-        if type(FPSMonitorDB.graph.colorCPU) ~= "table" then
-            FPSMonitorDB.graph.colorCPU = CopyTable(defaultConfig.graph.colorCPU)
         end
-        if type(FPSMonitorDB.graph.thickCPU) ~= "number" then
-            FPSMonitorDB.graph.thickCPU = defaultConfig.graph.thickCPU
         end
     end
 
@@ -833,32 +746,18 @@ local function AddSample(dt)
     if not fps or fps <= 0 then return end
     -- Always gather memory and CPU stats regardless of graph visibility so the
     -- display shows up-to-date values even when the graph is hidden.
-    local memUsage   = updateFrame and updateFrame.currentMemory or 0
-    local totalAddOn = updateFrame and updateFrame.currentTotalMem or 0
-    local luaMem     = updateFrame and updateFrame.currentLuaMem or 0
-    local cpuUsage   = updateFrame and updateFrame.currentCPU or 0
-    local bandwidthIn, bandwidthOut, homeLat, worldLat = GetNetStats()
+    local memUsage = 0
+    if graphFrame and graphFrame:IsShown() then
+        memUsage = updateFrame and updateFrame.currentMemory or 0
+    end
 
     local now = GetTime()
-    if now - lastMemUpdate >= memInterval then
+    if graphFrame and graphFrame:IsShown() and (now - lastMemUpdate >= memInterval) then
         lastMemUpdate = now
         if UpdateAddOnMemoryUsage then UpdateAddOnMemoryUsage() end
-        if UpdateAddOnCPUUsage    then UpdateAddOnCPUUsage()    end
         memUsage = GetAddOnMemoryUsage(addonName) / 1024
-        cpuUsage = GetAddOnCPUUsage(addonName) or 0
-        local total = 0
-        for i = 1, GetNumAddOns() do
-            if IsAddOnLoaded(i) then
-                total = total + GetAddOnMemoryUsage(i)
-            end
-        end
-        totalAddOn = total / 1024
-        luaMem     = collectgarbage("count") / 1024
         if updateFrame then
-            updateFrame.currentMemory   = memUsage
-            updateFrame.currentTotalMem = totalAddOn
-            updateFrame.currentLuaMem   = luaMem
-            updateFrame.currentCPU      = cpuUsage
+            updateFrame.currentMemory = memUsage
         end
     end
 
@@ -917,20 +816,9 @@ local function AddSample(dt)
     graphHistory.jitter[index] = math_sqrt(variance) * 1000
 
     graphHistory.memory[index] = memUsage
-    graphHistory.totalMemory[index] = memUsage
-    graphHistory.totalMem[index] = totalAddOn
-    graphHistory.luaMem[index] = luaMem
-    graphHistory.cpu[index] = cpuUsage
-    graphHistory.bandwidthIn[index] = bandwidthIn
-    graphHistory.bandwidthOut[index] = bandwidthOut
 
     local lat = (homeLat and worldLat) and ((homeLat + worldLat) / 2) or 0
     graphHistory.latency[index] = lat
-    graphHistory.homeLatency[index] = homeLat or 0
-    graphHistory.worldLatency[index] = worldLat or 0
-    local prevLat = graphHistory.latency[index - 1] or lat
-    graphHistory.netJitter[index] = math.abs(lat - prevLat)
-    graphHistory.frameDrops[index] = (dt * 1000 > 16.67) and 1 or 0
 
 
     graphCount = graphCount + 1
@@ -943,17 +831,7 @@ local function AddSample(dt)
         graphHistory.frameTime[graphStart] = nil
         graphHistory.jitter[graphStart] = nil
         graphHistory.memory[graphStart] = nil
-        graphHistory.totalMemory[graphStart] = nil
-        graphHistory.totalMem[graphStart] = nil
-        graphHistory.luaMem[graphStart] = nil
-        graphHistory.cpu[graphStart] = nil
-        graphHistory.bandwidthIn[graphStart] = nil
-        graphHistory.bandwidthOut[graphStart] = nil
-        graphHistory.netJitter[graphStart] = nil
-        graphHistory.frameDrops[graphStart] = nil
         graphHistory.latency[graphStart] = nil
-        graphHistory.homeLatency[graphStart] = nil
-        graphHistory.worldLatency[graphStart] = nil
         graphStart = graphStart + 1
         graphCount = graphCount - 1
     end
@@ -967,33 +845,13 @@ local function AddSample(dt)
             graphHistory.frameTime[newIdx] = graphHistory.frameTime[i]
             graphHistory.jitter[newIdx] = graphHistory.jitter[i]
             graphHistory.memory[newIdx] = graphHistory.memory[i]
-            graphHistory.totalMemory[newIdx] = graphHistory.totalMemory[i]
-            graphHistory.totalMem[newIdx] = graphHistory.totalMem[i]
-            graphHistory.luaMem[newIdx] = graphHistory.luaMem[i]
-            graphHistory.cpu[newIdx] = graphHistory.cpu[i]
-            graphHistory.bandwidthIn[newIdx] = graphHistory.bandwidthIn[i]
-            graphHistory.bandwidthOut[newIdx] = graphHistory.bandwidthOut[i]
-            graphHistory.netJitter[newIdx] = graphHistory.netJitter[i]
-            graphHistory.frameDrops[newIdx] = graphHistory.frameDrops[i]
             graphHistory.latency[newIdx] = graphHistory.latency[i]
-            graphHistory.homeLatency[newIdx] = graphHistory.homeLatency[i]
-            graphHistory.worldLatency[newIdx] = graphHistory.worldLatency[i]
             graphHistory.times[i] = nil
             graphHistory.fps[i] = nil
             graphHistory.frameTime[i] = nil
             graphHistory.jitter[i] = nil
             graphHistory.memory[i] = nil
-            graphHistory.totalMemory[i] = nil
-            graphHistory.totalMem[i] = nil
-            graphHistory.luaMem[i] = nil
-            graphHistory.cpu[i] = nil
-            graphHistory.bandwidthIn[i] = nil
-            graphHistory.bandwidthOut[i] = nil
-            graphHistory.netJitter[i] = nil
-            graphHistory.frameDrops[i] = nil
             graphHistory.latency[i] = nil
-            graphHistory.homeLatency[i] = nil
-            graphHistory.worldLatency[i] = nil
             
         end
         graphStart = 1
@@ -1006,17 +864,13 @@ local function CalculateStats(currentFPS, currentDT)
     if count == 0 then
         -- Safely grab whatever values we can for the very first frame
         local memUsage    = (GetAddOnMemoryUsage and GetAddOnMemoryUsage(addonName) / 1024) or 0
-        local totalMem    = 0
         if GetNumAddOns and IsAddOnLoaded and GetAddOnMemoryUsage then
             for i = 1, GetNumAddOns() do
                 if IsAddOnLoaded(i) then
-                    totalMem = totalMem + GetAddOnMemoryUsage(i)
                 end
             end
-            totalMem = totalMem / 1024
         end
         local luaM        = (collectgarbage and collectgarbage("count") / 1024) or 0
-        local cpuUsage    = (GetAddOnCPUUsage and GetAddOnCPUUsage(addonName)) or 0
         local _, _, homeL, worldL = GetNetStats()
         homeL = homeL or 0
         worldL = worldL or 0
@@ -1034,11 +888,6 @@ local function CalculateStats(currentFPS, currentDT)
             frameTime    = currentDT * 1000,
             jitter       = 0,
             memory       = memUsage,
-            totalMemory  = totalMem,
-            luaMemory    = luaM,
-            homeLatency  = homeL,
-            worldLatency = worldL,
-            cpu          = cpuUsage,
         }
     end
 
@@ -1088,11 +937,6 @@ local function CalculateStats(currentFPS, currentDT)
         frameTime = currentDT * 1000,
         jitter = math_sqrt(variance) * 1000,
         memory = graphHistory.memory[idx] or 0,
-        totalMemory = graphHistory.totalMem[idx] or 0,
-        luaMemory = graphHistory.luaMem[idx] or 0,
-        homeLatency = graphHistory.homeLatency[idx] or 0,
-        worldLatency = graphHistory.worldLatency[idx] or 0,
-        cpu = graphHistory.cpu[idx] or 0,
     }
 end
 
@@ -1132,10 +976,6 @@ local function UpdateDisplay(stats)
         string.format("%.2f ms", stats.frameTime),
         string.format("%.2f ms", stats.jitter),
         ColorizeMemory(stats.memory),
-        string.format("%.2f MB", stats.totalMemory),
-        string.format("%.2f MB", stats.luaMemory),
-        string.format("%d ms", stats.homeLatency),
-        string.format("%d ms", stats.worldLatency),
         string.format("%.2f ms", stats.jitter),
         string.format("%.2f ms", stats.cpu),
     }
@@ -1167,17 +1007,7 @@ function UpdateGraph()
         { key = "frameTime",  data = graphHistory.frameTime,   lines = graphLines.frameTime,   color = FPSMonitorDB.graph.colorFrameTime or {0,0.75,1}, thick = FPSMonitorDB.graph.thickFrameTime or 1.5, flag = FPSMonitorDB.graph.showFrameTime },
         { key = "jitter",     data = graphHistory.jitter,      lines = graphLines.jitter,      color = FPSMonitorDB.graph.colorJitter or {1,0,0}, thick = FPSMonitorDB.graph.thickJitter or 1,   flag = FPSMonitorDB.graph.showJitter },
         { key = "memory",     data = graphHistory.memory,      lines = graphLines.memory,      color = FPSMonitorDB.graph.colorMemory or {1,0,1}, thick = FPSMonitorDB.graph.thickMemory or 1,   flag = FPSMonitorDB.graph.showMemory },
-        { key = "totalMemory",data = graphHistory.totalMemory, lines = graphLines.totalMemory, color = FPSMonitorDB.graph.colorTotalMemory or {0,1,1}, thick = FPSMonitorDB.graph.thickTotalMemory or 1, flag = FPSMonitorDB.graph.showTotalMemory },
-        { key = "totalMem",  data = graphHistory.totalMem,   lines = graphLines.totalMem,   color = FPSMonitorDB.graph.colorTotalMem or {1,0.8,0}, thick = FPSMonitorDB.graph.thickTotalMem or 1, flag = FPSMonitorDB.graph.showTotalMem },
-        { key = "luaMem",    data = graphHistory.luaMem,     lines = graphLines.luaMem,     color = FPSMonitorDB.graph.colorLuaMem or {0,0.8,0}, thick = FPSMonitorDB.graph.thickLuaMem or 1, flag = FPSMonitorDB.graph.showLuaMem },
         { key = "latency",    data = graphHistory.latency,     lines = graphLines.latency,     color = FPSMonitorDB.graph.colorLatency or {1,1,0}, thick = FPSMonitorDB.graph.thickLatency or 1,   flag = FPSMonitorDB.graph.showLatency },
-        { key = "homeLatency",data = graphHistory.homeLatency, lines = graphLines.homeLatency, color = FPSMonitorDB.graph.colorHomeLatency or {1,0.5,0}, thick = FPSMonitorDB.graph.thickHomeLatency or 1, flag = FPSMonitorDB.graph.showHomeLatency },
-        { key = "worldLatency",data = graphHistory.worldLatency,lines = graphLines.worldLatency,color = FPSMonitorDB.graph.colorWorldLatency or {1,0.8,0}, thick = FPSMonitorDB.graph.thickWorldLatency or 1, flag = FPSMonitorDB.graph.showWorldLatency },
-        { key = "cpu",       data = graphHistory.cpu,        lines = graphLines.cpu,       color = FPSMonitorDB.graph.colorCPU or {1,0.5,0}, thick = FPSMonitorDB.graph.thickCPU or 1, flag = FPSMonitorDB.graph.showCPU },
-        { key = "bandwidthIn",  data = graphHistory.bandwidthIn,  lines = graphLines.bandwidthIn,  color = {0,1,0.5}, thick = 1, flag = FPSMonitorDB.graph.showBandwidthIn },
-        { key = "bandwidthOut", data = graphHistory.bandwidthOut, lines = graphLines.bandwidthOut, color = {0,0.7,1}, thick = 1, flag = FPSMonitorDB.graph.showBandwidthOut },
-        { key = "netJitter",    data = graphHistory.netJitter,    lines = graphLines.netJitter,    color = {1,0.6,0}, thick = 1, flag = FPSMonitorDB.graph.showNetJitter },
-        { key = "frameDrops",   data = graphHistory.frameDrops,   lines = graphLines.frameDrops,   color = {1,0,0.6}, thick = 1, flag = FPSMonitorDB.graph.showFrameDrops },
 
     }
 
@@ -1206,20 +1036,9 @@ function UpdateGraph()
         local legendParts = {}
         if FPSMonitorDB.graph.showFPS then table.insert(legendParts, "FPS (G)") end
         if FPSMonitorDB.graph.showFrameTime then table.insert(legendParts, "ms (B)") end
-        if FPSMonitorDB.graph.showJitter then table.insert(legendParts, "Jit ms (R)") end
+        if FPSMonitorDB.graph.showJitter then table.insert(legendParts, "Jit (R)") end
         if FPSMonitorDB.graph.showMemory then table.insert(legendParts, "Mem MB (M)") end
-        if FPSMonitorDB.graph.showTotalMemory then table.insert(legendParts, "Tot MB(C)") end
-        if FPSMonitorDB.graph.showTotalMem then table.insert(legendParts, "AllMem") end
-        if FPSMonitorDB.graph.showLuaMem then table.insert(legendParts, "LuaMem") end
         if FPSMonitorDB.graph.showLatency then table.insert(legendParts, "Lat ms (Y)") end
-        if FPSMonitorDB.graph.showHomeLatency then table.insert(legendParts, "Home (O)") end
-        if FPSMonitorDB.graph.showWorldLatency then table.insert(legendParts, "World (O)") end
-        if FPSMonitorDB.graph.showCPU then table.insert(legendParts, "CPU (O)") end
-        if FPSMonitorDB.graph.showBandwidthIn then table.insert(legendParts, "BW In") end
-        if FPSMonitorDB.graph.showBandwidthOut then table.insert(legendParts, "BW Out") end
-        if FPSMonitorDB.graph.showNetJitter then table.insert(legendParts, "NetJit") end
-        if FPSMonitorDB.graph.showFrameDrops then table.insert(legendParts, "Drops") end
-        if FPSMonitorDB.graph.showPercentile5 then table.insert(legendParts, "5% Low") end
         if #legendParts == 0 then legendParts = {"none"} end
         graphFrame.legend:SetText(table.concat(legendParts, " | "))
     end
@@ -1274,7 +1093,6 @@ function UpdateGraph()
     end
     local fpsRange = maxFPS - minFPS
     local fpsRange = maxFPS - minFPS
-    if (FPSMonitorDB.graph.showPercentiles or FPSMonitorDB.graph.showPercentile5) and graphGrid.p1 then
         local fps = GetFramerate()
         local stats = CalculateStats(fps, fps > 0 and (1 / fps) or 0)
         if FPSMonitorDB.graph.showPercentiles then
@@ -1295,19 +1113,11 @@ function UpdateGraph()
             if graphGrid.p01 then graphGrid.p01:Hide() end
             if graphGrid.pMed then graphGrid.pMed:Hide() end
         end
-        if FPSMonitorDB.graph.showPercentile5 and graphGrid.p5 then
-            local y5 = ((stats.low5 - minFPS) / fpsRange) * height + 2
-            graphGrid.p5:SetStartPoint("BOTTOMLEFT",2,y5)
-            graphGrid.p5:SetEndPoint("BOTTOMRIGHT",-2,y5)
-            graphGrid.p5:Show()
-        elseif graphGrid.p5 then
-            graphGrid.p5:Hide()
-        end
+        -- 5% line removed
     else
         if graphGrid.p1 then graphGrid.p1:Hide() end
         if graphGrid.p01 then graphGrid.p01:Hide() end
         if graphGrid.pMed then graphGrid.pMed:Hide() end
-        if graphGrid.p5 then graphGrid.p5:Hide() end
     end
 
     local rightLatMin, rightLatMax = math.huge, -math.huge
@@ -1368,10 +1178,8 @@ function UpdateGraph()
         for i = sampleCount, graphSampleResolution - 1 do
             if m.lines[i] then m.lines[i]:Hide() end
         end
-        if m.key == "memory" or m.key == "totalMemory" or m.key == "totalMem" or m.key == "luaMem" then
             if minVal < rightMemMin then rightMemMin = minVal end
             if maxVal > rightMemMax then rightMemMax = maxVal end
-        elseif m.key == "latency" or m.key == "homeLatency" or m.key == "worldLatency" then
             if minVal < rightLatMin then rightLatMin = minVal end
             if maxVal > rightLatMax then rightLatMax = maxVal end
         end
@@ -1593,7 +1401,6 @@ local function CreateDisplayFrame()
         sumDTSquared = 0
         sessionMinFPS = math.huge
         sessionMaxFPS = 0
-        graphHistory = { times={}, fps={}, frameTime={}, jitter={}, memory={}, totalMemory={}, totalMem={}, luaMem={}, cpu={}, latency={}, homeLatency={}, worldLatency={}, bandwidthIn={}, bandwidthOut={}, netJitter={}, frameDrops={} }
         graphStart = 1
         graphCount = 0
         graphElapsed = 0
@@ -1929,8 +1736,6 @@ local function CreateOptionsPanel()
         { key = "showFrameTime", label = "Show Frame Time" },
         { key = "showMemory", label = "Show Memory" },
         { key = "showLatency", label = "Show Avg Latency" },
-        { key = "showHomeLatency", label = "Show Home Lat" },
-        { key = "showWorldLatency", label = "Show World Lat" },
     }
 
     local prev = graphCheck
@@ -2017,18 +1822,14 @@ local function CreateOptionsPanel()
     local homeChk = CreateFrame("CheckButton", nil, optionsPanel.general, "UICheckButtonTemplate")
     homeChk:SetPoint("TOPLEFT", smoothingSlider, "BOTTOMLEFT", 0, -8)
     if homeChk.Text then homeChk.Text:SetText("Show home latency") end
-    homeChk:SetChecked(FPSMonitorDB.graph.showHomeLatency)
     homeChk:SetScript("OnClick", function(self)
-        FPSMonitorDB.graph.showHomeLatency = self:GetChecked()
         UpdateGraph()
     end)
 
     local worldChk = CreateFrame("CheckButton", nil, optionsPanel.general, "UICheckButtonTemplate")
     worldChk:SetPoint("TOPLEFT", homeChk, "BOTTOMLEFT", 0, -4)
     if worldChk.Text then worldChk.Text:SetText("Show world latency") end
-    worldChk:SetChecked(FPSMonitorDB.graph.showWorldLatency)
     worldChk:SetScript("OnClick", function(self)
-        FPSMonitorDB.graph.showWorldLatency = self:GetChecked()
         UpdateGraph()
     end)
 
@@ -2089,7 +1890,6 @@ local function CreateOptionsPanel()
         {label="Latency", color="colorLatency", thick="thickLatency"},
         {label="Home", color="colorHomeLatency", thick="thickHomeLatency"},
         {label="World", color="colorWorldLatency", thick="thickWorldLatency"},
-        {label="CPU", color="colorCPU", thick="thickCPU"},
     }
     local anchor = exportBtn
     local function CreateColorOption(info)
@@ -2174,7 +1974,6 @@ SlashCmdList["FPSMON"] = function(msg)
         sumDTSquared = 0
         sessionMinFPS = math.huge
         sessionMaxFPS = 0
-        graphHistory = { times={}, fps={}, frameTime={}, jitter={}, memory={}, totalMemory={}, totalMem={}, luaMem={}, cpu={}, latency={}, homeLatency={}, worldLatency={}, bandwidthIn={}, bandwidthOut={}, netJitter={}, frameDrops={} }
         graphStart = 1
         graphCount = 0
         graphElapsed = 0
@@ -2193,7 +1992,6 @@ SlashCmdList["FPSMON"] = function(msg)
         sessionMinFPS = math.huge
         sessionMaxFPS = 0
         FPSPerCharDB.overall = { min = math.huge, max = 0 }
-        graphHistory = { times={}, fps={}, frameTime={}, jitter={}, memory={}, totalMemory={}, totalMem={}, luaMem={}, cpu={}, latency={}, homeLatency={}, worldLatency={}, bandwidthIn={}, bandwidthOut={}, netJitter={}, frameDrops={} }
         graphStart = 1
         graphCount = 0
         graphElapsed = 0
@@ -2304,15 +2102,7 @@ local function OnEvent(_, event, arg1)
             graphHistory.frameTime[1] = initialFrameTime
             graphHistory.fps[1] = initialFPS
             graphHistory.memory[1] = updateFrame and updateFrame.currentMemory or 0
-            graphHistory.totalMemory[1] = updateFrame and updateFrame.currentMemory or 0
-            graphHistory.cpu[1] = updateFrame and updateFrame.currentCPU or 0
-            graphHistory.bandwidthIn[1] = bwIn
-            graphHistory.bandwidthOut[1] = bwOut
-            graphHistory.netJitter[1] = 0
-            graphHistory.frameDrops[1] = 0
             graphHistory.latency[1] = initLatency
-            graphHistory.homeLatency[1] = homeLat or 0
-            graphHistory.worldLatency[1] = worldLat or 0
             graphStart = 1
             graphCount = 1
         end
