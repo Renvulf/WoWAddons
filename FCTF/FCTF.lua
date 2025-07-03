@@ -32,31 +32,39 @@ local COMBAT_FONT_GROUPS = {
     ["Fun"] = {
         path  = ADDON_PATH .. "Fun\\",
         fonts = {
-            "04b.ttf", "Barriecito.ttf", "ComicRunes.ttf", "Green Fuz.otf",
-            "Guroes.ttf", "Melted.ttf", "Midorima.ttf", "Munsteria.ttf",
+            "04b.ttf", "Barriecito.ttf", "ComicRunes.ttf", "Dmagic.ttf",
+            "Elven.ttf", "Green Fuz.otf", "Gunung.ttf", "Guroes.ttf",
+            "Heorot.ttf", "Kiyrand.ttf", "Kting.ttf", "Melted.ttf",
+            "Midorima.ttf", "Munsteria.ttf", "Odinson.ttf", "Pau.ttf",
             "Runic.ttf", "Runy.ttf", "Shiruken.ttf", "Skullphabet.ttf",
-            "WhoAsksSatan.ttf", "Wickedmouse.ttf", "akash.ttf", "edgyh.ttf",
-            "edkies.ttf", "graff.ttf", "shog.ttf",
+            "WKnight.ttf", "Wasser.ttf", "WhoAsksSatan.ttf", "Wickedmouse.ttf",
+            "akash.ttf", "crygords.ttf", "edgyh.ttf", "edkies.ttf",
+            "figtoen.ttf", "graff.ttf", "leviathans.ttf", "shog.ttf",
+            "tsuchigumo.ttf",
         },
     },
     ["Future"] = {
         path  = ADDON_PATH .. "Future\\",
         fonts = {
-            "914Solid.ttf", "ChopSic.ttf", "Digital.ttf", "FastHand.ttf",
-            "Orbitron.ttf", "Pepsi.ttf", "RaceSpace.ttf", "RushDriver.ttf",
+            "914Solid.ttf", "Audiowide.ttf", "Caesar.ttf", "ChopSic.ttf",
+            "Digital.ttf", "FastHand.ttf", "Orbitron.ttf", "Pepsi.ttf",
+            "Price.ttf", "RaceSpace.ttf", "RushDriver.ttf", "albra.TTF",
         },
     },
     ["Movie/Game"] = {
         path  = ADDON_PATH .. "MovieGame\\",
         fonts = {
-            "Deltarune.ttf", "Halo.ttf", "HarryP.ttf", "Pokemon.ttf",
-            "Spongebob.ttf", "Terminator.ttf", "modernwarfare.ttf",
+            "Acadian.ttf", "Deltarune.ttf", "Elven.ttf", "Gunung.ttf",
+            "Halo.ttf", "HarryP.ttf", "Hobbit.ttf", "Kting.ttf",
+            "Ktingw.ttf", "MetalMacabre.ttf", "Odinson.ttf", "Pokemon.ttf",
+            "Ruritania.ttf", "Spongebob.ttf", "Terminator.ttf",
+            "The Centurion .ttf", "VTKS.ttf", "dalek.ttf", "modernwarfare.ttf",
         },
     },
     ["Easy-to-Read"] = {
         path  = ADDON_PATH .. "Easy-to-Read\\",
         fonts = {
-            "AlteHaasGroteskBold.ttf", "Expressway.ttf",
+            "AlteHaasGroteskBold.ttf", "Bangers.ttf", "Expressway.ttf",
             "NotoSans_Condensed-Bold.ttf", "PTSansNarrow-Bold.ttf",
             "Prototype.ttf", "Roboto-Bold.ttf", "SF-Pro.ttf",
             "accidentalpres.ttf", "bignoodletitling.ttf", "continuum.ttf",
@@ -238,15 +246,15 @@ end
 local scaleLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 -- position the label below the last dropdown to prevent overlap
 if lastDropdown then
-    scaleLabel:SetPoint("TOPLEFT", lastDropdown, "BOTTOMLEFT", 0, -20)
+    scaleLabel:SetPoint("TOP", lastDropdown, "BOTTOM", 0, -20)
 else
-    scaleLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -160)
+    scaleLabel:SetPoint("TOP", frame, "TOP", 0, -160)
 end
 scaleLabel:SetText("Combat Text Size:")
 
 local slider = CreateFrame("Slider", addonName .. "ScaleSlider", frame, "OptionsSliderTemplate")
 slider:SetSize(300, 16)
-slider:SetPoint("TOPLEFT", scaleLabel, "BOTTOMLEFT", 0, -8)
+slider:SetPoint("TOP", scaleLabel, "BOTTOM", 0, -8)
 slider:SetMinMaxValues(0.5, 5.0)
 slider:SetValueStep(0.1)
 slider:SetObeyStepOnDrag(true)
@@ -275,9 +283,9 @@ slider:SetScript("OnLeave", GameTooltip_Hide)
 
 -- 6) PREVIEW & EDIT ---------------------------------------------------------
 preview = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-preview:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -20)
+preview:SetPoint("TOP", slider, "BOTTOM", 0, -20)
 preview:SetWidth(360)
-preview:SetJustifyH("LEFT")
+preview:SetJustifyH("CENTER")
 preview:SetText("12345")
 
 -- Apply a default preview font. GameFontNormalLarge should normally exist,
@@ -286,7 +294,7 @@ SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
 
 editBox = CreateFrame("EditBox", addonName .. "PreviewEdit", frame, "InputBoxTemplate")
 editBox:SetSize(360, 24)
-editBox:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -8)
+editBox:SetPoint("TOP", preview, "BOTTOM", 0, -8)
 editBox:SetAutoFocus(false)
 editBox:SetText("12345")
 editBox:SetScript("OnTextChanged", function(self) preview:SetText(self:GetText()) end)
