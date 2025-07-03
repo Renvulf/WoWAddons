@@ -22,7 +22,11 @@ local PERCHAR_DEFAULTS = {
     combatHealing  = tonumber(GetCVar("floatingCombatTextCombatHealing")) == 1,
     combatDamage   = tonumber(GetCVar("floatingCombatTextCombatDamage")) == 1,
     petDamage      = tonumber(GetCVar("floatingCombatTextPetMeleeDamage")) == 1,
-    periodicDamage = tonumber(GetCVar("floatingCombatTextPeriodicDamage")) == 1,
+    -- WoW's CVar controlling periodic spell damage visibility is
+    -- "floatingCombatTextCombatLogPeriodicSpells".  The previous code used
+    -- "floatingCombatTextPeriodicDamage" which doesn't exist and resulted in the
+    -- setting not persisting between sessions.
+    periodicDamage = tonumber(GetCVar("floatingCombatTextCombatLogPeriodicSpells")) == 1,
 }
 for k,v in pairs(PERCHAR_DEFAULTS) do
     if FCTFPCDB[k] == nil then FCTFPCDB[k] = v end
@@ -311,7 +315,8 @@ local opts = {
     {k="combatHealing",  l="Show Combat Healing",  c="floatingCombatTextCombatHealing"},
     {k="combatDamage",   l="Show Combat Damage",   c="floatingCombatTextCombatDamage"},
     {k="petDamage",      l="Show Pet Damage",      c="floatingCombatTextPetMeleeDamage"},
-    {k="periodicDamage", l="Show Periodic Damage", c="floatingCombatTextPeriodicDamage"},
+    -- Use the correct CVar so the option persists between sessions
+    {k="periodicDamage", l="Show Periodic Damage", c="floatingCombatTextCombatLogPeriodicSpells"},
 }
 for i,opt in ipairs(opts) do
     local col = (i-1) % 2
