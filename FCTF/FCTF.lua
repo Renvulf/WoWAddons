@@ -333,8 +333,12 @@ applyBtn:SetScript("OnClick", function()
         local fontPath = ADDON_PATH .. FCTFDB.selectedFont
         DAMAGE_TEXT_FONT = fontPath
         COMBAT_TEXT_FONT  = fontPath
-        print("|cFF00FF00[FCTF]|r Combat font saved. You can now /reload to apply.")
-        UIErrorsFrame:AddMessage("FCTF: please /reload UI to apply.",1,1,0)
+        -- Inform the user that the font choice has been saved but requires a
+        -- full client restart to take effect. Reloading the UI alone is not
+        -- sufficient because the combat text font is cached when the game
+        -- launches.
+        print("|cFF00FF00[FCTF]|r Combat font saved. Please restart WoW to apply.")
+        UIErrorsFrame:AddMessage("FCTF: restart WoW to load the new font.", 1, 1, 0)
     else
         print("|cFFFF0000[FCTF]|r No font selected.")
     end
