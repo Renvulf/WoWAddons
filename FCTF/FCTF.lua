@@ -330,7 +330,8 @@ applyBtn:SetPoint("BOTTOMLEFT", 16, 16)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
     if FCTFDB.selectedFont then
-        DAMAGE_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
+        local fontPath = (ADDON_PATH .. FCTFDB.selectedFont):gsub("/","\\")
+        DAMAGE_TEXT_FONT = fontPath
         print("|cFF00FF00[FCTF]|r Combat font saved. Restart WoW to apply.")
         UIErrorsFrame:AddMessage("FCTF: please EXIT & RESTART WoW to apply.",1,1,0)
     else
@@ -450,12 +451,21 @@ frame:SetScript("OnEvent", function(self, event, name)
         if FCTFDB.selectedFont then
             local g,f = FCTFDB.selectedFont:match("^([^/]+)/(.+)$")
             if g and f and dropdowns[g] and existsFonts[g] and existsFonts[g][f] then
-                DAMAGE_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
+                local fontPath = (ADDON_PATH .. FCTFDB.selectedFont):gsub("/","\\")
+                DAMAGE_TEXT_FONT = fontPath
                 local cache = cachedFonts[g] and cachedFonts[g][f]
                 if cache then SetPreviewFont(cache) end
                 preview:SetText(editBox:GetText())
                 for grp,dd in pairs(dropdowns) do UIDropDownMenu_SetText(dd, "Select Font") end
                 UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$",""))
+            end
+        end
+        -- Apply saved combat text options
+        if opts then
+            for _, opt in ipairs(opts) do
+                if FCTFPCDB[opt.k] ~= nil then
+                    SetCVar(opt.c, FCTFPCDB[opt.k] and 1 or 0)
+                end
             end
         end
         if InterfaceOptions_AddCategory then InterfaceOptions_AddCategory(frame) end
