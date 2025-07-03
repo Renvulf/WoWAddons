@@ -335,9 +335,17 @@ applyBtn:SetPoint("BOTTOMLEFT", 16, 16)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
     if FCTFDB.selectedFont then
-        local fontPath = ADDON_PATH .. FCTFDB.selectedFont
-        DAMAGE_TEXT_FONT = fontPath
-        COMBAT_TEXT_FONT  = fontPath
+        -- Parse the saved "group/filename" entry using the last '/' so
+        -- groups with slashes are handled correctly.  We then look up the
+        -- actual folder path from COMBAT_FONT_GROUPS to avoid constructing an
+        -- invalid path like "Movie/Game".
+        local grp,fname = FCTFDB.selectedFont:match("^(.*)/([^/]+)$")
+        local path = grp and fname and COMBAT_FONT_GROUPS[grp]
+                       and COMBAT_FONT_GROUPS[grp].path .. fname
+        if path then
+            DAMAGE_TEXT_FONT = path
+            COMBAT_TEXT_FONT  = path
+        end
         -- Inform the user that the font choice has been saved but requires a
         -- full client restart to take effect. Reloading the UI alone is not
         -- sufficient because the combat text font is cached when the game
@@ -465,7 +473,10 @@ frame:SetScript("OnEvent", function(self, event, name)
             -- group names containing slashes are handled correctly
             local g,f = FCTFDB.selectedFont:match("^(.*)/([^/]+)$")
             if g and f and dropdowns[g] and existsFonts[g] and existsFonts[g][f] then
-                local fontPath = ADDON_PATH .. FCTFDB.selectedFont
+                -- Reconstruct the absolute path using the group's folder path
+                -- so that names like "Movie/Game" map correctly to the
+                -- "MovieGame" directory.
+                local fontPath = COMBAT_FONT_GROUPS[g].path .. f
                 DAMAGE_TEXT_FONT = fontPath
                 COMBAT_TEXT_FONT  = fontPath
                 local cache = cachedFonts[g] and cachedFonts[g][f]
