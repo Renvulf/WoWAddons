@@ -330,7 +330,10 @@ applyBtn:SetPoint("BOTTOMLEFT", 16, 16)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
     if FCTFDB.selectedFont then
-        DAMAGE_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
+        -- Convert path separators for Windows clients to ensure the font is
+        -- applied correctly. WoW expects backslashes in file paths.
+        local fontPath = (ADDON_PATH .. FCTFDB.selectedFont):gsub("/","\\")
+        DAMAGE_TEXT_FONT = fontPath
         print("|cFF00FF00[FCTF]|r Combat font saved. Restart WoW to apply.")
         UIErrorsFrame:AddMessage("FCTF: please EXIT & RESTART WoW to apply.",1,1,0)
     else
@@ -450,7 +453,10 @@ frame:SetScript("OnEvent", function(self, event, name)
         if FCTFDB.selectedFont then
             local g,f = FCTFDB.selectedFont:match("^([^/]+)/(.+)$")
             if g and f and dropdowns[g] and existsFonts[g] and existsFonts[g][f] then
-                DAMAGE_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
+                -- Ensure the saved path works across platforms by normalising
+                -- slashes when assigning to the global combat text font.
+                local fontPath = (ADDON_PATH .. FCTFDB.selectedFont):gsub("/","\\")
+                DAMAGE_TEXT_FONT = fontPath
                 local cache = cachedFonts[g] and cachedFonts[g][f]
                 if cache then SetPreviewFont(cache) end
                 preview:SetText(editBox:GetText())
