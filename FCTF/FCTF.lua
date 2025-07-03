@@ -223,6 +223,11 @@ for idx, grp in ipairs(order) do
                 info.text  = display
                 info.func  = function()
                     for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
+                    -- store the selected font as "<group>/<filename>".  The
+                    -- group name itself may contain a slash (e.g. "Movie/Game"),
+                    -- so when retrieving we always split on the *last* slash
+                    -- rather than the first.  This avoids corrupting group
+                    -- names that contain a slash.
                     FCTFDB.selectedFont = grp .. "/" .. fname
                     UIDropDownMenu_SetText(dd, display)
                     SetPreviewFont(cache)
@@ -388,7 +393,9 @@ SlashCmdList["FCT"] = function()
 
     for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
     if FCTFDB.selectedFont then
-        local grp,fname = FCTFDB.selectedFont:match("^([^/]+)/(.+)$")
+        -- parse using the last '/' to support group names that contain
+        -- slashes (e.g. "Movie/Game").
+        local grp,fname = FCTFDB.selectedFont:match("^(.*)/([^/]+)$")
         if grp and fname and dropdowns[grp] and existsFonts[grp][fname] then
             UIDropDownMenu_SetText(dropdowns[grp], fname:gsub("%.otf$",""):gsub("%.ttf$",""))
             local cache = cachedFonts[grp][fname]
@@ -454,7 +461,9 @@ frame:RegisterEvent("ADDON_LOADED")
 frame:SetScript("OnEvent", function(self, event, name)
     if name == addonName then
         if FCTFDB.selectedFont then
-            local g,f = FCTFDB.selectedFont:match("^([^/]+)/(.+)$")
+            -- extract group and filename using the last '/' so that
+            -- group names containing slashes are handled correctly
+            local g,f = FCTFDB.selectedFont:match("^(.*)/([^/]+)$")
             if g and f and dropdowns[g] and existsFonts[g] and existsFonts[g][f] then
                 local fontPath = ADDON_PATH .. FCTFDB.selectedFont
                 DAMAGE_TEXT_FONT = fontPath
