@@ -329,16 +329,25 @@ applyBtn:SetSize(120, 22)
 applyBtn:SetPoint("BOTTOMLEFT", 16, 16)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
-    if FCTFDB.selectedFont then
-        -- Update Blizzard's Floating Combat Text font reference
-        SetCVar("floatingCombatTextFont", ADDON_PATH .. FCTFDB.selectedFont)
-        -- also assign the global for builds that still honour it
-        COMBAT_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
-        print("|cFF00FF00[FCTF]|r Combat font saved. Restart WoW to apply.")
-        UIErrorsFrame:AddMessage("FCTF: please EXIT & RESTART WoW to apply.",1,1,0)
-    else
+    if not FCTFDB.selectedFont then
         print("|cFFFF0000[FCTF]|r No font selected.")
+        return
     end
+
+    -- verify stored font still exists before saving
+    local g,f = FCTFDB.selectedFont:match("^([^/]+)/(.+)$")
+    if not (g and f and existsFonts[g] and existsFonts[g][f]) then
+        print("|cFFFF0000[FCTF]|r Selected font not found.")
+        return
+    end
+
+    -- Update Blizzard's Floating Combat Text font reference
+    SetCVar("floatingCombatTextFont", ADDON_PATH .. FCTFDB.selectedFont)
+    -- also assign the global for builds that still honour it
+    COMBAT_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
+
+    print("|cFF00FF00[FCTF]|r Combat font saved. Restart WoW to apply.")
+    UIErrorsFrame:AddMessage("FCTF: please EXIT & RESTART WoW to apply.", 1, 1, 0)
 end)
 
 local defaultBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
@@ -449,20 +458,23 @@ end)
 -- 14) APPLY/SAVE ON ADDON_LOADED
 frame:RegisterEvent("ADDON_LOADED")
 frame:SetScript("OnEvent", function(self, event, name)
-    if name == addonName then
-        if FCTFDB.selectedFont then
-            local g,f = FCTFDB.selectedFont:match("^([^/]+)/(.+)$")
-            if g and f and dropdowns[g] and existsFonts[g] and existsFonts[g][f] then
-                -- apply saved font on load
-                SetCVar("floatingCombatTextFont", ADDON_PATH .. FCTFDB.selectedFont)
-                COMBAT_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
-                local cache = cachedFonts[g] and cachedFonts[g][f]
-                if cache then SetPreviewFont(cache) end
-                preview:SetText(editBox:GetText())
-                for grp,dd in pairs(dropdowns) do UIDropDownMenu_SetText(dd, "Select Font") end
-                UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$",""))
-            end
+    if event ~= "ADDON_LOADED" or name ~= addonName then return end
+
+    if FCTFDB.selectedFont then
+        local g, f = FCTFDB.selectedFont:match("^([^/]+)/(.+)$")
+        if g and f and dropdowns[g] and existsFonts[g] and existsFonts[g][f] then
+            -- apply saved font on load
+            SetCVar("floatingCombatTextFont", ADDON_PATH .. FCTFDB.selectedFont)
+            COMBAT_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
+
+            local cache = cachedFonts[g] and cachedFonts[g][f]
+            if cache then SetPreviewFont(cache) end
+            preview:SetText(editBox:GetText())
+            for grp, dd in pairs(dropdowns) do UIDropDownMenu_SetText(dd, "Select Font") end
+            UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$", ""):gsub("%.ttf$", ""))
         end
-        if InterfaceOptions_AddCategory then InterfaceOptions_AddCategory(frame) end
     end
+
+    if InterfaceOptions_AddCategory then InterfaceOptions_AddCategory(frame) end
+    self:UnregisterEvent("ADDON_LOADED")
 end)
