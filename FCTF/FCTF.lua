@@ -330,7 +330,10 @@ applyBtn:SetPoint("BOTTOMLEFT", 16, 16)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
     if FCTFDB.selectedFont then
-        DAMAGE_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
+        -- Update Blizzard's Floating Combat Text font reference
+        SetCVar("floatingCombatTextFont", ADDON_PATH .. FCTFDB.selectedFont)
+        -- also assign the global for builds that still honour it
+        COMBAT_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
         print("|cFF00FF00[FCTF]|r Combat font saved. Restart WoW to apply.")
         UIErrorsFrame:AddMessage("FCTF: please EXIT & RESTART WoW to apply.",1,1,0)
     else
@@ -450,7 +453,9 @@ frame:SetScript("OnEvent", function(self, event, name)
         if FCTFDB.selectedFont then
             local g,f = FCTFDB.selectedFont:match("^([^/]+)/(.+)$")
             if g and f and dropdowns[g] and existsFonts[g] and existsFonts[g][f] then
-                DAMAGE_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
+                -- apply saved font on load
+                SetCVar("floatingCombatTextFont", ADDON_PATH .. FCTFDB.selectedFont)
+                COMBAT_TEXT_FONT = ADDON_PATH .. FCTFDB.selectedFont
                 local cache = cachedFonts[g] and cachedFonts[g][f]
                 if cache then SetPreviewFont(cache) end
                 preview:SetText(editBox:GetText())
