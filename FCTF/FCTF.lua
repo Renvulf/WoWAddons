@@ -1,6 +1,8 @@
 -- FCTF.lua
 local addonName = ...
 local ADDON_PATH = "Interface\\AddOns\\" .. addonName .. "\\"
+-- detect whether the BackdropTemplate mixin exists (Retail only)
+local backdropTemplate = (BackdropTemplateMixin and "BackdropTemplate") or nil
 --[[
   ---------------------------------------------------------------------------
     Font Detection
@@ -129,7 +131,7 @@ local blizzDefaultDamageFont
 local blizzDefaultCombatFont
 
 -- 2) MAIN WINDOW
-local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, "BackdropTemplate")
+local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, backdropTemplate)
 --
 -- The options window previously lacked a border and used uneven padding
 -- around its contents.  Here we keep all the widgets exactly where they
@@ -361,6 +363,8 @@ editBox:SetScript("OnTextChanged", function(self) preview:SetText(self:GetText()
 
 -- 7) COMBAT OPTION CHECKBOXES ----------------------------------------------
 local optionCheckboxes = {}
+-- placeholders for incoming damage/healing checkboxes (Retail only)
+local cbIncDam, cbIncHeal
 local opts = {
     {k="combatHealing",  l="Show Combat Healing",  c="floatingCombatTextCombatHealing"},
     {k="combatDamage",   l="Show Combat Damage",   c="floatingCombatTextCombatDamage"},
@@ -388,48 +392,6 @@ for i,opt in ipairs(opts) do
     cb:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", x, y)
     optionCheckboxes[opt.k] = {box = cb, cvar = opt.c}
 end
-
--- row index for new controls (#opts==4 so next row==2)
-local newRow = math.floor(#opts/2)
--- align incoming damage checkbox column with the edit box
-local baseX, baseY = 0, -16 - newRow*30
-
--- Incoming DAMAGE (column 1)
-local cbIncDam = CreateCheckbox(frame, "Show Incoming Damage", 0, 0, FCTFPCDB.incomingDamage,
-  function(self)
-    FCTFPCDB.incomingDamage = self:GetChecked()
-    if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
-    if not self:GetChecked() then
-      COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
-      COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
-      COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = nil
-      COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
-    else
-      COMBAT_TEXT_TYPE_INFO.DAMAGE       = originalInfo.DAMAGE
-      COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = originalInfo.DAMAGE_CRIT
-      COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = originalInfo.SPELL_DAMAGE
-      COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = originalInfo.SPELL_DAMAGE_CRIT
-    end
-  end)
-cbIncDam:ClearAllPoints()
-cbIncDam:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX, baseY)
-
--- Incoming HEALING (column 2)
-local cbIncHeal = CreateCheckbox(frame, "Show Incoming Healing", 0, 0, FCTFPCDB.incomingHealing,
-  function(self)
-    FCTFPCDB.incomingHealing = self:GetChecked()
-    if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
-    if not self:GetChecked() then
-      COMBAT_TEXT_TYPE_INFO.HEAL      = nil
-      COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
-    else
-      COMBAT_TEXT_TYPE_INFO.HEAL      = originalInfo.HEAL
-      COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = originalInfo.HEAL_CRIT
-    end
-  end)
-cbIncHeal:ClearAllPoints()
--- keep second column aligned with other checkboxes
-cbIncHeal:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX + CB_COL_W + 16, baseY)
 
 -- 8) APPLY & DEFAULT BUTTONS -----------------------------------------------
 local applyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
@@ -533,7 +495,9 @@ defaultBtn:SetScript("OnClick", function()
         end
     end
 
-    cbIncDam:SetChecked(true)
+    if cbIncDam then
+        cbIncDam:SetChecked(true)
+    end
     FCTFPCDB.incomingDamage = true
     if type(COMBAT_TEXT_TYPE_INFO) == "table" then
         COMBAT_TEXT_TYPE_INFO.DAMAGE       = originalInfo.DAMAGE
@@ -542,7 +506,9 @@ defaultBtn:SetScript("OnClick", function()
         COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = originalInfo.SPELL_DAMAGE_CRIT
     end
 
-    cbIncHeal:SetChecked(true)
+    if cbIncHeal then
+        cbIncHeal:SetChecked(true)
+    end
     FCTFPCDB.incomingHealing = true
     if type(COMBAT_TEXT_TYPE_INFO) == "table" then
         COMBAT_TEXT_TYPE_INFO.HEAL      = originalInfo.HEAL
@@ -665,8 +631,16 @@ frame:SetScript("OnEvent", function(self, event, name)
 
         -- apply saved checkbox states in case the frame was
         -- created before SavedVariables were available
-        cbIncDam:SetChecked(FCTFPCDB.incomingDamage)
-        cbIncHeal:SetChecked(FCTFPCDB.incomingHealing)
+        if cbIncDam then
+            cbIncDam:SetChecked(FCTFPCDB.incomingDamage)
+        end
+        if cbIncHeal then
+            cbIncHeal:SetChecked(FCTFPCDB.incomingHealing)
+        end
+
+        if InterfaceOptions_AddCategory then
+            InterfaceOptions_AddCategory(frame)
+        end
 
         if FCTFDB.selectedFont then
             -- extract group and filename using the last '/' so that
@@ -722,9 +696,53 @@ frame:SetScript("OnEvent", function(self, event, name)
         if InterfaceOptions_AddCategory then
             InterfaceOptions_AddCategory(frame)
         end
+
+        -- Retail-only incoming damage/healing checkboxes
+        do
+            local newRow = math.floor(#opts/2)
+            local baseX, baseY = 0, -16 - newRow*30
+
+            cbIncDam = CreateCheckbox(frame, "Show Incoming Damage", 0, 0,
+                FCTFPCDB.incomingDamage, function(self)
+                FCTFPCDB.incomingDamage = self:GetChecked()
+                if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
+                if not self:GetChecked() then
+                    COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
+                    COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
+                    COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = nil
+                    COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
+                else
+                    COMBAT_TEXT_TYPE_INFO.DAMAGE       = originalInfo.DAMAGE
+                    COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = originalInfo.DAMAGE_CRIT
+                    COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = originalInfo.SPELL_DAMAGE
+                    COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = originalInfo.SPELL_DAMAGE_CRIT
+                end
+            end)
+            cbIncDam:ClearAllPoints()
+            cbIncDam:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX, baseY)
+
+            cbIncHeal = CreateCheckbox(frame, "Show Incoming Healing", 0, 0,
+                FCTFPCDB.incomingHealing, function(self)
+                FCTFPCDB.incomingHealing = self:GetChecked()
+                if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
+                if not self:GetChecked() then
+                    COMBAT_TEXT_TYPE_INFO.HEAL      = nil
+                    COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
+                else
+                    COMBAT_TEXT_TYPE_INFO.HEAL      = originalInfo.HEAL
+                    COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = originalInfo.HEAL_CRIT
+                end
+            end)
+            cbIncHeal:ClearAllPoints()
+            cbIncHeal:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX + CB_COL_W + 16, baseY)
+        end
     elseif event == "PLAYER_LOGOUT" then
         -- store the latest checkbox states on logout to ensure persistence
-        FCTFPCDB.incomingDamage  = cbIncDam:GetChecked()
-        FCTFPCDB.incomingHealing = cbIncHeal:GetChecked()
+        if cbIncDam then
+            FCTFPCDB.incomingDamage = cbIncDam:GetChecked()
+        end
+        if cbIncHeal then
+            FCTFPCDB.incomingHealing = cbIncHeal:GetChecked()
+        end
     end
 end)
