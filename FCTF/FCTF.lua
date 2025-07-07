@@ -107,11 +107,13 @@ for group, data in pairs(COMBAT_FONT_GROUPS) do
     for _, fname in ipairs(data.fonts) do
         local path = data.path .. fname
         local f = CreateFont(addonName .. "Cache" .. group .. fname)
-        f:SetFont(path, 32, "")
-        local loaded = f:GetFont()
+        -- safely attempt to load the font; missing or invalid files
+        -- should not throw errors during detection
+        local ok = pcall(function() f:SetFont(path, 32, "") end)
+        local loaded = ok and f:GetFont()
         if loaded and loaded:lower():find(fname:lower(), 1, true) then
             existsFonts[group][fname] = true
-            cachedFonts[group][fname] = {font=f, path=path}
+            cachedFonts[group][fname] = { font = f, path = path }
         else
             existsFonts[group][fname] = false
         end
@@ -355,7 +357,11 @@ for i,opt in ipairs(opts) do
     -- initially anchor at origin; we reposition immediately after
     local cb = CreateCheckbox(frame, opt.l, 0, 0, FCTFPCDB[opt.k], function(self)
         FCTFPCDB[opt.k] = self:GetChecked()
-        SetCVar(opt.c, self:GetChecked() and 1 or 0)
+        -- guard against missing CVars on certain game versions
+        if type(GetCVar) == "function" and type(SetCVar) == "function" and
+           GetCVar(opt.c) ~= nil then
+            SetCVar(opt.c, self:GetChecked() and "1" or "0")
+        end
     end)
     cb:ClearAllPoints()
     cb:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", x, y)
@@ -421,8 +427,9 @@ applyBtn:SetScript("OnClick", function()
         local path = grp and fname and COMBAT_FONT_GROUPS[grp]
                        and COMBAT_FONT_GROUPS[grp].path .. fname
         if path then
-            DAMAGE_TEXT_FONT = path
-            COMBAT_TEXT_FONT  = path
+            -- assign to Blizzard globals only when they exist to avoid errors
+            if type(DAMAGE_TEXT_FONT) == "string" then DAMAGE_TEXT_FONT = path end
+            if type(COMBAT_TEXT_FONT)  == "string" then COMBAT_TEXT_FONT  = path end
         end
         -- Inform the user that the font choice has been saved but requires a
         -- full client restart to take effect. Reloading the UI alone is not
@@ -529,6 +536,9 @@ minimapButton:SetScript("OnEnter", function(self)
 end)
 minimapButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+-- remember the last placed angle so we only update when needed
+minimapButton.lastAngle = minimapButton.lastAngle or FCTFDB.minimapAngle
+
 minimapButton:SetScript("OnUpdate", function(self)
     if self.isMoving then
         local mx, my = GetCursorPosition()
@@ -537,11 +547,14 @@ minimapButton:SetScript("OnUpdate", function(self)
         local cx, cy = Minimap:GetCenter()
         local dx, dy = mx - cx, my - cy
         FCTFDB.minimapAngle = math.deg(math.atan2(dy, dx))
+    elseif self.lastAngle == FCTFDB.minimapAngle then
+        return -- nothing changed
     end
-    local ang = math.rad(FCTFDB.minimapAngle or 45)
-    local r = Minimap:GetWidth() / 2 + 10
+    self.lastAngle = FCTFDB.minimapAngle
+    local a = math.rad(self.lastAngle)
+    local r = Minimap:GetWidth()/2 + 10
     self:ClearAllPoints()
-    self:SetPoint("CENTER", Minimap, "CENTER", math.cos(ang) * r, math.sin(ang) * r)
+    self:SetPoint("CENTER", Minimap, "CENTER", math.cos(a)*r, math.sin(a)*r)
 end)
 
 -- 14) EVENT HANDLER SETUP ---------------------------------------------------
@@ -563,8 +576,9 @@ frame:SetScript("OnEvent", function(self, event, name)
                 -- so that names like "Movie/Game" map correctly to the
                 -- "MovieGame" directory.
                 local fontPath = COMBAT_FONT_GROUPS[g].path .. f
-                DAMAGE_TEXT_FONT = fontPath
-                COMBAT_TEXT_FONT  = fontPath
+                -- apply the font if the Blizzard globals are available
+                if type(DAMAGE_TEXT_FONT) == "string" then DAMAGE_TEXT_FONT = fontPath end
+                if type(COMBAT_TEXT_FONT)  == "string" then COMBAT_TEXT_FONT  = fontPath end
                 local cache = cachedFonts[g] and cachedFonts[g][f]
                 if cache then SetPreviewFont(cache) end
                 preview:SetText(editBox:GetText())
