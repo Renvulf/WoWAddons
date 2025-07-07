@@ -518,7 +518,6 @@ end)
 
 -- 14) EVENT HANDLER SETUP ---------------------------------------------------
 frame:RegisterEvent("ADDON_LOADED")
-frame:RegisterEvent("PLAYER_LOGIN")
 frame:SetScript("OnEvent", function(self, event, name)
     if event == "ADDON_LOADED" and name == addonName then
         if FCTFDB.selectedFont then
@@ -539,23 +538,30 @@ frame:SetScript("OnEvent", function(self, event, name)
                 UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$",""))
             end
         end
-    elseif event == "PLAYER_LOGIN" then
-        -- snapshot Blizzard's default handlers after they are defined
+    elseif event == "ADDON_LOADED" and name == "Blizzard_CombatText" then
+        -- snapshot Blizzard's default combat text type info now that it's loaded
         originalInfo = {}
-        for k, v in pairs(COMBAT_TEXT_TYPE_INFO) do
-            originalInfo[k] = v
+        if type(COMBAT_TEXT_TYPE_INFO) == "table" then
+            for k, v in pairs(COMBAT_TEXT_TYPE_INFO) do
+                originalInfo[k] = v
+            end
         end
-        -- apply saved toggles now that the table exists
-        if not FCTFPCDB.incomingDamage then
+
+        -- apply saved incoming damage/heal toggles only after the table exists
+        if not FCTFPCDB.incomingDamage and type(COMBAT_TEXT_TYPE_INFO) == "table" then
             COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
             COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
             COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = nil
             COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
         end
-        if not FCTFPCDB.incomingHealing then
+        if not FCTFPCDB.incomingHealing and type(COMBAT_TEXT_TYPE_INFO) == "table" then
             COMBAT_TEXT_TYPE_INFO.HEAL      = nil
             COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
         end
-        if InterfaceOptions_AddCategory then InterfaceOptions_AddCategory(frame) end
+
+        -- only now add the options panel to interface options
+        if InterfaceOptions_AddCategory then
+            InterfaceOptions_AddCategory(frame)
+        end
     end
 end)
