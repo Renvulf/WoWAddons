@@ -134,7 +134,9 @@ local PAD       = 20   -- distance from the outer edge to the nearest widget
 local BORDER    = 12   -- thickness of the decorative border
 local HEADER_H  = 40   -- space reserved for the InterfaceOptions header
 local PREVIEW_W = 320  -- width of preview and edit boxes
-local CB_COL_W  = 150  -- checkbox column width
+local CB_COL_W  = 160  -- checkbox column width
+local ROW_SPACING      = 60   -- vertical gap between dropdown rows
+local CHECKBOX_SPACING = 36   -- vertical gap between checkbox rows
 
 -- The existing widgets already expect roughly 20px from the top-left
 -- of the frame, so we simply expand the overall frame to ensure the same
@@ -143,7 +145,7 @@ local CB_COL_W  = 150  -- checkbox column width
 -- adequate padding on both sides. This prevents the second column of
 -- dropdowns from touching or overlapping the right border when the
 -- window is scaled.
-frame:SetSize(364 + PAD * 2, 468 + PAD * 2)
+frame:SetSize(364 + PAD * 2, 508 + PAD * 2)
 frame:SetPoint("CENTER")
 frame:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -233,8 +235,10 @@ for idx, grp in ipairs(order) do
     local row = math.floor((idx-1)/2)
     local col = (idx-1) % 2
     -- place dropdowns below the InterfaceOptions title text
-    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 20 + col*180, -(HEADER_H + row*50))
-    UIDropDownMenu_SetWidth(dd, 160)
+    dd:SetPoint("TOPLEFT", frame, "TOPLEFT",
+                PAD + col * (PREVIEW_W/2 + PAD),
+                -(HEADER_H + PAD + row * ROW_SPACING))
+    UIDropDownMenu_SetWidth(dd, PREVIEW_W/2 - PAD/2)
     dropdowns[grp] = dd
     if idx == #order then
         lastDropdown = dd -- remember last dropdown for layout anchoring
@@ -285,7 +289,7 @@ local scaleLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 -- position the label below the last dropdown to prevent overlap
 local sliderOffsetX = 15 -- shift controls slightly right for centering
 if lastDropdown then
-    scaleLabel:SetPoint("TOPLEFT", lastDropdown, "BOTTOMLEFT", sliderOffsetX, -20)
+    scaleLabel:SetPoint("TOPLEFT", lastDropdown, "BOTTOMLEFT", sliderOffsetX, -30)
 else
     scaleLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 16 + sliderOffsetX, -160)
 end
@@ -351,7 +355,7 @@ for i,opt in ipairs(opts) do
     local row = math.floor((i-1) / 2)
     -- anchor checkboxes below the edit box to avoid overlap with the preview box
     local x = 16 + col * CB_COL_W
-    local y = -16 - row * 30
+    local y = -16 - row * CHECKBOX_SPACING
     -- initially anchor at origin; we reposition immediately after
     local cb = CreateCheckbox(frame, opt.l, 0, 0, FCTFPCDB[opt.k], function(self)
         FCTFPCDB[opt.k] = self:GetChecked()
@@ -363,7 +367,7 @@ end
 
 -- row index for new controls (#opts==4 so next row==2)
 local newRow = math.floor(#opts/2)
-local baseX, baseY = 16, -16 - newRow*30
+local baseX, baseY = 16, -16 - newRow * CHECKBOX_SPACING
 
 -- Incoming DAMAGE (column 1)
 local cbIncDam = CreateCheckbox(frame, "Show Incoming Damage", 0, 0, FCTFPCDB.incomingDamage,
@@ -409,7 +413,7 @@ applyBtn:SetSize(100, 22)
 -- overall frame height has been reduced
 -- keep the action buttons in place or slightly lower so they no longer
 -- overlap the lowest checkboxes
-applyBtn:SetPoint("BOTTOMLEFT", 16, 12)
+applyBtn:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", PAD, PAD)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
     if FCTFDB.selectedFont then
@@ -458,7 +462,7 @@ local closeBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 closeBtn:SetSize(80, 24)
 -- Align with the Apply button and use the reduced
 -- bottom spacing
-closeBtn:SetPoint("BOTTOMRIGHT", -16, 12)
+closeBtn:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -PAD, PAD)
 closeBtn:SetText("Close")
 closeBtn:SetScript("OnClick", function() frame:Hide() end)
 closeBtn:SetScript("OnEnter", function(self)
