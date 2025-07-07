@@ -122,6 +122,12 @@ end
 
 local originalInfo = {}
 
+-- cache Blizzard's default combat text fonts so we can revert the preview
+-- when the user presses the "Default" button. these paths are populated once
+-- the relevant globals become available (usually when Blizzard_CombatText loads)
+local blizzDefaultDamageFont
+local blizzDefaultCombatFont
+
 -- 2) MAIN WINDOW
 local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, "BackdropTemplate")
 --
@@ -456,14 +462,18 @@ defaultBtn:SetScript("OnClick", function()
     size  = size  or 20
     flags = flags or ""
 
-    -- Blizzard may expose the default combat text font through different
-    -- globals depending on the client version.  Prefer DAMAGE_TEXT_FONT when
-    -- available and fall back to COMBAT_TEXT_FONT otherwise.
-    local defaultPath
-    if type(DAMAGE_TEXT_FONT) == "string" then
-        defaultPath = DAMAGE_TEXT_FONT
-    elseif type(COMBAT_TEXT_FONT) == "string" then
-        defaultPath = COMBAT_TEXT_FONT
+    -- Use the cached Blizzard fonts captured at load time instead of whatever
+    -- the globals might currently contain (they could have been overwritten by
+    -- a custom selection earlier in the session).
+    local defaultPath = blizzDefaultDamageFont or blizzDefaultCombatFont
+
+    -- restore the Blizzard globals so the next reload also uses the real
+    -- default font instead of a previously saved custom path
+    if blizzDefaultDamageFont and type(DAMAGE_TEXT_FONT) == "string" then
+        DAMAGE_TEXT_FONT = blizzDefaultDamageFont
+    end
+    if blizzDefaultCombatFont and type(COMBAT_TEXT_FONT) == "string" then
+        COMBAT_TEXT_FONT = blizzDefaultCombatFont
     end
 
     -- safely attempt to apply the default font.  pcall prevents Lua errors if
@@ -598,6 +608,15 @@ frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:SetScript("OnEvent", function(self, event, name)
     if event == "ADDON_LOADED" and name == addonName then
+        -- store Blizzard's default fonts before applying any custom path so we
+        -- can revert the preview later even after the globals change
+        if not blizzDefaultDamageFont and type(DAMAGE_TEXT_FONT) == "string" then
+            blizzDefaultDamageFont = DAMAGE_TEXT_FONT
+        end
+        if not blizzDefaultCombatFont and type(COMBAT_TEXT_FONT) == "string" then
+            blizzDefaultCombatFont = COMBAT_TEXT_FONT
+        end
+
         -- apply saved checkbox states in case the frame was
         -- created before SavedVariables were available
         cbIncDam:SetChecked(FCTFPCDB.incomingDamage)
@@ -623,6 +642,16 @@ frame:SetScript("OnEvent", function(self, event, name)
             end
         end
     elseif event == "ADDON_LOADED" and name == "Blizzard_CombatText" then
+        -- record Blizzard's default font paths once the combat text addon is
+        -- loaded; this guarantees the globals have been initialised before we
+        -- possibly overwrite them with a custom selection
+        if not blizzDefaultDamageFont and type(DAMAGE_TEXT_FONT) == "string" then
+            blizzDefaultDamageFont = DAMAGE_TEXT_FONT
+        end
+        if not blizzDefaultCombatFont and type(COMBAT_TEXT_FONT) == "string" then
+            blizzDefaultCombatFont = COMBAT_TEXT_FONT
+        end
+
         -- snapshot Blizzard's default combat text type info now that it's loaded
         originalInfo = {}
         if type(COMBAT_TEXT_TYPE_INFO) == "table" then
