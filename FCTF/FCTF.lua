@@ -243,15 +243,37 @@ local order = {"Fun", "Future", "Movie/Game", "Easy-to-Read", "Custom"}
     columns.  The starting offset is calculated so the entire group of
     dropdowns remains horizontally centered regardless of frame width.
 --]]
-local DROPDOWN_WIDTH       = 160
-local DROPDOWN_GAP         = 20
-local DROPDOWN_COL_SPACING = DROPDOWN_WIDTH + DROPDOWN_GAP
+local DROPDOWN_WIDTH = 160       -- width passed to UIDropDownMenu_SetWidth
+local DROPDOWN_GAP   = 20        -- horizontal gap between dropdown columns
 
--- compute how far from the left border the first dropdown should start so
--- both columns appear centered within the window
-local DROPDOWN_START_X = math.floor(
-    (frame:GetWidth() - (DROPDOWN_WIDTH * 2 + DROPDOWN_GAP)) / 2 + 0.5
-)
+--[[
+    The actual visible width of a dropdown is slightly larger than the value
+    supplied to UIDropDownMenu_SetWidth because of the arrow button.  When the
+    window size changes or UI scale differs, the hardcoded offsets used
+    previously could cause the right column to overlap the window border.  To
+    ensure consistent centering we calculate the column spacing dynamically
+    using the measured width of one of the dropdowns after it has been sized.
+--]]
+local function LayoutDropdowns()
+    local example = dropdowns[order[1]]
+    if not example then return end
+    local ddWidth = math.floor(example:GetWidth() + 0.5)
+    local colSpacing = ddWidth + DROPDOWN_GAP
+    local startX = math.floor((frame:GetWidth() - (ddWidth * 2 + DROPDOWN_GAP)) / 2 + 0.5)
+    for idx, grp in ipairs(order) do
+        local dd = dropdowns[grp]
+        if dd then
+            local row = math.floor((idx-1)/2)
+            local col = (idx-1) % 2
+            dd:ClearAllPoints()
+            dd:SetPoint(
+                "TOPLEFT", frame, "TOPLEFT",
+                startX + col * colSpacing,
+                -(HEADER_H + row * 50)
+            )
+        end
+    end
+end
 
 local lastDropdown
 for idx, grp in ipairs(order) do
@@ -260,10 +282,10 @@ for idx, grp in ipairs(order) do
     local col = (idx-1) % 2
     -- place dropdowns below the InterfaceOptions title text and keep them
     -- centered within the available space
+    -- initial placement; will be adjusted once LayoutDropdowns() runs
     dd:SetPoint(
         "TOPLEFT", frame, "TOPLEFT",
-        DROPDOWN_START_X + col * DROPDOWN_COL_SPACING,
-        -(HEADER_H + row * 50)
+        0, -(HEADER_H + row * 50)
     )
     UIDropDownMenu_SetWidth(dd, DROPDOWN_WIDTH)
     dropdowns[grp] = dd
@@ -310,6 +332,12 @@ for idx, grp in ipairs(order) do
         end
     end)
 end
+
+-- adjust dropdown positions now that their actual widths are known
+LayoutDropdowns()
+-- also realign if the frame size changes (unlikely but safe)
+frame:HookScript("OnSizeChanged", LayoutDropdowns)
+frame:HookScript("OnShow", LayoutDropdowns)
 
 -- 5) SCALE SLIDER -----------------------------------------------------------
 local scaleLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
