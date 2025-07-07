@@ -447,17 +447,53 @@ defaultBtn:SetSize(100,22)
 defaultBtn:SetPoint("LEFT", applyBtn, "RIGHT", 8, 0)
 defaultBtn:SetText("Default")
 defaultBtn:SetScript("OnClick", function()
-    FCTFDB.selectedFont = "Default/default.ttf"
-    local cache = cachedFonts["Default"] and cachedFonts["Default"]["default.ttf"]
-    if cache then
-        SetPreviewFont(cache)
+    -- clear any previously selected custom font
+    FCTFDB.selectedFont = nil
+
+    -- capture the currently applied font size and flags so the preview
+    -- remains visually consistent when switching fonts
+    local _, size, flags = preview:GetFont()
+    size  = size  or 20
+    flags = flags or ""
+
+    -- Blizzard may expose the default combat text font through different
+    -- globals depending on the client version.  Prefer DAMAGE_TEXT_FONT when
+    -- available and fall back to COMBAT_TEXT_FONT otherwise.
+    local defaultPath
+    if type(DAMAGE_TEXT_FONT) == "string" then
+        defaultPath = DAMAGE_TEXT_FONT
+    elseif type(COMBAT_TEXT_FONT) == "string" then
+        defaultPath = COMBAT_TEXT_FONT
+    end
+
+    -- safely attempt to apply the default font.  pcall prevents Lua errors if
+    -- the path is invalid or the font fails to load for any reason.
+    if defaultPath then
+        local ok = pcall(function()
+            preview:SetFont(defaultPath, size, flags)
+        end)
+        if not ok then
+            -- fall back to the UI font if SetFont fails for any reason
+            SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
+        end
     else
+        -- if neither Blizzard global exists we simply use the UI font object
         SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
     end
-    editBox:SetText(editBox:GetText())
+
+    -- ensure the preview font string's height fits the applied font
+    local _, applied = preview:GetFont()
+    applied = applied or size
+    preview:SetHeight(applied + math.ceil(applied * 0.4))
+
+    -- refresh the preview text and reset UI controls
+    preview:SetText(editBox:GetText())
+    for _, dd in pairs(dropdowns) do
+        UIDropDownMenu_SetText(dd, "Select Font")
+    end
     slider:SetValue(1.0); UpdateScale(1.0)
-    for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
-    print("|cFF00FF00[FCTF]|r Reset to default font.")
+
+    print("|cFF00FF00[FCTF]|r Preview now shows Blizzard's default combat-text font.")
 end)
 
 -- 11) CLOSE BUTTON
