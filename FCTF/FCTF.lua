@@ -387,9 +387,9 @@ cbIncHeal:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX + 200, baseY)
 -- 8) APPLY & DEFAULT BUTTONS -----------------------------------------------
 local applyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 applyBtn:SetSize(120, 22)
--- Anchor near the bottom border so controls above have room
--- Adjusted from 20 to 4 due to increased frame height
-applyBtn:SetPoint("BOTTOMLEFT", 16, 4)
+-- Anchor away from the bottom border so controls above have room
+-- Raised from 4 to 40 per layout adjustment
+applyBtn:SetPoint("BOTTOMLEFT", 16, 40)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
     if FCTFDB.selectedFont then
@@ -437,8 +437,8 @@ end)
 local closeBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 closeBtn:SetSize(80, 24)
 -- Align vertically with the Apply button for a balanced layout
--- Vertical offset adjusted to 4 to match Apply button
-closeBtn:SetPoint("BOTTOMRIGHT", -16, 4)
+-- Vertical offset adjusted to 40 to match Apply button
+closeBtn:SetPoint("BOTTOMRIGHT", -16, 40)
 closeBtn:SetText("Close")
 closeBtn:SetScript("OnClick", function() frame:Hide() end)
 closeBtn:SetScript("OnEnter", function(self)
