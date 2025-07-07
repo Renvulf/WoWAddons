@@ -235,15 +235,37 @@ end
 -- Displayed dropdown order; the "Custom" category replaces the old "Default"
 -- dropdown to allow users to provide their own fonts.
 local order = {"Fun", "Future", "Movie/Game", "Easy-to-Read", "Custom"}
+
+--[[
+    Dropdown layout information.  The previous implementation used hardcoded
+    offsets which made centering brittle when the frame size changed.  The
+    constants below describe the dropdown width and the horizontal gap between
+    columns.  The starting offset is calculated so the entire group of
+    dropdowns remains horizontally centered regardless of frame width.
+--]]
+local DROPDOWN_WIDTH       = 160
+local DROPDOWN_GAP         = 20
+local DROPDOWN_COL_SPACING = DROPDOWN_WIDTH + DROPDOWN_GAP
+
+-- compute how far from the left border the first dropdown should start so
+-- both columns appear centered within the window
+local DROPDOWN_START_X = math.floor(
+    (frame:GetWidth() - (DROPDOWN_WIDTH * 2 + DROPDOWN_GAP)) / 2 + 0.5
+)
+
 local lastDropdown
 for idx, grp in ipairs(order) do
     local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]", "") .. "DD", frame, "UIDropDownMenuTemplate")
     local row = math.floor((idx-1)/2)
     local col = (idx-1) % 2
-    -- place dropdowns below the InterfaceOptions title text
-    -- shift dropdowns slightly so left and right margins are even
-    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 32 + col*180, -(HEADER_H + row*50))
-    UIDropDownMenu_SetWidth(dd, 160)
+    -- place dropdowns below the InterfaceOptions title text and keep them
+    -- centered within the available space
+    dd:SetPoint(
+        "TOPLEFT", frame, "TOPLEFT",
+        DROPDOWN_START_X + col * DROPDOWN_COL_SPACING,
+        -(HEADER_H + row * 50)
+    )
+    UIDropDownMenu_SetWidth(dd, DROPDOWN_WIDTH)
     dropdowns[grp] = dd
     if idx == #order then
         lastDropdown = dd -- remember last dropdown for layout anchoring
