@@ -242,7 +242,7 @@ for idx, grp in ipairs(order) do
     local col = (idx-1) % 2
     -- place dropdowns below the InterfaceOptions title text
     -- shift dropdowns slightly so left and right margins are even
-    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 32 + col*180, -(HEADER_H + row*50))
+    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 16 + col*170, -(HEADER_H + row*50))
     UIDropDownMenu_SetWidth(dd, 160)
     dropdowns[grp] = dd
     if idx == #order then
@@ -250,7 +250,8 @@ for idx, grp in ipairs(order) do
     end
 
     local label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    label:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 16, 3)
+    -- position label so its left edge aligns with the dropdown
+    label:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 4, 3)
     label:SetText(grp)
 
     UIDropDownMenu_Initialize(dd, function()
@@ -310,7 +311,9 @@ _G[slider:GetName() .. "Low"]:SetText("0.5")
 _G[slider:GetName() .. "High"]:SetText("5.0")
 
 local scaleValue = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-scaleValue:SetPoint("LEFT", slider, "RIGHT", 10, 0)
+scaleValue:ClearAllPoints()
+-- center the slider value text 2px above the bar
+scaleValue:SetPoint("BOTTOM", slider, "TOP", 0, 2)
 
 local function UpdateScale(val)
     val = math.floor(val * 10 + 0.5) / 10
