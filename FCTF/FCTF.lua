@@ -27,6 +27,9 @@ local PERCHAR_DEFAULTS = {
     -- "floatingCombatTextPeriodicDamage" which doesn't exist and resulted in the
     -- setting not persisting between sessions.
     periodicDamage = tonumber(GetCVar("floatingCombatTextCombatLogPeriodicSpells")) == 1,
+    -- incoming healing and damage defaults
+    incomingDamage  = true,
+    incomingHealing = true,
 }
 for k,v in pairs(PERCHAR_DEFAULTS) do
     if FCTFPCDB[k] == nil then FCTFPCDB[k] = v end
@@ -115,10 +118,16 @@ for group, data in pairs(COMBAT_FONT_GROUPS) do
     end
 end
 
+-- snapshot Blizzard's default handlers so we can restore them
+local originalInfo = {}
+for k, v in pairs(COMBAT_TEXT_TYPE_INFO) do
+    originalInfo[k] = v
+end
+
 -- 2) MAIN WINDOW
 local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, "BackdropTemplate")
 -- Expanded size and extra top padding so header text doesn't clip
-frame:SetSize(420, 500)
+frame:SetSize(420, 580)
 frame:SetPoint("CENTER")
 frame:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -333,10 +342,50 @@ for i,opt in ipairs(opts) do
     cb:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", x, y)
 end
 
+-- row index for new controls (#opts==4 so next row==2)
+local newRow = math.floor(#opts/2)
+local baseY  = -16 - newRow*30
+
+-- Incoming DAMAGE
+local cbIncDam = CreateCheckbox(frame,
+  "Show Incoming Damage",
+  16, baseY,
+  FCTFPCDB.incomingDamage,
+  function(self)
+    FCTFPCDB.incomingDamage = self:GetChecked()
+    if not self:GetChecked() then
+      COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
+      COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
+      COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = nil
+      COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
+    else
+      COMBAT_TEXT_TYPE_INFO.DAMAGE       = originalInfo.DAMAGE
+      COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = originalInfo.DAMAGE_CRIT
+      COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = originalInfo.SPELL_DAMAGE
+      COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = originalInfo.SPELL_DAMAGE_CRIT
+    end
+  end)
+
+-- Incoming HEALING
+local cbIncHeal = CreateCheckbox(frame,
+  "Show Incoming Healing",
+  216, baseY,
+  FCTFPCDB.incomingHealing,
+  function(self)
+    FCTFPCDB.incomingHealing = self:GetChecked()
+    if not self:GetChecked() then
+      COMBAT_TEXT_TYPE_INFO.HEAL      = nil
+      COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
+    else
+      COMBAT_TEXT_TYPE_INFO.HEAL      = originalInfo.HEAL
+      COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = originalInfo.HEAL_CRIT
+    end
+  end)
+
 -- 8) APPLY & DEFAULT BUTTONS -----------------------------------------------
 local applyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 applyBtn:SetSize(120, 22)
-applyBtn:SetPoint("BOTTOMLEFT", 16, 16)
+applyBtn:SetPoint("BOTTOMLEFT", 16, 76)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
     if FCTFDB.selectedFont then
@@ -383,7 +432,7 @@ end)
 -- 11) CLOSE BUTTON
 local closeBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 closeBtn:SetSize(80, 24)
-closeBtn:SetPoint("BOTTOMRIGHT", -16, 16)
+closeBtn:SetPoint("BOTTOMRIGHT", -16, 76)
 closeBtn:SetText("Close")
 closeBtn:SetScript("OnClick", function() frame:Hide() end)
 closeBtn:SetScript("OnEnter", function(self)
@@ -490,6 +539,18 @@ frame:SetScript("OnEvent", function(self, event, name)
                 for grp,dd in pairs(dropdowns) do UIDropDownMenu_SetText(dd, "Select Font") end
                 UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$",""))
             end
+        end
+        -- restore incoming-damage toggle
+        if not FCTFPCDB.incomingDamage then
+            COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
+            COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
+            COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = nil
+            COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
+        end
+        -- restore incoming-healing toggle
+        if not FCTFPCDB.incomingHealing then
+            COMBAT_TEXT_TYPE_INFO.HEAL      = nil
+            COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
         end
         if InterfaceOptions_AddCategory then InterfaceOptions_AddCategory(frame) end
     end
