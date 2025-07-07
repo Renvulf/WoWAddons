@@ -128,7 +128,8 @@ local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, "BackdropTemp
 -- may be tweaked as needed; 360 provides a snug fit.
 -- Increase height so the bottom border fully clears the last row of
 -- checkboxes. This prevents overlap with the Apply/Close buttons.
-frame:SetSize(420, 492)
+-- Height 540 ensures the bottom border clears all controls
+frame:SetSize(420, 540)
 frame:SetPoint("CENTER")
 frame:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -386,8 +387,9 @@ cbIncHeal:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX + 200, baseY)
 -- 8) APPLY & DEFAULT BUTTONS -----------------------------------------------
 local applyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 applyBtn:SetSize(120, 22)
--- Position higher so it sits well above the bottom border
-applyBtn:SetPoint("BOTTOMLEFT", 16, 20)
+-- Anchor near the bottom border so controls above have room
+-- Adjusted from 20 to 4 due to increased frame height
+applyBtn:SetPoint("BOTTOMLEFT", 16, 4)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
     if FCTFDB.selectedFont then
@@ -435,7 +437,8 @@ end)
 local closeBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 closeBtn:SetSize(80, 24)
 -- Align vertically with the Apply button for a balanced layout
-closeBtn:SetPoint("BOTTOMRIGHT", -16, 20)
+-- Vertical offset adjusted to 4 to match Apply button
+closeBtn:SetPoint("BOTTOMRIGHT", -16, 4)
 closeBtn:SetText("Close")
 closeBtn:SetScript("OnClick", function() frame:Hide() end)
 closeBtn:SetScript("OnEnter", function(self)
