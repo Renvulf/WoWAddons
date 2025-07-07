@@ -139,7 +139,11 @@ local CB_COL_W  = 150  -- checkbox column width
 -- The existing widgets already expect roughly 20px from the top-left
 -- of the frame, so we simply expand the overall frame to ensure the same
 -- distance on the remaining sides as well.
-frame:SetSize(344 + PAD * 2, 468 + PAD * 2)
+-- Widen the frame slightly so dropdown menus and other widgets have
+-- adequate padding on both sides. This prevents the second column of
+-- dropdowns from touching or overlapping the right border when the
+-- window is scaled.
+frame:SetSize(364 + PAD * 2, 468 + PAD * 2)
 frame:SetPoint("CENTER")
 frame:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
