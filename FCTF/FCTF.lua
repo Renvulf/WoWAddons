@@ -123,7 +123,10 @@ local originalInfo = {}
 -- 2) MAIN WINDOW
 local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, "BackdropTemplate")
 -- Expanded size and extra top padding so header text doesn't clip
-frame:SetSize(420, 580)
+-- Shrink the overall height so the bottom border sits just
+-- beneath the Apply/Default/Close buttons. The exact value
+-- may be tweaked as needed; 360 provides a snug fit.
+frame:SetSize(420, 360)
 frame:SetPoint("CENTER")
 frame:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -340,13 +343,10 @@ end
 
 -- row index for new controls (#opts==4 so next row==2)
 local newRow = math.floor(#opts/2)
-local baseY  = -16 - newRow*30
+local baseX, baseY = 16, -16 - newRow*30
 
--- Incoming DAMAGE
-local cbIncDam = CreateCheckbox(frame,
-  "Show Incoming Damage",
-  16, baseY,
-  FCTFPCDB.incomingDamage,
+-- Incoming DAMAGE (column 1)
+local cbIncDam = CreateCheckbox(frame, "Show Incoming Damage", 0, 0, FCTFPCDB.incomingDamage,
   function(self)
     FCTFPCDB.incomingDamage = self:GetChecked()
     if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
@@ -362,12 +362,11 @@ local cbIncDam = CreateCheckbox(frame,
       COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = originalInfo.SPELL_DAMAGE_CRIT
     end
   end)
+cbIncDam:ClearAllPoints()
+cbIncDam:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX, baseY)
 
--- Incoming HEALING
-local cbIncHeal = CreateCheckbox(frame,
-  "Show Incoming Healing",
-  216, baseY,
-  FCTFPCDB.incomingHealing,
+-- Incoming HEALING (column 2)
+local cbIncHeal = CreateCheckbox(frame, "Show Incoming Healing", 0, 0, FCTFPCDB.incomingHealing,
   function(self)
     FCTFPCDB.incomingHealing = self:GetChecked()
     if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
@@ -379,6 +378,8 @@ local cbIncHeal = CreateCheckbox(frame,
       COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = originalInfo.HEAL_CRIT
     end
   end)
+cbIncHeal:ClearAllPoints()
+cbIncHeal:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX + 200, baseY)
 
 -- 8) APPLY & DEFAULT BUTTONS -----------------------------------------------
 local applyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
