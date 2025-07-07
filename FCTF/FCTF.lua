@@ -253,7 +253,11 @@ for idx, grp in ipairs(order) do
     -- position label so its left edge aligns with the dropdown
     label:ClearAllPoints()
     label:SetPoint("BOTTOM", dd, "TOP", 0, 3)
-    label:SetWidth(UIDropDownMenu_GetWidth(dd))
+    -- Use the frame's GetWidth() method to obtain the dropdown width.
+    -- UIDropDownMenu_GetWidth has been removed in Dragonflight and older
+    -- globals may not return a valid number. GetWidth() is available on all
+    -- frames and ensures a numeric width is returned.
+    label:SetWidth(dd:GetWidth())
     label:SetJustifyH("CENTER")
     label:SetText(grp)
 
