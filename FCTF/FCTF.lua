@@ -125,7 +125,10 @@ local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, "BackdropTemp
 -- Sized so the bottom border sits just above the action buttons
 -- while leaving a small buffer for a clean look. Width reduced a touch to
 -- minimize empty space at the sides without crowding controls.
-frame:SetSize(405, 500)
+-- The original width left noticeably more padding on the right side of
+-- the options window than on the left.  Reduce the width a little so the
+-- left and right borders appear more balanced.
+frame:SetSize(380, 500)
 frame:SetPoint("CENTER")
 frame:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -264,7 +267,9 @@ end
 -- 5) SCALE SLIDER -----------------------------------------------------------
 local scaleLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 -- position the label below the last dropdown to prevent overlap
-local sliderOffsetX = 15 -- shift controls slightly right for centering
+-- Shift controls slightly right for centering.  The value was a bit too
+-- large after shrinking the frame width, causing extra space on the left.
+local sliderOffsetX = 5
 if lastDropdown then
     scaleLabel:SetPoint("TOPLEFT", lastDropdown, "BOTTOMLEFT", sliderOffsetX, -20)
 else
@@ -304,7 +309,8 @@ slider:SetScript("OnLeave", GameTooltip_Hide)
 -- 6) PREVIEW & EDIT ---------------------------------------------------------
 preview = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 preview:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -20)
-preview:SetWidth(360)
+-- Fit the preview text within the slightly narrower frame.
+preview:SetWidth(330)
 preview:SetJustifyH("LEFT")
 preview:SetText("12345")
 
@@ -313,7 +319,8 @@ preview:SetText("12345")
 SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
 
 editBox = CreateFrame("EditBox", addonName .. "PreviewEdit", frame, "InputBoxTemplate")
-editBox:SetSize(360, 24)
+-- Match the preview field width so the edit box lines up neatly.
+editBox:SetSize(330, 24)
 editBox:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -8)
 editBox:SetAutoFocus(false)
 editBox:SetText("12345")
