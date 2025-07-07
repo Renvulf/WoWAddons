@@ -123,8 +123,9 @@ local originalInfo = {}
 -- 2) MAIN WINDOW
 local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, "BackdropTemplate")
 -- Sized so the bottom border sits just above the action buttons
--- while leaving a small buffer for a clean look
-frame:SetSize(420, 500)
+-- while leaving a small buffer for a clean look. Width reduced a touch to
+-- minimize empty space at the sides without crowding controls.
+frame:SetSize(405, 500)
 frame:SetPoint("CENTER")
 frame:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
