@@ -119,14 +119,6 @@ for group, data in pairs(COMBAT_FONT_GROUPS) do
 end
 
 local originalInfo = {}
--- COMBAT_TEXT_TYPE_INFO may not exist yet at load time. Guard the copy loop
--- so "pairs" only runs when the table is available to avoid nil-table errors
--- during addon initialization.
-if type(COMBAT_TEXT_TYPE_INFO) == "table" then
-    for k, v in pairs(COMBAT_TEXT_TYPE_INFO) do
-        originalInfo[k] = v
-    end
-end
 
 -- 2) MAIN WINDOW
 local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, "BackdropTemplate")
@@ -357,6 +349,7 @@ local cbIncDam = CreateCheckbox(frame,
   FCTFPCDB.incomingDamage,
   function(self)
     FCTFPCDB.incomingDamage = self:GetChecked()
+    if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
     if not self:GetChecked() then
       COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
       COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
@@ -377,6 +370,7 @@ local cbIncHeal = CreateCheckbox(frame,
   FCTFPCDB.incomingHealing,
   function(self)
     FCTFPCDB.incomingHealing = self:GetChecked()
+    if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
     if not self:GetChecked() then
       COMBAT_TEXT_TYPE_INFO.HEAL      = nil
       COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
@@ -522,10 +516,11 @@ minimapButton:SetScript("OnUpdate", function(self)
     self:SetPoint("CENTER", Minimap, "CENTER", math.cos(ang) * r, math.sin(ang) * r)
 end)
 
--- 14) APPLY/SAVE ON ADDON_LOADED
+-- 14) EVENT HANDLER SETUP ---------------------------------------------------
 frame:RegisterEvent("ADDON_LOADED")
+frame:RegisterEvent("PLAYER_LOGIN")
 frame:SetScript("OnEvent", function(self, event, name)
-    if name == addonName then
+    if event == "ADDON_LOADED" and name == addonName then
         if FCTFDB.selectedFont then
             -- extract group and filename using the last '/' so that
             -- group names containing slashes are handled correctly
@@ -544,14 +539,19 @@ frame:SetScript("OnEvent", function(self, event, name)
                 UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$",""))
             end
         end
-        -- restore incoming-damage toggle
+    elseif event == "PLAYER_LOGIN" then
+        -- snapshot Blizzard's default handlers after they are defined
+        originalInfo = {}
+        for k, v in pairs(COMBAT_TEXT_TYPE_INFO) do
+            originalInfo[k] = v
+        end
+        -- apply saved toggles now that the table exists
         if not FCTFPCDB.incomingDamage then
             COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
             COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
             COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = nil
             COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
         end
-        -- restore incoming-healing toggle
         if not FCTFPCDB.incomingHealing then
             COMBAT_TEXT_TYPE_INFO.HEAL      = nil
             COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
