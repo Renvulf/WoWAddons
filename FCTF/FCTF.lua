@@ -130,8 +130,11 @@ local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, "BackdropTemp
 --
 -- Constants control the visual spacing and border width so adjustments can
 -- be made in a single location.
-local PAD      = 20   -- distance from the outer edge to the nearest widget
+local PAD       = 20   -- distance from the outer edge to the nearest widget
 local BORDER    = 12   -- thickness of the decorative border
+local HEADER_H  = 40   -- space reserved for the InterfaceOptions header
+local PREVIEW_W = 320  -- width of preview and edit boxes
+local CB_COL_W  = 150  -- checkbox column width
 
 -- The existing widgets already expect roughly 20px from the top-left
 -- of the frame, so we simply expand the overall frame to ensure the same
@@ -225,9 +228,8 @@ for idx, grp in ipairs(order) do
     local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]", "") .. "DD", frame, "UIDropDownMenuTemplate")
     local row = math.floor((idx-1)/2)
     local col = (idx-1) % 2
-    -- extra vertical padding to keep labels away from the top border
-    -- shift every dropdown 20px closer to the top to remove blank space
-    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 20 + col*180, -20 - row*50)
+    -- place dropdowns below the InterfaceOptions title text
+    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 20 + col*180, -(HEADER_H + row*50))
     UIDropDownMenu_SetWidth(dd, 160)
     dropdowns[grp] = dd
     if idx == #order then
@@ -317,7 +319,7 @@ slider:SetScript("OnLeave", GameTooltip_Hide)
 -- 6) PREVIEW & EDIT ---------------------------------------------------------
 preview = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 preview:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -20)
-preview:SetWidth(360)
+preview:SetWidth(PREVIEW_W)
 preview:SetJustifyH("LEFT")
 preview:SetText("12345")
 
@@ -326,7 +328,7 @@ preview:SetText("12345")
 SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
 
 editBox = CreateFrame("EditBox", addonName .. "PreviewEdit", frame, "InputBoxTemplate")
-editBox:SetSize(360, 24)
+editBox:SetSize(PREVIEW_W, 24)
 editBox:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -8)
 editBox:SetAutoFocus(false)
 editBox:SetText("12345")
@@ -344,7 +346,7 @@ for i,opt in ipairs(opts) do
     local col = (i-1) % 2
     local row = math.floor((i-1) / 2)
     -- anchor checkboxes below the edit box to avoid overlap with the preview box
-    local x = 16 + col * 200
+    local x = 16 + col * CB_COL_W
     local y = -16 - row * 30
     -- initially anchor at origin; we reposition immediately after
     local cb = CreateCheckbox(frame, opt.l, 0, 0, FCTFPCDB[opt.k], function(self)
@@ -393,7 +395,7 @@ local cbIncHeal = CreateCheckbox(frame, "Show Incoming Healing", 0, 0, FCTFPCDB.
     end
   end)
 cbIncHeal:ClearAllPoints()
-cbIncHeal:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX + 200, baseY)
+cbIncHeal:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX + CB_COL_W, baseY)
 
 -- 8) APPLY & DEFAULT BUTTONS -----------------------------------------------
 local applyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
