@@ -546,8 +546,14 @@ end)
 
 -- 14) EVENT HANDLER SETUP ---------------------------------------------------
 frame:RegisterEvent("ADDON_LOADED")
+frame:RegisterEvent("PLAYER_LOGOUT")
 frame:SetScript("OnEvent", function(self, event, name)
     if event == "ADDON_LOADED" and name == addonName then
+        -- apply saved checkbox states in case the frame was
+        -- created before SavedVariables were available
+        cbIncDam:SetChecked(FCTFPCDB.incomingDamage)
+        cbIncHeal:SetChecked(FCTFPCDB.incomingHealing)
+
         if FCTFDB.selectedFont then
             -- extract group and filename using the last '/' so that
             -- group names containing slashes are handled correctly
@@ -591,5 +597,9 @@ frame:SetScript("OnEvent", function(self, event, name)
         if InterfaceOptions_AddCategory then
             InterfaceOptions_AddCategory(frame)
         end
+    elseif event == "PLAYER_LOGOUT" then
+        -- store the latest checkbox states on logout to ensure persistence
+        FCTFPCDB.incomingDamage  = cbIncDam:GetChecked()
+        FCTFPCDB.incomingHealing = cbIncHeal:GetChecked()
     end
 end)
