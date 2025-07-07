@@ -347,6 +347,7 @@ editBox:SetText("12345")
 editBox:SetScript("OnTextChanged", function(self) preview:SetText(self:GetText()) end)
 
 -- 7) COMBAT OPTION CHECKBOXES ----------------------------------------------
+local optionCheckboxes = {}
 local opts = {
     {k="combatHealing",  l="Show Combat Healing",  c="floatingCombatTextCombatHealing"},
     {k="combatDamage",   l="Show Combat Damage",   c="floatingCombatTextCombatDamage"},
@@ -371,6 +372,7 @@ for i,opt in ipairs(opts) do
     end)
     cb:ClearAllPoints()
     cb:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", x, y)
+    optionCheckboxes[opt.k] = {box = cb, cvar = opt.c}
 end
 
 -- row index for new controls (#opts==4 so next row==2)
@@ -444,7 +446,9 @@ applyBtn:SetScript("OnClick", function()
         print("|cFF00FF00[FCTF]|r Combat font saved. Please restart WoW to apply.")
         UIErrorsFrame:AddMessage("FCTF: restart WoW to load the new font.", 1, 1, 0)
     else
-        print("|cFFFF0000[FCTF]|r No font selected.")
+        -- Default was chosen or no custom font selected; notify the user that
+        -- the stock combat font has been restored.
+        print("|cFF00FF00[FCTF]|r Default Font Applied. Please restart WoW to apply.")
     end
 end)
 
@@ -503,7 +507,33 @@ defaultBtn:SetScript("OnClick", function()
     end
     slider:SetValue(1.0); UpdateScale(1.0)
 
-    print("|cFF00FF00[FCTF]|r Preview now shows Blizzard's default combat-text font.")
+    -- enable all combat text options since these represent the default state
+    for k,data in pairs(optionCheckboxes) do
+        data.box:SetChecked(true)
+        FCTFPCDB[k] = true
+        if type(GetCVar) == "function" and type(SetCVar) == "function" and
+           data.cvar and GetCVar(data.cvar) ~= nil then
+            SetCVar(data.cvar, "1")
+        end
+    end
+
+    cbIncDam:SetChecked(true)
+    FCTFPCDB.incomingDamage = true
+    if type(COMBAT_TEXT_TYPE_INFO) == "table" then
+        COMBAT_TEXT_TYPE_INFO.DAMAGE       = originalInfo.DAMAGE
+        COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = originalInfo.DAMAGE_CRIT
+        COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = originalInfo.SPELL_DAMAGE
+        COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = originalInfo.SPELL_DAMAGE_CRIT
+    end
+
+    cbIncHeal:SetChecked(true)
+    FCTFPCDB.incomingHealing = true
+    if type(COMBAT_TEXT_TYPE_INFO) == "table" then
+        COMBAT_TEXT_TYPE_INFO.HEAL      = originalInfo.HEAL
+        COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = originalInfo.HEAL_CRIT
+    end
+
+    print("|cFF00FF00[FCTF]|r Default Font Applied. Please restart WoW to apply.")
 end)
 
 -- 11) CLOSE BUTTON
