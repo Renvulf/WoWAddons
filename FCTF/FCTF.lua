@@ -242,7 +242,7 @@ for idx, grp in ipairs(order) do
     local col = (idx-1) % 2
     -- place dropdowns below the InterfaceOptions title text
     -- shift dropdowns slightly so left and right margins are even
-    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 16 + col*170, -(HEADER_H + row*50))
+    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 16 + col*180, -(HEADER_H + row*50))
     UIDropDownMenu_SetWidth(dd, 160)
     dropdowns[grp] = dd
     if idx == #order then
@@ -251,7 +251,10 @@ for idx, grp in ipairs(order) do
 
     local label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     -- position label so its left edge aligns with the dropdown
-    label:SetPoint("BOTTOMLEFT", dd, "TOPLEFT", 4, 3)
+    label:ClearAllPoints()
+    label:SetPoint("BOTTOM", dd, "TOP", 0, 3)
+    label:SetWidth(UIDropDownMenu_GetWidth(dd))
+    label:SetJustifyH("CENTER")
     label:SetText(grp)
 
     UIDropDownMenu_Initialize(dd, function()
@@ -334,9 +337,10 @@ slider:SetScript("OnLeave", GameTooltip_Hide)
 
 -- 6) PREVIEW & EDIT ---------------------------------------------------------
 preview = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-preview:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -20)
+preview:ClearAllPoints()
+preview:SetPoint("TOP", slider, "BOTTOM", 0, -20)
 preview:SetWidth(PREVIEW_W)
-preview:SetJustifyH("LEFT")
+preview:SetJustifyH("CENTER")
 preview:SetText("12345")
 
 -- Apply a default preview font. GameFontNormalLarge should normally exist,
@@ -345,7 +349,8 @@ SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
 
 editBox = CreateFrame("EditBox", addonName .. "PreviewEdit", frame, "InputBoxTemplate")
 editBox:SetSize(PREVIEW_W, 24)
-editBox:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -8)
+editBox:ClearAllPoints()
+editBox:SetPoint("TOP", preview, "BOTTOM", 0, -8)
 editBox:SetAutoFocus(false)
 editBox:SetText("12345")
 editBox:SetScript("OnTextChanged", function(self) preview:SetText(self:GetText()) end)
