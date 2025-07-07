@@ -122,16 +122,29 @@ local originalInfo = {}
 
 -- 2) MAIN WINDOW
 local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, "BackdropTemplate")
--- Sized so the bottom border sits just above the action buttons
--- while leaving a small buffer for a clean look. Width reduced a touch to
--- minimize empty space at the sides without crowding controls.
-frame:SetSize(405, 500)
+--
+-- The options window previously lacked a border and used uneven padding
+-- around its contents.  Here we keep all the widgets exactly where they
+-- were defined and instead only change the outer frame so that it provides
+-- an even buffer on every side and a simple border for clarity.
+--
+-- Constants control the visual spacing and border width so adjustments can
+-- be made in a single location.
+local PAD      = 20   -- distance from the outer edge to the nearest widget
+local BORDER    = 12   -- thickness of the decorative border
+
+-- The existing widgets already expect roughly 20px from the top-left
+-- of the frame, so we simply expand the overall frame to ensure the same
+-- distance on the remaining sides as well.
+frame:SetSize(344 + PAD * 2, 468 + PAD * 2)
 frame:SetPoint("CENTER")
 frame:SetBackdrop({
     bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
-    -- no edgeFile so the grey border is removed
-    -- and only the translucent background remains
-    tile     = true, tileSize = 32, edgeSize = 0,
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile     = true, tileSize = 32,
+    edgeSize = BORDER,
+    insets   = { left = PAD - BORDER, right = PAD - BORDER,
+                 top  = PAD - BORDER, bottom = PAD - BORDER },
 })
 frame:SetBackdropColor(0, 0, 0, 0.8)
 frame:EnableMouse(true)
