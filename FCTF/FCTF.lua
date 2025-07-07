@@ -212,7 +212,8 @@ for idx, grp in ipairs(order) do
     local row = math.floor((idx-1)/2)
     local col = (idx-1) % 2
     -- extra vertical padding to keep labels away from the top border
-    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 20 + col*180, -40 - row*50)
+    -- shift every dropdown 20px closer to the top to remove blank space
+    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 20 + col*180, -20 - row*50)
     UIDropDownMenu_SetWidth(dd, 160)
     dropdowns[grp] = dd
     if idx == #order then
@@ -386,7 +387,9 @@ local applyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 applyBtn:SetSize(100, 22)
 -- Position slightly closer to the bottom border now that the
 -- overall frame height has been reduced
-applyBtn:SetPoint("BOTTOMLEFT", 16, 20)
+-- keep the action buttons in place or slightly lower so they no longer
+-- overlap the lowest checkboxes
+applyBtn:SetPoint("BOTTOMLEFT", 16, 12)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
     if FCTFDB.selectedFont then
@@ -435,7 +438,7 @@ local closeBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
 closeBtn:SetSize(80, 24)
 -- Align with the Apply button and use the reduced
 -- bottom spacing
-closeBtn:SetPoint("BOTTOMRIGHT", -16, 20)
+closeBtn:SetPoint("BOTTOMRIGHT", -16, 12)
 closeBtn:SetText("Close")
 closeBtn:SetScript("OnClick", function() frame:Hide() end)
 closeBtn:SetScript("OnEnter", function(self)
