@@ -241,7 +241,8 @@ for idx, grp in ipairs(order) do
     local row = math.floor((idx-1)/2)
     local col = (idx-1) % 2
     -- place dropdowns below the InterfaceOptions title text
-    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 20 + col*180, -(HEADER_H + row*50))
+    -- shift dropdowns slightly so left and right margins are even
+    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 32 + col*180, -(HEADER_H + row*50))
     UIDropDownMenu_SetWidth(dd, 160)
     dropdowns[grp] = dd
     if idx == #order then
@@ -359,7 +360,8 @@ for i,opt in ipairs(opts) do
     local col = (i-1) % 2
     local row = math.floor((i-1) / 2)
     -- anchor checkboxes below the edit box to avoid overlap with the preview box
-    local x = 16 + col * CB_COL_W
+    -- align first column with the preview edit box
+    local x = (col == 0) and 0 or (CB_COL_W + 16)
     local y = -16 - row * 30
     -- initially anchor at origin; we reposition immediately after
     local cb = CreateCheckbox(frame, opt.l, 0, 0, FCTFPCDB[opt.k], function(self)
@@ -377,7 +379,8 @@ end
 
 -- row index for new controls (#opts==4 so next row==2)
 local newRow = math.floor(#opts/2)
-local baseX, baseY = 16, -16 - newRow*30
+-- align incoming damage checkbox column with the edit box
+local baseX, baseY = 0, -16 - newRow*30
 
 -- Incoming DAMAGE (column 1)
 local cbIncDam = CreateCheckbox(frame, "Show Incoming Damage", 0, 0, FCTFPCDB.incomingDamage,
@@ -413,7 +416,8 @@ local cbIncHeal = CreateCheckbox(frame, "Show Incoming Healing", 0, 0, FCTFPCDB.
     end
   end)
 cbIncHeal:ClearAllPoints()
-cbIncHeal:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX + CB_COL_W, baseY)
+-- keep second column aligned with other checkboxes
+cbIncHeal:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX + CB_COL_W + 16, baseY)
 
 -- 8) APPLY & DEFAULT BUTTONS -----------------------------------------------
 local applyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
