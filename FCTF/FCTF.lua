@@ -118,10 +118,14 @@ for group, data in pairs(COMBAT_FONT_GROUPS) do
     end
 end
 
--- snapshot Blizzard's default handlers so we can restore them
 local originalInfo = {}
-for k, v in pairs(COMBAT_TEXT_TYPE_INFO) do
-    originalInfo[k] = v
+-- COMBAT_TEXT_TYPE_INFO may not exist yet at load time. Guard the copy loop
+-- so "pairs" only runs when the table is available to avoid nil-table errors
+-- during addon initialization.
+if type(COMBAT_TEXT_TYPE_INFO) == "table" then
+    for k, v in pairs(COMBAT_TEXT_TYPE_INFO) do
+        originalInfo[k] = v
+    end
 end
 
 -- 2) MAIN WINDOW
