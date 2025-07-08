@@ -147,6 +147,7 @@ local PREVIEW_W = 320  -- width of preview and edit boxes
 local CB_COL_W  = 150  -- checkbox column width
 local DD_WIDTH  = 160  -- dropdown width
 local DD_GAP    = 20   -- space between dropdown columns
+local ROW_HEIGHT = 50  -- vertical spacing between dropdown rows
 
 -- The existing widgets already expect roughly 20px from the top-left
 -- of the frame, so we simply expand the overall frame to ensure the same
@@ -173,6 +174,15 @@ frame:SetScript("OnDragStart", frame.StartMoving)
 frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
 frame:Hide()
 frame.name = "FCTF"
+
+-- content container used purely for layout so widgets remain neatly
+-- inside the frame even when dimensions change.  This avoids anchoring
+-- everything directly to the outer frame and keeps padding consistent.
+local content = CreateFrame("Frame", nil, frame)
+content:SetPoint("TOPLEFT", PAD, -HEADER_H)
+content:SetPoint("BOTTOMRIGHT", -PAD, PAD)
+local INNER_W = frame:GetWidth() - PAD * 2
+
 
 -- allow ESC key to close the frame
 if UISpecialFrames then
@@ -241,23 +251,23 @@ end
 local order = {"Fun", "Future", "Movie/Game", "Easy-to-Read", "Custom"}
 local lastDropdown
 for idx, grp in ipairs(order) do
-    local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]", "") .. "DD", frame, "UIDropDownMenuTemplate")
+    local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]", "") .. "DD", content, "UIDropDownMenuTemplate")
     local row = math.floor((idx-1)/2)
     local col = (idx-1) % 2
-    -- center both dropdown columns within the frame
-    local totalCols   = 2
-    local totalWidth  = DD_WIDTH * totalCols + DD_GAP
-    local margin      = math.max(0, (frame:GetWidth() - totalWidth) / 2)
-    local xOffset     = margin + col * (DD_WIDTH + DD_GAP)
-    local yOffset     = -(HEADER_H + row * 50)
-    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", xOffset, yOffset)
+    -- determine how many dropdowns are on this row so we can center them
+    local itemsThisRow = math.min(2, #order - row*2)
+    local totalWidth   = itemsThisRow * DD_WIDTH + (itemsThisRow-1) * DD_GAP
+    local margin       = math.max(0, (INNER_W - totalWidth) / 2)
+    local xOffset      = margin + col * (DD_WIDTH + DD_GAP)
+    local yOffset      = -row * ROW_HEIGHT
+    dd:SetPoint("TOPLEFT", content, "TOPLEFT", xOffset, yOffset)
     UIDropDownMenu_SetWidth(dd, DD_WIDTH)
     dropdowns[grp] = dd
     if idx == #order then
         lastDropdown = dd -- remember last dropdown for layout anchoring
     end
 
-    local label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    local label = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     -- position label so its left edge aligns with the dropdown
     label:ClearAllPoints()
     label:SetPoint("BOTTOM", dd, "TOP", 0, 3)
@@ -306,17 +316,17 @@ for idx, grp in ipairs(order) do
 end
 
 -- 5) SCALE SLIDER -----------------------------------------------------------
-local scaleLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+local scaleLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 -- position the label below the last dropdown to prevent overlap
 local sliderOffsetX = 15 -- shift controls slightly right for centering
 if lastDropdown then
     scaleLabel:SetPoint("TOPLEFT", lastDropdown, "BOTTOMLEFT", sliderOffsetX, -20)
 else
-    scaleLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 16 + sliderOffsetX, -160)
+    scaleLabel:SetPoint("TOPLEFT", content, "TOPLEFT", sliderOffsetX, -ROW_HEIGHT*math.ceil(#order/2) - 20)
 end
 scaleLabel:SetText("Combat Text Size:")
 
-local slider = CreateFrame("Slider", addonName .. "ScaleSlider", frame, "OptionsSliderTemplate")
+local slider = CreateFrame("Slider", addonName .. "ScaleSlider", content, "OptionsSliderTemplate")
 slider:SetSize(300, 16)
 slider:SetPoint("TOPLEFT", scaleLabel, "BOTTOMLEFT", 0, -8)
 slider:SetMinMaxValues(0.5, 5.0)
@@ -325,7 +335,7 @@ slider:SetObeyStepOnDrag(true)
 _G[slider:GetName() .. "Low"]:SetText("0.5")
 _G[slider:GetName() .. "High"]:SetText("5.0")
 
-local scaleValue = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+local scaleValue = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 scaleValue:ClearAllPoints()
 -- center the slider value text 2px above the bar
 scaleValue:SetPoint("BOTTOM", slider, "TOP", 0, 2)
@@ -348,7 +358,7 @@ end)
 slider:SetScript("OnLeave", GameTooltip_Hide)
 
 -- 6) PREVIEW & EDIT ---------------------------------------------------------
-preview = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+preview = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 preview:ClearAllPoints()
 preview:SetPoint("TOP", slider, "BOTTOM", 0, -20)
 preview:SetWidth(PREVIEW_W)
@@ -359,7 +369,7 @@ preview:SetText("12345")
 -- but we fall back to the current FontObject if it does not to avoid errors.
 SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
 
-editBox = CreateFrame("EditBox", addonName .. "PreviewEdit", frame, "InputBoxTemplate")
+editBox = CreateFrame("EditBox", addonName .. "PreviewEdit", content, "InputBoxTemplate")
 editBox:SetSize(PREVIEW_W, 24)
 editBox:ClearAllPoints()
 editBox:SetPoint("TOP", preview, "BOTTOM", 0, -8)
@@ -386,7 +396,7 @@ for i,opt in ipairs(opts) do
     local x = (col == 0) and 0 or (CB_COL_W + 16)
     local y = -16 - row * 30
     -- initially anchor at origin; we reposition immediately after
-    local cb = CreateCheckbox(frame, opt.l, 0, 0, FCTFPCDB[opt.k], function(self)
+    local cb = CreateCheckbox(content, opt.l, 0, 0, FCTFPCDB[opt.k], function(self)
         FCTFPCDB[opt.k] = self:GetChecked()
         -- guard against missing CVars on certain game versions
         if type(GetCVar) == "function" and type(SetCVar) == "function" and
@@ -400,7 +410,7 @@ for i,opt in ipairs(opts) do
 end
 
 -- 8) APPLY & DEFAULT BUTTONS -----------------------------------------------
-local applyBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+local applyBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
 -- Match the width of the Default button for consistency
 applyBtn:SetSize(100, 22)
 -- Position slightly closer to the bottom border now that the
@@ -436,7 +446,7 @@ applyBtn:SetScript("OnClick", function()
     end
 end)
 
-local defaultBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+local defaultBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
 defaultBtn:SetSize(100,22)
 defaultBtn:SetPoint("LEFT", applyBtn, "RIGHT", 8, 0)
 defaultBtn:SetText("Default")
@@ -525,7 +535,7 @@ defaultBtn:SetScript("OnClick", function()
 end)
 
 -- 11) CLOSE BUTTON
-local closeBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+local closeBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
 closeBtn:SetSize(80, 24)
 -- Align with the Apply button and use the reduced
 -- bottom spacing
@@ -708,7 +718,7 @@ frame:SetScript("OnEvent", function(self, event, name)
             local newRow = math.floor(#opts/2)
             local baseX, baseY = 0, -16 - newRow*30
 
-            cbIncDam = CreateCheckbox(frame, "Show Incoming Damage", 0, 0,
+            cbIncDam = CreateCheckbox(content, "Show Incoming Damage", 0, 0,
                 FCTFPCDB.incomingDamage, function(self)
                 FCTFPCDB.incomingDamage = self:GetChecked()
                 if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
@@ -727,7 +737,7 @@ frame:SetScript("OnEvent", function(self, event, name)
             cbIncDam:ClearAllPoints()
             cbIncDam:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX, baseY)
 
-            cbIncHeal = CreateCheckbox(frame, "Show Incoming Healing", 0, 0,
+            cbIncHeal = CreateCheckbox(content, "Show Incoming Healing", 0, 0,
                 FCTFPCDB.incomingHealing, function(self)
                 FCTFPCDB.incomingHealing = self:GetChecked()
                 if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
