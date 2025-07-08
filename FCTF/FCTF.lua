@@ -145,6 +145,8 @@ local BORDER    = 12   -- thickness of the decorative border
 local HEADER_H  = 40   -- space reserved for the InterfaceOptions header
 local PREVIEW_W = 320  -- width of preview and edit boxes
 local CB_COL_W  = 150  -- checkbox column width
+local DD_WIDTH  = 160  -- dropdown width
+local DD_GAP    = 20   -- space between dropdown columns
 
 -- The existing widgets already expect roughly 20px from the top-left
 -- of the frame, so we simply expand the overall frame to ensure the same
@@ -243,9 +245,10 @@ for idx, grp in ipairs(order) do
     local row = math.floor((idx-1)/2)
     local col = (idx-1) % 2
     -- place dropdowns below the InterfaceOptions title text
-    -- shift dropdowns slightly so left and right margins are even
-    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 16 + col*180, -(HEADER_H + row*50))
-    UIDropDownMenu_SetWidth(dd, 160)
+    -- horizontally center both columns within the frame
+    local margin = math.max(0, (frame:GetWidth() - (DD_WIDTH * 2 + DD_GAP)) / 2)
+    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", margin + col * (DD_WIDTH + DD_GAP), -(HEADER_H + row*50))
+    UIDropDownMenu_SetWidth(dd, DD_WIDTH)
     dropdowns[grp] = dd
     if idx == #order then
         lastDropdown = dd -- remember last dropdown for layout anchoring
