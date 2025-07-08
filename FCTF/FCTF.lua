@@ -142,14 +142,18 @@ local frame = CreateFrame("Frame", addonName .. "Frame", UIParent, backdropTempl
 --
 -- Constants control the visual spacing and border width so adjustments can
 -- be made in a single location.
-local PAD       = 20   -- distance from the outer edge to the nearest widget
-local BORDER    = 12   -- thickness of the decorative border
-local HEADER_H  = 40   -- space reserved for the InterfaceOptions header
-local PREVIEW_W = 320  -- width of preview and edit boxes
-local CB_COL_W  = 150  -- checkbox column width
-local DD_WIDTH  = 160  -- dropdown width
-local DD_GAP    = 20   -- space between dropdown columns
-local ROW_HEIGHT = 50  -- vertical spacing between dropdown rows
+local PAD        = 20   -- distance from the outer edge to the nearest widget
+local BORDER     = 12   -- thickness of the decorative border
+local HEADER_H   = 40   -- space reserved for the InterfaceOptions header
+local PREVIEW_W  = 320  -- width of preview and edit boxes
+local CB_COL_W   = 150  -- checkbox column width
+local DD_WIDTH   = 160  -- dropdown width
+local DD_GAP     = 20   -- space between dropdown columns
+local ROW_HEIGHT = 50   -- vertical spacing between dropdown rows
+-- action button geometry
+local BUTTON_GAP = 8    -- horizontal spacing between Apply/Default/Close buttons
+local APPLY_W    = 100  -- width of the Apply and Default buttons
+local CLOSE_W    = 80   -- width of the Close button
 
 -- The existing widgets already expect roughly 20px from the top-left
 -- of the frame, so we simply expand the overall frame to ensure the same
@@ -420,11 +424,13 @@ end
 -- container frame keeps the action buttons centred and evenly spaced
 local buttonBar = CreateFrame("Frame", nil, content)
 buttonBar:SetPoint("BOTTOM", 0, 12)
-buttonBar:SetSize(288, 22) -- total width of the three buttons plus gaps
+-- width is computed from the individual button widths and gaps to keep
+-- the entire bar centered even if sizes change
+buttonBar:SetSize(APPLY_W * 2 + CLOSE_W + BUTTON_GAP * 2, 22)
 
 local applyBtn = CreateFrame("Button", nil, buttonBar, "UIPanelButtonTemplate")
 -- Match the width of the Default button for consistency
-applyBtn:SetSize(100, 22)
+applyBtn:SetSize(APPLY_W, 22)
 applyBtn:SetPoint("LEFT", buttonBar, "LEFT", 0, 0)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
@@ -455,8 +461,8 @@ applyBtn:SetScript("OnClick", function()
 end)
 
 local defaultBtn = CreateFrame("Button", nil, buttonBar, "UIPanelButtonTemplate")
-defaultBtn:SetSize(100,22)
-defaultBtn:SetPoint("LEFT", applyBtn, "RIGHT", 8, 0)
+defaultBtn:SetSize(APPLY_W,22)
+defaultBtn:SetPoint("LEFT", applyBtn, "RIGHT", BUTTON_GAP, 0)
 defaultBtn:SetText("Default")
 defaultBtn:SetScript("OnClick", function()
     -- clear any previously selected custom font
@@ -544,9 +550,9 @@ end)
 
 -- 11) CLOSE BUTTON
 local closeBtn = CreateFrame("Button", nil, buttonBar, "UIPanelButtonTemplate")
-closeBtn:SetSize(80, 24)
+closeBtn:SetSize(CLOSE_W, 24)
 -- position at the far right of the button bar
-closeBtn:SetPoint("LEFT", defaultBtn, "RIGHT", 8, 0)
+closeBtn:SetPoint("LEFT", defaultBtn, "RIGHT", BUTTON_GAP, 0)
 closeBtn:SetText("Close")
 closeBtn:SetScript("OnClick", function() frame:Hide() end)
 closeBtn:SetScript("OnEnter", function(self)
