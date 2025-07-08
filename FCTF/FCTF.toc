@@ -1,0 +1,10 @@
+## Interface: 110200, 110107, 110001, 100200, 100107, 100105, 100100, 100007, 100002, 90207, 80307, 70305, 60204, 50408, 40304, 30404, 20504, 11307
+## Title: Floating Damage Fonts
+## Notes: Display customizable floating combat text with live font & size adjustments. Type /float or click the minimap icon to configure; drop new .ttf fonts into the folder and restart to apply.
+## IconTexture: Interface\AddOns\FCTF\floaticon1
+## Author: Renvulf
+## Version: 2.4
+## SavedVariables: FCTFDB
+## SavedVariablesPerCharacter: FCTFPCDB
+
+FCTF.lua
