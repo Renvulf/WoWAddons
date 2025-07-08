@@ -318,17 +318,20 @@ end
 -- 5) SCALE SLIDER -----------------------------------------------------------
 local scaleLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 -- position the label below the last dropdown to prevent overlap
-local sliderOffsetX = 15 -- shift controls slightly right for centering
+-- place the scale label directly beneath the font dropdowns and
+-- centre it horizontally so long text doesn't push the slider off screen
 if lastDropdown then
-    scaleLabel:SetPoint("TOPLEFT", lastDropdown, "BOTTOMLEFT", sliderOffsetX, -20)
+    scaleLabel:SetPoint("TOP", lastDropdown, "BOTTOM", 0, -20)
 else
-    scaleLabel:SetPoint("TOPLEFT", content, "TOPLEFT", sliderOffsetX, -ROW_HEIGHT*math.ceil(#order/2) - 20)
+    scaleLabel:SetPoint("TOP", content, "TOP", 0, -ROW_HEIGHT*math.ceil(#order/2) - 20)
 end
+scaleLabel:SetJustifyH("CENTER")
 scaleLabel:SetText("Combat Text Size:")
 
 local slider = CreateFrame("Slider", addonName .. "ScaleSlider", content, "OptionsSliderTemplate")
 slider:SetSize(300, 16)
-slider:SetPoint("TOPLEFT", scaleLabel, "BOTTOMLEFT", 0, -8)
+-- anchor via the centre so the slider remains neatly within the frame
+slider:SetPoint("TOP", scaleLabel, "BOTTOM", 0, -8)
 slider:SetMinMaxValues(0.5, 5.0)
 slider:SetValueStep(0.1)
 slider:SetObeyStepOnDrag(true)
