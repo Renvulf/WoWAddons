@@ -244,11 +244,12 @@ for idx, grp in ipairs(order) do
     local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]", "") .. "DD", frame, "UIDropDownMenuTemplate")
     local row = math.floor((idx-1)/2)
     local col = (idx-1) % 2
-    -- position dropdowns flush with the left and right frame padding
-    local xOffset = (col == 0)
-        and PAD                                       -- left column
-        or (frame:GetWidth() - PAD - DD_WIDTH)        -- right column
-    local yOffset = -(HEADER_H + row * 50)
+    -- center both dropdown columns within the frame
+    local totalCols   = 2
+    local totalWidth  = DD_WIDTH * totalCols + DD_GAP
+    local margin      = math.max(0, (frame:GetWidth() - totalWidth) / 2)
+    local xOffset     = margin + col * (DD_WIDTH + DD_GAP)
+    local yOffset     = -(HEADER_H + row * 50)
     dd:SetPoint("TOPLEFT", frame, "TOPLEFT", xOffset, yOffset)
     UIDropDownMenu_SetWidth(dd, DD_WIDTH)
     dropdowns[grp] = dd
