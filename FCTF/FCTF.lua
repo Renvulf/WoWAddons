@@ -123,6 +123,8 @@ for group, data in pairs(COMBAT_FONT_GROUPS) do
 end
 
 local originalInfo = {}
+-- track whether the options panel was added to Interface Options
+local addedCategory = false
 
 -- cache Blizzard's default combat text fonts so we can revert the preview
 -- when the user presses the "Default" button. these paths are populated once
@@ -169,6 +171,8 @@ frame:SetBackdrop({
 frame:SetBackdropColor(0, 0, 0, 0.8)
 frame:EnableMouse(true)
 frame:SetMovable(true)
+-- prevent the frame from being dragged off screen
+frame:SetClampedToScreen(true)
 frame:RegisterForDrag("LeftButton")
 frame:SetScript("OnDragStart", frame.StartMoving)
 frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
@@ -413,14 +417,15 @@ for i,opt in ipairs(opts) do
 end
 
 -- 8) APPLY & DEFAULT BUTTONS -----------------------------------------------
-local applyBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+-- container frame keeps the action buttons centred and evenly spaced
+local buttonBar = CreateFrame("Frame", nil, content)
+buttonBar:SetPoint("BOTTOM", 0, 12)
+buttonBar:SetSize(288, 22) -- total width of the three buttons plus gaps
+
+local applyBtn = CreateFrame("Button", nil, buttonBar, "UIPanelButtonTemplate")
 -- Match the width of the Default button for consistency
 applyBtn:SetSize(100, 22)
--- Position slightly closer to the bottom border now that the
--- overall frame height has been reduced
--- keep the action buttons in place or slightly lower so they no longer
--- overlap the lowest checkboxes
-applyBtn:SetPoint("BOTTOMLEFT", 16, 12)
+applyBtn:SetPoint("LEFT", buttonBar, "LEFT", 0, 0)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
     if FCTFDB.selectedFont then
@@ -449,7 +454,7 @@ applyBtn:SetScript("OnClick", function()
     end
 end)
 
-local defaultBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+local defaultBtn = CreateFrame("Button", nil, buttonBar, "UIPanelButtonTemplate")
 defaultBtn:SetSize(100,22)
 defaultBtn:SetPoint("LEFT", applyBtn, "RIGHT", 8, 0)
 defaultBtn:SetText("Default")
@@ -538,11 +543,10 @@ defaultBtn:SetScript("OnClick", function()
 end)
 
 -- 11) CLOSE BUTTON
-local closeBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+local closeBtn = CreateFrame("Button", nil, buttonBar, "UIPanelButtonTemplate")
 closeBtn:SetSize(80, 24)
--- Align with the Apply button and use the reduced
--- bottom spacing
-closeBtn:SetPoint("BOTTOMRIGHT", -16, 12)
+-- position at the far right of the button bar
+closeBtn:SetPoint("LEFT", defaultBtn, "RIGHT", 8, 0)
 closeBtn:SetText("Close")
 closeBtn:SetScript("OnClick", function() frame:Hide() end)
 closeBtn:SetScript("OnEnter", function(self)
@@ -604,8 +608,30 @@ minimapButton:EnableMouse(true)
 minimapButton:RegisterForClicks("LeftButtonUp")
 minimapButton:RegisterForDrag("LeftButton")
 minimapButton:SetScript("OnClick", function() SlashCmdList["FCT"]() end)
-minimapButton:SetScript("OnDragStart", function(self) self.isMoving = true end)
-minimapButton:SetScript("OnDragStop", function(self) self.isMoving = false end)
+
+-- helper to position the button along the minimap border
+local function UpdateButtonPosition(self)
+    local angle = math.rad(FCTFDB.minimapAngle)
+    local radius = Minimap:GetWidth()/2 + 10
+    self:ClearAllPoints()
+    self:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle)*radius, math.sin(angle)*radius)
+end
+
+minimapButton:SetScript("OnDragStart", function(self)
+    self:SetScript("OnUpdate", function(btn)
+        local mx, my = GetCursorPosition()
+        local scale = Minimap:GetEffectiveScale()
+        mx, my = mx / scale, my / scale
+        local cx, cy = Minimap:GetCenter()
+        FCTFDB.minimapAngle = math.deg(math.atan2(my - cy, mx - cx))
+        UpdateButtonPosition(btn)
+    end)
+end)
+
+minimapButton:SetScript("OnDragStop", function(self)
+    self:SetScript("OnUpdate", nil)
+    UpdateButtonPosition(self)
+end)
 minimapButton:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:SetText("Click to toggle FCTF settings", 1, 1, 1)
@@ -613,26 +639,8 @@ minimapButton:SetScript("OnEnter", function(self)
 end)
 minimapButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
--- remember the last placed angle so we only update when needed
-minimapButton.lastAngle = minimapButton.lastAngle or FCTFDB.minimapAngle
-
-minimapButton:SetScript("OnUpdate", function(self)
-    if self.isMoving then
-        local mx, my = GetCursorPosition()
-        local scale = Minimap:GetEffectiveScale()
-        mx, my = mx / scale, my / scale
-        local cx, cy = Minimap:GetCenter()
-        local dx, dy = mx - cx, my - cy
-        FCTFDB.minimapAngle = math.deg(math.atan2(dy, dx))
-    elseif self.lastAngle == FCTFDB.minimapAngle then
-        return -- nothing changed
-    end
-    self.lastAngle = FCTFDB.minimapAngle
-    local a = math.rad(self.lastAngle)
-    local r = Minimap:GetWidth()/2 + 10
-    self:ClearAllPoints()
-    self:SetPoint("CENTER", Minimap, "CENTER", math.cos(a)*r, math.sin(a)*r)
-end)
+-- initialise position when the addon loads
+UpdateButtonPosition(minimapButton)
 
 -- 14) EVENT HANDLER SETUP ---------------------------------------------------
 frame:RegisterEvent("ADDON_LOADED")
@@ -657,8 +665,9 @@ frame:SetScript("OnEvent", function(self, event, name)
             cbIncHeal:SetChecked(FCTFPCDB.incomingHealing)
         end
 
-        if InterfaceOptions_AddCategory then
+        if InterfaceOptions_AddCategory and not addedCategory then
             InterfaceOptions_AddCategory(frame)
+            addedCategory = true
         end
 
         if FCTFDB.selectedFont then
@@ -712,8 +721,9 @@ frame:SetScript("OnEvent", function(self, event, name)
         end
 
         -- only now add the options panel to interface options
-        if InterfaceOptions_AddCategory then
+        if InterfaceOptions_AddCategory and not addedCategory then
             InterfaceOptions_AddCategory(frame)
+            addedCategory = true
         end
 
         -- Retail-only incoming damage/healing checkboxes
