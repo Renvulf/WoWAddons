@@ -1,5 +1,15 @@
 -- FontMagic.lua
 local addonName = ...
+
+-- safe loader: C_AddOns.LoadAddOn (Retail ≥11.0.2) or legacy LoadAddOn
+local safeLoadAddOn
+if type(C_AddOns) == "table" and type(C_AddOns.LoadAddOn) == "function" then
+    safeLoadAddOn = C_AddOns.LoadAddOn
+elseif type(LoadAddOn) == "function" then
+    safeLoadAddOn = LoadAddOn
+else
+    safeLoadAddOn = function() end
+end
 local ADDON_PATH = "Interface\\AddOns\\" .. addonName .. "\\"
 -- Name of the optional addon supplying user fonts
 local CUSTOM_ADDON = "FontMagicCustomFonts"
@@ -7,7 +17,7 @@ local CUSTOM_ADDON = "FontMagicCustomFonts"
 local CUSTOM_PATH  = "Interface\\AddOns\\" .. CUSTOM_ADDON .. "\\Custom\\"
 
 -- Try to load the companion addon so its global table becomes available
-pcall(LoadAddOn, CUSTOM_ADDON)
+pcall(safeLoadAddOn, CUSTOM_ADDON)
 -- If loaded, prefer its reported path in case the folder was moved/renamed
 if type(FontMagicCustomFonts) == "table" and type(FontMagicCustomFonts.PATH) == "string" then
     CUSTOM_PATH = FontMagicCustomFonts.PATH
@@ -341,11 +351,21 @@ scaleLabel:SetText("Combat Text Size:")
 local slider = CreateFrame("Slider", addonName .. "ScaleSlider", frame, "OptionsSliderTemplate")
 slider:SetSize(300, 16)
 slider:SetPoint("TOPLEFT", scaleLabel, "BOTTOMLEFT", 0, -8)
-slider:SetMinMaxValues(0.5, 5.0)
-slider:SetValueStep(0.1)
-slider:SetObeyStepOnDrag(true)
-_G[slider:GetName() .. "Low"]:SetText("0.5")
-_G[slider:GetName() .. "High"]:SetText("5.0")
+
+local scaleSupported = GetCVar("WorldTextScale") ~= nil
+
+if scaleSupported then
+    slider:SetMinMaxValues(0.5, 5.0)
+    slider:SetValueStep(0.1)
+    slider:SetObeyStepOnDrag(true)
+    _G[slider:GetName() .. "Low"]:SetText("0.5")
+    _G[slider:GetName() .. "High"]:SetText("5.0")
+else
+    slider:Disable()
+    scaleLabel:SetTextColor(0.5, 0.5, 0.5)
+    _G[slider:GetName() .. "Low"]:SetText("")
+    _G[slider:GetName() .. "High"]:SetText("")
+end
 
 local scaleValue = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 scaleValue:ClearAllPoints()
@@ -353,21 +373,32 @@ scaleValue:ClearAllPoints()
 scaleValue:SetPoint("BOTTOM", slider, "TOP", 0, 2)
 
 local function UpdateScale(val)
+    if not scaleSupported then return end
     val = math.floor(val * 10 + 0.5) / 10
     SetCVar("WorldTextScale", tostring(val))
     scaleValue:SetText(string.format("%.1f", val))
 end
 
-local currentScale = tonumber(GetCVar("WorldTextScale")) or 1.0
-slider:SetValue(currentScale)
-scaleValue:SetText(string.format("%.1f", currentScale))
-slider:SetScript("OnValueChanged", function(self,val) UpdateScale(val) end)
-slider:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:AddLine("Drag to adjust combat text size",1,1,1)
-    GameTooltip:Show()
-end)
-slider:SetScript("OnLeave", GameTooltip_Hide)
+if scaleSupported then
+    local currentScale = tonumber(GetCVar("WorldTextScale")) or 1.0
+    slider:SetValue(currentScale)
+    scaleValue:SetText(string.format("%.1f", currentScale))
+    slider:SetScript("OnValueChanged", function(self,val) UpdateScale(val) end)
+    slider:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:AddLine("Drag to adjust combat text size",1,1,1)
+        GameTooltip:Show()
+    end)
+    slider:SetScript("OnLeave", GameTooltip_Hide)
+else
+    scaleValue:SetText("|cff888888N/A|r")
+    slider:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Not available in this version of WoW", nil, nil, nil, nil, true)
+        GameTooltip:Show()
+    end)
+    slider:SetScript("OnLeave", GameTooltip_Hide)
+end
 
 -- 6) PREVIEW & EDIT ---------------------------------------------------------
 preview = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
