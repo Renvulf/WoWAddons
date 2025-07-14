@@ -431,25 +431,41 @@ local opts = {
     -- Use the correct CVar so the option persists between sessions
     {k="periodicDamage", l="Show Periodic Damage", c="floatingCombatTextCombatLogPeriodicSpells"},
 }
-for i,opt in ipairs(opts) do
-    local col = (i-1) % 2
-    local row = math.floor((i-1) / 2)
+for i, opt in ipairs(opts) do
+    local col = (i - 1) % 2
+    local row = math.floor((i - 1) / 2)
     -- anchor checkboxes below the edit box to avoid overlap with the preview box
     -- align first column with the preview edit box
     local x = (col == 0) and 0 or (CB_COL_W + 16)
     local y = -16 - row * 30
-    -- initially anchor at origin; we reposition immediately after
-    local cb = CreateCheckbox(frame, opt.l, 0, 0, FontMagicPCDB[opt.k], function(self)
-        FontMagicPCDB[opt.k] = self:GetChecked()
-        -- guard against missing CVars on certain game versions
-        if type(GetCVar) == "function" and type(SetCVar) == "function" and
-           GetCVar(opt.c) ~= nil then
-            SetCVar(opt.c, self:GetChecked() and "1" or "0")
+
+    local cvarSupported = type(GetCVar) == "function" and GetCVar(opt.c) ~= nil
+    local onClick
+    if cvarSupported then
+        onClick = function(self)
+            FontMagicPCDB[opt.k] = self:GetChecked()
+            if type(SetCVar) == "function" then
+                SetCVar(opt.c, self:GetChecked() and "1" or "0")
+            end
         end
-    end)
+    else
+        onClick = nil
+    end
+
+    -- initially anchor at origin; we reposition immediately after
+    local cb = CreateCheckbox(frame, opt.l, 0, 0, FontMagicPCDB[opt.k], onClick)
     cb:ClearAllPoints()
     cb:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", x, y)
-    optionCheckboxes[opt.k] = {box = cb, cvar = opt.c}
+
+    if not cvarSupported then
+        -- grey out checkboxes for unsupported CVars so layout remains intact
+        cb:Disable()
+        if cb.text then
+            cb.text:SetTextColor(0.5, 0.5, 0.5)
+        end
+    end
+
+    optionCheckboxes[opt.k] = { box = cb, cvar = opt.c }
 end
 
 -- 8) APPLY & DEFAULT BUTTONS -----------------------------------------------
