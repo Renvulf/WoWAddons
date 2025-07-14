@@ -4,6 +4,17 @@
 -- FontMagic will be able to use them.
 
 local ADDON_NAME = ...
+
+-- safe loader: C_AddOns.LoadAddOn (Retail ≥11.0.2) or legacy LoadAddOn
+local safeLoadAddOn
+if type(C_AddOns) == "table" and type(C_AddOns.LoadAddOn) == "function" then
+    safeLoadAddOn = C_AddOns.LoadAddOn
+elseif type(LoadAddOn) == "function" then
+    safeLoadAddOn = LoadAddOn
+else
+    safeLoadAddOn = function() end
+end
+
 local ADDON_PATH = "Interface\\AddOns\\" .. ADDON_NAME .. "\\Custom\\"
 
 -- Public table used by the main FontMagic addon
