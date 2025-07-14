@@ -110,6 +110,19 @@ local COMBAT_FONT_GROUPS = {
             "pf_tempesta_seven.ttf",
         },
     },
+    ["Random"] = {
+        path  = ADDON_PATH .. "Random\\",
+        fonts = {
+            "BauhausRegular.ttf", "CalibriBold.ttf", "DieDieDie.ttf",
+            "Diogenes.ttf", "Disko.ttf", "Exocet.ttf", "Fraks.ttf",
+            "Galaxyone.ttf", "Ginko.ttf", "Homespun.ttf", "IKARRG.TTF",
+            "JJSTS.TTF", "Junegull.ttf", "MystikOrbs.ttf", "ParryHotter.ttf",
+            "Prototype.ttf", "Rebuffed.TTF", "Skratchpunk.ttf", "Solange.ttf",
+            "Starcine.ttf", "Stentiga.ttf", "Takeaway.ttf", "Trashco.ttf",
+            "WaltographUI.ttf", "Whiplash.ttf", "Zombie.ttf", "animeace.ttf",
+            "baskethammer.ttf", "college.ttf", "font2.ttf",
+        },
+    },
     ["Default"] = {
         path  = ADDON_PATH,
         fonts = {"default.ttf"},
@@ -271,7 +284,7 @@ end
 -- Dropdowns for each font group arranged neatly in two columns
 -- Displayed dropdown order; the "Custom" category replaces the old "Default"
 -- dropdown to allow users to provide their own fonts.
-local order = {"Fun", "Future", "Movie/Game", "Easy-to-Read", "Custom"}
+local order = {"Fun", "Future", "Movie/Game", "Easy-to-Read", "Custom", "Random"}
 local lastDropdown
 for idx, grp in ipairs(order) do
     local dd = CreateFrame("Frame", addonName .. grp:gsub("[^%w]", "") .. "DD", frame, "UIDropDownMenuTemplate")
