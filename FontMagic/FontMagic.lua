@@ -565,6 +565,14 @@ minimapButton:SetSize(20, 20)
 minimapButton:SetFrameStrata("MEDIUM")
 minimapButton:SetFrameLevel(8)
 
+-- helper to position the minimap button at a specific angle
+local function PositionMinimapButton(btn, angle)
+    local a = math.rad(angle)
+    local r = Minimap:GetWidth()/2 + 10
+    btn:ClearAllPoints()
+    btn:SetPoint("CENTER", Minimap, "CENTER", math.cos(a)*r, math.sin(a)*r)
+end
+
 -- icon (masked to a circle)
 local iconTex = minimapButton:CreateTexture(nil, "BACKGROUND")
 iconTex:SetTexture(ADDON_PATH .. "floaticon.png")
@@ -596,6 +604,8 @@ minimapButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 -- remember the last placed angle so we only update when needed
 minimapButton.lastAngle = minimapButton.lastAngle or FontMagicDB.minimapAngle
+-- place the button immediately rather than waiting for the first OnUpdate
+PositionMinimapButton(minimapButton, minimapButton.lastAngle)
 
 minimapButton:SetScript("OnUpdate", function(self)
     if self.isMoving then
@@ -609,10 +619,7 @@ minimapButton:SetScript("OnUpdate", function(self)
         return -- nothing changed
     end
     self.lastAngle = FontMagicDB.minimapAngle
-    local a = math.rad(self.lastAngle)
-    local r = Minimap:GetWidth()/2 + 10
-    self:ClearAllPoints()
-    self:SetPoint("CENTER", Minimap, "CENTER", math.cos(a)*r, math.sin(a)*r)
+    PositionMinimapButton(self, self.lastAngle)
 end)
 
 -- 14) EVENT HANDLER SETUP ---------------------------------------------------
