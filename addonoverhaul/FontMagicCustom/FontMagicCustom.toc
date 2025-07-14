@@ -1,0 +1,8 @@
+## Interface: 110200, 110107, 110001, 100200, 100107, 100105, 100100, 100007, 100002, 90207, 80307, 70305, 60204, 50408, 40304, 30404, 20504, 11307
+## Title: FontMagicCustom
+## Notes: Allows custom fonts to be used with FontMagic Addon. Drop any .ttf files renamed to a number (e.g 5.ttf) into this add-on's folder and they appear for use in the FontMagic Addon. 
+## IconTexture: Interface\AddOns\FontMagicCustom\floaticon1
+## Author: Renvulf
+## Version: 1.0
+
+FontMagicCustom.lua
