@@ -193,6 +193,7 @@ local BORDER    = 12   -- thickness of the decorative border
 local HEADER_H  = 40   -- space reserved for the InterfaceOptions header
 local PREVIEW_W = 320  -- width of preview and edit boxes
 local CB_COL_W  = 150  -- checkbox column width
+local DD_COL_W  = 180  -- width allocated for each dropdown column
 
 -- The existing widgets already expect roughly 20px from the top-left
 -- of the frame, so we simply expand the overall frame to ensure the same
@@ -292,7 +293,7 @@ for idx, grp in ipairs(order) do
     local col = (idx-1) % 2
     -- place dropdowns below the InterfaceOptions title text
     -- shift dropdowns slightly so left and right margins are even
-    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 16 + col*180, -(HEADER_H + row*50))
+    dd:SetPoint("TOPLEFT", frame, "TOPLEFT", 16 + col*DD_COL_W, -(HEADER_H + row*50))
     UIDropDownMenu_SetWidth(dd, 160)
     dropdowns[grp] = dd
     if idx == #order then
@@ -363,7 +364,15 @@ local scaleLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 -- position the label below the last dropdown to prevent overlap
 local sliderOffsetX = 15 -- shift controls slightly right for centering
 if lastDropdown then
-    scaleLabel:SetPoint("TOPLEFT", lastDropdown, "BOTTOMLEFT", sliderOffsetX, -20)
+    -- If the last dropdown resides in the right column shift the label
+    -- left by one dropdown width so subsequent widgets align with the
+    -- main column under the first dropdown.
+    local lastCol = (#order - 1) % 2
+    local xoff = sliderOffsetX
+    if lastCol == 1 then -- right column
+        xoff = xoff - DD_COL_W
+    end
+    scaleLabel:SetPoint("TOPLEFT", lastDropdown, "BOTTOMLEFT", xoff, -20)
 else
     scaleLabel:SetPoint("TOPLEFT", frame, "TOPLEFT", 16 + sliderOffsetX, -160)
 end
