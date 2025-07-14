@@ -1,4 +1,4 @@
--- FCTF.lua
+-- FontMagic.lua
 local addonName = ...
 local ADDON_PATH = "Interface\\AddOns\\" .. addonName .. "\\"
 -- detect whether the BackdropTemplate mixin exists (Retail only)
@@ -15,10 +15,10 @@ local backdropTemplate = (BackdropTemplateMixin and "BackdropTemplate") or nil
 --]]
 
 -- SavedDB defaults
-if not FCTFDB then
-    FCTFDB = { minimapAngle = 45 }
+if not FontMagicDB then
+    FontMagicDB = { minimapAngle = 45 }
 end
-FCTFPCDB = FCTFPCDB or {}
+FontMagicPCDB = FontMagicPCDB or {}
 
 local PERCHAR_DEFAULTS = {
     combatHealing  = tonumber(GetCVar("floatingCombatTextCombatHealing")) == 1,
@@ -34,7 +34,7 @@ local PERCHAR_DEFAULTS = {
     incomingHealing = true,
 }
 for k,v in pairs(PERCHAR_DEFAULTS) do
-    if FCTFPCDB[k] == nil then FCTFPCDB[k] = v end
+    if FontMagicPCDB[k] == nil then FontMagicPCDB[k] = v end
 end
 
 local COMBAT_FONT_GROUPS = {
@@ -170,7 +170,7 @@ frame:RegisterForDrag("LeftButton")
 frame:SetScript("OnDragStart", frame.StartMoving)
 frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
 frame:Hide()
-frame.name = "FCTF"
+frame.name = "FontMagic"
 
 -- allow ESC key to close the frame
 if UISpecialFrames then
@@ -279,14 +279,14 @@ for idx, grp in ipairs(order) do
                     -- so when retrieving we always split on the *last* slash
                     -- rather than the first.  This avoids corrupting group
                     -- names that contain a slash.
-                    FCTFDB.selectedFont = grp .. "/" .. fname
+                    FontMagicDB.selectedFont = grp .. "/" .. fname
                     UIDropDownMenu_SetText(dd, display)
                     SetPreviewFont(cache)
                     local txt = editBox:GetText()
                     preview:SetText("")
                     preview:SetText(txt)
                 end
-                info.checked = (FCTFDB.selectedFont == grp .. "/" .. fname)
+                info.checked = (FontMagicDB.selectedFont == grp .. "/" .. fname)
                 UIDropDownMenu_AddButton(info)
             end
         end
@@ -380,8 +380,8 @@ for i,opt in ipairs(opts) do
     local x = (col == 0) and 0 or (CB_COL_W + 16)
     local y = -16 - row * 30
     -- initially anchor at origin; we reposition immediately after
-    local cb = CreateCheckbox(frame, opt.l, 0, 0, FCTFPCDB[opt.k], function(self)
-        FCTFPCDB[opt.k] = self:GetChecked()
+    local cb = CreateCheckbox(frame, opt.l, 0, 0, FontMagicPCDB[opt.k], function(self)
+        FontMagicPCDB[opt.k] = self:GetChecked()
         -- guard against missing CVars on certain game versions
         if type(GetCVar) == "function" and type(SetCVar) == "function" and
            GetCVar(opt.c) ~= nil then
@@ -404,12 +404,12 @@ applyBtn:SetSize(100, 22)
 applyBtn:SetPoint("BOTTOMLEFT", 16, 12)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
-    if FCTFDB.selectedFont then
+    if FontMagicDB.selectedFont then
         -- Parse the saved "group/filename" entry using the last '/' so
         -- groups with slashes are handled correctly.  We then look up the
         -- actual folder path from COMBAT_FONT_GROUPS to avoid constructing an
         -- invalid path like "Movie/Game".
-        local grp,fname = FCTFDB.selectedFont:match("^(.*)/([^/]+)$")
+        local grp,fname = FontMagicDB.selectedFont:match("^(.*)/([^/]+)$")
         local path = grp and fname and COMBAT_FONT_GROUPS[grp]
                        and COMBAT_FONT_GROUPS[grp].path .. fname
         if path then
@@ -421,12 +421,12 @@ applyBtn:SetScript("OnClick", function()
         -- full client restart to take effect. Reloading the UI alone is not
         -- sufficient because the combat text font is cached when the game
         -- launches.
-        print("|cFF00FF00[FCTF]|r Combat font saved. Please restart WoW to apply.")
-        UIErrorsFrame:AddMessage("FCTF: restart WoW to load the new font.", 1, 1, 0)
+        print("|cFF00FF00[FontMagic]|r Combat font saved. Please restart WoW to apply.")
+        UIErrorsFrame:AddMessage("FontMagic: restart WoW to load the new font.", 1, 1, 0)
     else
         -- Default was chosen or no custom font selected; notify the user that
         -- the stock combat font has been restored.
-        print("|cFF00FF00[FCTF]|r Default Font Applied. Please restart WoW to apply.")
+        print("|cFF00FF00[FontMagic]|r Default Font Applied. Please restart WoW to apply.")
     end
 end)
 
@@ -436,7 +436,7 @@ defaultBtn:SetPoint("LEFT", applyBtn, "RIGHT", 8, 0)
 defaultBtn:SetText("Default")
 defaultBtn:SetScript("OnClick", function()
     -- clear any previously selected custom font
-    FCTFDB.selectedFont = nil
+    FontMagicDB.selectedFont = nil
 
     -- capture the currently applied font size and flags so the preview
     -- remains visually consistent when switching fonts
@@ -488,7 +488,7 @@ defaultBtn:SetScript("OnClick", function()
     -- enable all combat text options since these represent the default state
     for k,data in pairs(optionCheckboxes) do
         data.box:SetChecked(true)
-        FCTFPCDB[k] = true
+        FontMagicPCDB[k] = true
         if type(GetCVar) == "function" and type(SetCVar) == "function" and
            data.cvar and GetCVar(data.cvar) ~= nil then
             SetCVar(data.cvar, "1")
@@ -498,7 +498,7 @@ defaultBtn:SetScript("OnClick", function()
     if cbIncDam then
         cbIncDam:SetChecked(true)
     end
-    FCTFPCDB.incomingDamage = true
+    FontMagicPCDB.incomingDamage = true
     if type(COMBAT_TEXT_TYPE_INFO) == "table" then
         COMBAT_TEXT_TYPE_INFO.DAMAGE       = originalInfo.DAMAGE
         COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = originalInfo.DAMAGE_CRIT
@@ -509,13 +509,13 @@ defaultBtn:SetScript("OnClick", function()
     if cbIncHeal then
         cbIncHeal:SetChecked(true)
     end
-    FCTFPCDB.incomingHealing = true
+    FontMagicPCDB.incomingHealing = true
     if type(COMBAT_TEXT_TYPE_INFO) == "table" then
         COMBAT_TEXT_TYPE_INFO.HEAL      = originalInfo.HEAL
         COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = originalInfo.HEAL_CRIT
     end
 
-    print("|cFF00FF00[FCTF]|r Default Font Applied. Please restart WoW to apply.")
+    print("|cFF00FF00[FontMagic]|r Default Font Applied. Please restart WoW to apply.")
 end)
 
 -- 11) CLOSE BUTTON
@@ -545,10 +545,10 @@ SlashCmdList["FCT"] = function()
     end
 
     for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
-    if FCTFDB.selectedFont then
+    if FontMagicDB.selectedFont then
         -- parse using the last '/' to support group names that contain
         -- slashes (e.g. "Movie/Game").
-        local grp,fname = FCTFDB.selectedFont:match("^(.*)/([^/]+)$")
+        local grp,fname = FontMagicDB.selectedFont:match("^(.*)/([^/]+)$")
         if grp and fname and dropdowns[grp] and existsFonts[grp][fname] then
             UIDropDownMenu_SetText(dropdowns[grp], fname:gsub("%.otf$",""):gsub("%.ttf$",""))
             local cache = cachedFonts[grp][fname]
@@ -589,13 +589,13 @@ minimapButton:SetScript("OnDragStart", function(self) self.isMoving = true end)
 minimapButton:SetScript("OnDragStop", function(self) self.isMoving = false end)
 minimapButton:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-    GameTooltip:SetText("Click to toggle FCTF settings", 1, 1, 1)
+    GameTooltip:SetText("Click to toggle FontMagic settings", 1, 1, 1)
     GameTooltip:Show()
 end)
 minimapButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 -- remember the last placed angle so we only update when needed
-minimapButton.lastAngle = minimapButton.lastAngle or FCTFDB.minimapAngle
+minimapButton.lastAngle = minimapButton.lastAngle or FontMagicDB.minimapAngle
 
 minimapButton:SetScript("OnUpdate", function(self)
     if self.isMoving then
@@ -604,11 +604,11 @@ minimapButton:SetScript("OnUpdate", function(self)
         mx, my = mx / scale, my / scale
         local cx, cy = Minimap:GetCenter()
         local dx, dy = mx - cx, my - cy
-        FCTFDB.minimapAngle = math.deg(math.atan2(dy, dx))
-    elseif self.lastAngle == FCTFDB.minimapAngle then
+        FontMagicDB.minimapAngle = math.deg(math.atan2(dy, dx))
+    elseif self.lastAngle == FontMagicDB.minimapAngle then
         return -- nothing changed
     end
-    self.lastAngle = FCTFDB.minimapAngle
+    self.lastAngle = FontMagicDB.minimapAngle
     local a = math.rad(self.lastAngle)
     local r = Minimap:GetWidth()/2 + 10
     self:ClearAllPoints()
@@ -632,20 +632,20 @@ frame:SetScript("OnEvent", function(self, event, name)
         -- apply saved checkbox states in case the frame was
         -- created before SavedVariables were available
         if cbIncDam then
-            cbIncDam:SetChecked(FCTFPCDB.incomingDamage)
+            cbIncDam:SetChecked(FontMagicPCDB.incomingDamage)
         end
         if cbIncHeal then
-            cbIncHeal:SetChecked(FCTFPCDB.incomingHealing)
+            cbIncHeal:SetChecked(FontMagicPCDB.incomingHealing)
         end
 
         if InterfaceOptions_AddCategory then
             InterfaceOptions_AddCategory(frame)
         end
 
-        if FCTFDB.selectedFont then
+        if FontMagicDB.selectedFont then
             -- extract group and filename using the last '/' so that
             -- group names containing slashes are handled correctly
-            local g,f = FCTFDB.selectedFont:match("^(.*)/([^/]+)$")
+            local g,f = FontMagicDB.selectedFont:match("^(.*)/([^/]+)$")
             if g and f and dropdowns[g] and existsFonts[g] and existsFonts[g][f] then
                 -- Reconstruct the absolute path using the group's folder path
                 -- so that names like "Movie/Game" map correctly to the
@@ -681,13 +681,13 @@ frame:SetScript("OnEvent", function(self, event, name)
         end
 
         -- apply saved incoming damage/heal toggles only after the table exists
-        if not FCTFPCDB.incomingDamage and type(COMBAT_TEXT_TYPE_INFO) == "table" then
+        if not FontMagicPCDB.incomingDamage and type(COMBAT_TEXT_TYPE_INFO) == "table" then
             COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
             COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
             COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = nil
             COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
         end
-        if not FCTFPCDB.incomingHealing and type(COMBAT_TEXT_TYPE_INFO) == "table" then
+        if not FontMagicPCDB.incomingHealing and type(COMBAT_TEXT_TYPE_INFO) == "table" then
             COMBAT_TEXT_TYPE_INFO.HEAL      = nil
             COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
         end
@@ -703,8 +703,8 @@ frame:SetScript("OnEvent", function(self, event, name)
             local baseX, baseY = 0, -16 - newRow*30
 
             cbIncDam = CreateCheckbox(frame, "Show Incoming Damage", 0, 0,
-                FCTFPCDB.incomingDamage, function(self)
-                FCTFPCDB.incomingDamage = self:GetChecked()
+                FontMagicPCDB.incomingDamage, function(self)
+                FontMagicPCDB.incomingDamage = self:GetChecked()
                 if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
                 if not self:GetChecked() then
                     COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
@@ -722,8 +722,8 @@ frame:SetScript("OnEvent", function(self, event, name)
             cbIncDam:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX, baseY)
 
             cbIncHeal = CreateCheckbox(frame, "Show Incoming Healing", 0, 0,
-                FCTFPCDB.incomingHealing, function(self)
-                FCTFPCDB.incomingHealing = self:GetChecked()
+                FontMagicPCDB.incomingHealing, function(self)
+                FontMagicPCDB.incomingHealing = self:GetChecked()
                 if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
                 if not self:GetChecked() then
                     COMBAT_TEXT_TYPE_INFO.HEAL      = nil
@@ -739,10 +739,10 @@ frame:SetScript("OnEvent", function(self, event, name)
     elseif event == "PLAYER_LOGOUT" then
         -- store the latest checkbox states on logout to ensure persistence
         if cbIncDam then
-            FCTFPCDB.incomingDamage = cbIncDam:GetChecked()
+            FontMagicPCDB.incomingDamage = cbIncDam:GetChecked()
         end
         if cbIncHeal then
-            FCTFPCDB.incomingHealing = cbIncHeal:GetChecked()
+            FontMagicPCDB.incomingHealing = cbIncHeal:GetChecked()
         end
     end
 end)
