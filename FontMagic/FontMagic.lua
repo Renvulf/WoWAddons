@@ -221,6 +221,11 @@ frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
 frame:Hide()
 frame.name = "FontMagic"
 
+-- discard unsaved font selections whenever the window closes
+frame:SetScript("OnHide", function()
+    pendingFont = nil
+end)
+
 -- allow ESC key to close the frame
 if UISpecialFrames then
     tinsert(UISpecialFrames, frame:GetName())
@@ -240,6 +245,8 @@ end
 local dropdowns = {}
 local preview
 local editBox
+-- holds a font selection made via the dropdowns but not yet applied
+local pendingFont
 
 --[[
     Apply a font to the preview field.
@@ -334,19 +341,18 @@ for idx, grp in ipairs(order) do
                 info.text  = display
                 info.func  = function()
                     for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
-                    -- store the selected font as "<group>/<filename>".  The
-                    -- group name itself may contain a slash (e.g. "Movie/Game"),
-                    -- so when retrieving we always split on the *last* slash
-                    -- rather than the first.  This avoids corrupting group
-                    -- names that contain a slash.
-                    FontMagicDB.selectedFont = grp .. "/" .. fname
+                    -- store the selected font locally until the user clicks Apply
+                    -- This prevents the combat font from changing immediately.
+                    pendingFont = grp .. "/" .. fname
                     UIDropDownMenu_SetText(dd, display)
                     SetPreviewFont(cache)
                     local txt = editBox:GetText()
                     preview:SetText("")
                     preview:SetText(txt)
                 end
-                info.checked = (FontMagicDB.selectedFont == grp .. "/" .. fname)
+                -- highlight the font selected via Apply or the pending choice
+                local selected = pendingFont or FontMagicDB.selectedFont
+                info.checked = (selected == grp .. "/" .. fname)
                 UIDropDownMenu_AddButton(info)
             end
         end
@@ -509,12 +515,14 @@ applyBtn:SetSize(100, 22)
 applyBtn:SetPoint("BOTTOMLEFT", 16, 12)
 applyBtn:SetText("Apply")
 applyBtn:SetScript("OnClick", function()
-    if FontMagicDB.selectedFont then
+    -- use the pending selection if the user picked a font but hasn't applied yet
+    local selection = pendingFont or FontMagicDB.selectedFont
+    if selection then
         -- Parse the saved "group/filename" entry using the last '/' so
         -- groups with slashes are handled correctly.  We then look up the
         -- actual folder path from COMBAT_FONT_GROUPS to avoid constructing an
         -- invalid path like "Movie/Game".
-        local grp,fname = FontMagicDB.selectedFont:match("^(.*)/([^/]+)$")
+        local grp,fname = selection:match("^(.*)/([^/]+)$")
         local path = grp and fname and COMBAT_FONT_GROUPS[grp]
                        and COMBAT_FONT_GROUPS[grp].path .. fname
         if path then
@@ -522,6 +530,9 @@ applyBtn:SetScript("OnClick", function()
             if type(DAMAGE_TEXT_FONT) == "string" then DAMAGE_TEXT_FONT = path end
             if type(COMBAT_TEXT_FONT)  == "string" then COMBAT_TEXT_FONT  = path end
         end
+        -- persist the applied font
+        FontMagicDB.selectedFont = selection
+        pendingFont = nil
         -- Inform the user that the font choice has been saved but requires a
         -- full client restart to take effect. Reloading the UI alone is not
         -- sufficient because the combat text font is cached when the game
@@ -542,6 +553,7 @@ defaultBtn:SetText("Default")
 defaultBtn:SetScript("OnClick", function()
     -- clear any previously selected custom font
     FontMagicDB.selectedFont = nil
+    pendingFont = nil
 
     -- capture the currently applied font size and flags so the preview
     -- remains visually consistent when switching fonts
@@ -649,6 +661,8 @@ SlashCmdList["FCT"] = function()
         return
     end
 
+    pendingFont = nil -- discard any un-applied selection
+
     for g,d in pairs(dropdowns) do UIDropDownMenu_SetText(d, "Select Font") end
     if FontMagicDB.selectedFont then
         -- parse using the last '/' to support group names that contain
@@ -659,6 +673,9 @@ SlashCmdList["FCT"] = function()
             local cache = cachedFonts[grp][fname]
             if cache then SetPreviewFont(cache) end
         end
+    else
+        -- no saved font means use the UI's default
+        SetPreviewFont(GameFontNormalLarge or preview:GetFontObject())
     end
     preview:SetText(editBox:GetText())
     frame:Show()
