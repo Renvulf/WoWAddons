@@ -1,6 +1,17 @@
 -- FontMagic.lua
 local addonName = ...
 local ADDON_PATH = "Interface\\AddOns\\" .. addonName .. "\\"
+-- Name of the optional addon supplying user fonts
+local CUSTOM_ADDON = "FontMagicCustomFonts"
+-- Default path for custom fonts shipped by the companion addon
+local CUSTOM_PATH  = "Interface\\AddOns\\" .. CUSTOM_ADDON .. "\\Custom\\"
+
+-- Try to load the companion addon so its global table becomes available
+pcall(LoadAddOn, CUSTOM_ADDON)
+-- If loaded, prefer its reported path in case the folder was moved/renamed
+if type(FontMagicCustomFonts) == "table" and type(FontMagicCustomFonts.PATH) == "string" then
+    CUSTOM_PATH = FontMagicCustomFonts.PATH
+end
 -- detect whether the BackdropTemplate mixin exists (Retail only)
 local backdropTemplate = (BackdropTemplateMixin and "BackdropTemplate") or nil
 --[[
@@ -88,7 +99,9 @@ local COMBAT_FONT_GROUPS = {
     -- Folder for user provided fonts.  Any files named 1.ttf - 20.ttf will be
     -- detected and offered in the dropdown.  Missing files are ignored.
     ["Custom"] = {
-        path  = ADDON_PATH .. "Custom\\",
+        -- custom fonts are provided by the optional FontMagicCustomFonts addon
+        -- they reside in its Custom folder rather than this addon's
+        path  = CUSTOM_PATH,
         fonts = {}, -- populated below
     },
 }
@@ -103,6 +116,7 @@ end
 
 -- Cache loaded fonts to allow previewing in the options panel
 local cachedFonts, existsFonts = {}, {}
+local hasCustomFonts = false -- tracks whether any custom font could be loaded
 for group, data in pairs(COMBAT_FONT_GROUPS) do
     cachedFonts[group] = {}
     existsFonts[group] = {}
@@ -116,6 +130,9 @@ for group, data in pairs(COMBAT_FONT_GROUPS) do
         if loaded and loaded:lower():find(fname:lower(), 1, true) then
             existsFonts[group][fname] = true
             cachedFonts[group][fname] = { font = f, path = path }
+            if group == "Custom" then
+                hasCustomFonts = true
+            end
         else
             existsFonts[group][fname] = false
         end
@@ -262,6 +279,17 @@ for idx, grp in ipairs(order) do
     label:SetWidth(dd:GetWidth())
     label:SetJustifyH("CENTER")
     label:SetText(grp)
+
+    if grp == "Custom" then
+        dd:SetScript("OnEnter", function(self)
+            if not hasCustomFonts then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Install FontMagicCustomFonts to use custom fonts", nil, nil, nil, nil, true)
+                GameTooltip:Show()
+            end
+        end)
+        dd:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
 
     UIDropDownMenu_Initialize(dd, function()
         local added = false
