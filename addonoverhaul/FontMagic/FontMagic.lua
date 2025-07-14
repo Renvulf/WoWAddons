@@ -37,7 +37,15 @@ local backdropTemplate = (BackdropTemplateMixin and "BackdropTemplate") or nil
 
 -- SavedDB defaults
 if not FontMagicDB then
-    FontMagicDB = { minimapAngle = 45 }
+    -- Default placement for the minimap button is the bottom-left corner
+    -- (approximately 225 degrees around the minimap).  This avoids the
+    -- initial position being hidden beneath default UI elements on a fresh
+    -- installation, particularly in WoW Classic.
+    FontMagicDB = { minimapAngle = 225 }
+elseif FontMagicDB.minimapAngle == nil then
+    -- In case a previous version created the DB without this key, ensure a
+    -- sensible default.
+    FontMagicDB.minimapAngle = 225
 end
 FontMagicPCDB = FontMagicPCDB or {}
 
