@@ -1,5 +1,8 @@
 local addonName, addonTable = ...
 
+-- Current database schema version
+local CURRENT_VERSION = 1
+
 -- Initialize variables
 local DiceTrackerDB
 local statsFrame, statsText, predictionText, recommendationText
@@ -154,78 +157,89 @@ local function getBucket(t)
 end
 
 local function frequencyPredict(bucket)
-    local data = DiceTrackerDB.buckets[bucket]
-    if not data or (data.count or 0) == 0 then
-        return "7", 0
-    end
-    local counts = {data.Low or 0, data["7"] or 0, data.High or 0}
-    local total = counts[1] + counts[2] + counts[3]
-    local idx, maxC = 1, counts[1]
-    if counts[2] > maxC then idx, maxC = 2, counts[2] end
-    if counts[3] > maxC then idx, maxC = 3, counts[3] end
-    local cats = {"Low", "7", "High"}
-    return cats[idx], maxC / total
+    local ok, cat, prob = safeCall(function()
+        local data = DiceTrackerDB.buckets[bucket]
+        if not data or (data.count or 0) == 0 then
+            return "7", 0
+        end
+        local counts = {data.Low or 0, data["7"] or 0, data.High or 0}
+        local total = counts[1] + counts[2] + counts[3]
+        local idx, maxC = 1, counts[1]
+        if counts[2] > maxC then idx, maxC = 2, counts[2] end
+        if counts[3] > maxC then idx, maxC = 3, counts[3] end
+        local cats = {"Low", "7", "High"}
+        return cats[idx], maxC / total
+    end)
+    return cat or "7", prob or 0
 end
 
 -- Process a pair of rolls from a single dice toss
 local function ProcessPair(tossTime, roll1, roll2)
-    local sum = roll1 + roll2
-    local categoryIndex
-    local category
-    if sum >= 2 and sum <= 6 then
-        categoryIndex, category = 1, "Low"
-    elseif sum == 7 then
-        categoryIndex, category = 2, "7"
-    else
-        categoryIndex, category = 3, "High"
-    end
+    safeCall(function()
+        local sum = roll1 + roll2
+        local categoryIndex
+        local category
+        if sum >= 2 and sum <= 6 then
+            categoryIndex, category = 1, "Low"
+        elseif sum == 7 then
+            categoryIndex, category = 2, "7"
+        else
+            categoryIndex, category = 3, "High"
+        end
 
-    local bucket = getBucket(tossTime)
-    DiceTrackerDB.buckets[bucket] = DiceTrackerDB.buckets[bucket] or {count = 0, Low = 0, ["7"] = 0, High = 0}
-    local b = DiceTrackerDB.buckets[bucket]
-    b.count = b.count + 1
-    b[category] = (b[category] or 0) + 1
+        local bucket = getBucket(tossTime)
+        DiceTrackerDB.buckets[bucket] = DiceTrackerDB.buckets[bucket] or {count = 0, Low = 0, ["7"] = 0, High = 0}
+        local b = DiceTrackerDB.buckets[bucket]
+        b.count = b.count + 1
+        b[category] = (b[category] or 0) + 1
 
-    local input = {}
-    for i = 1, 12 do input[i] = (i == bucket) and 1 or 0 end
-    local delta = (DiceTrackerDB.lastTossTime and (tossTime - DiceTrackerDB.lastTossTime) or 60)
-    input[13] = delta / 60
-    for i = 1, 3 do
-        input[13 + i] = (i == (DiceTrackerDB.prevCategoryIndex or 0)) and 1 or 0
-    end
+        local input = {}
+        for i = 1, 12 do input[i] = (i == bucket) and 1 or 0 end
+        local delta = (DiceTrackerDB.lastTossTime and (tossTime - DiceTrackerDB.lastTossTime) or 60)
+        if delta < 0 or delta > 3600 then delta = 60 end
+        input[13] = delta / 60
+        for i = 1, 3 do
+            input[13 + i] = (i == (DiceTrackerDB.prevCategoryIndex or 0)) and 1 or 0
+        end
 
-    local target = {0, 0, 0}
-    target[categoryIndex] = 1
-    local ok = pcall(function() FFNetwork:train(input, target) end)
-    if not ok then FFNetwork:initialize() end
+        local target = {0, 0, 0}
+        target[categoryIndex] = 1
+        local ok = pcall(function() FFNetwork:train(input, target) end)
+        if not ok then FFNetwork:initialize() end
 
-    DiceTrackerDB.prevCategoryIndex = categoryIndex
-    DiceTrackerDB.lastTossTime = tossTime
+        DiceTrackerDB.prevCategoryIndex = categoryIndex
+        DiceTrackerDB.lastTossTime = tossTime
 
-    processRollPair(tossBuffer.player or "", roll1, roll2)
+        processRollPair(tossBuffer.player or "", roll1, roll2)
+    end)
 end
 
 -- Public API to predict the next outcome
 function addonTable:Predict()
-    local now = time()
-    local bucket = getBucket(now)
-    local input = {}
-    for i = 1, 12 do input[i] = (i == bucket) and 1 or 0 end
-    local delta = (DiceTrackerDB.lastTossTime and (now - DiceTrackerDB.lastTossTime) or 60)
-    input[13] = delta / 60
-    for i = 1, 3 do
-        input[13 + i] = (i == (DiceTrackerDB.prevCategoryIndex or 0)) and 1 or 0
-    end
+    local result
+    safeCall(function()
+        local now = time()
+        local bucket = getBucket(now)
+        local input = {}
+        for i = 1, 12 do input[i] = (i == bucket) and 1 or 0 end
+        local delta = (DiceTrackerDB.lastTossTime and (now - DiceTrackerDB.lastTossTime) or 60)
+        if delta < 0 or delta > 3600 then delta = 60 end
+        input[13] = delta / 60
+        for i = 1, 3 do
+            input[13 + i] = (i == (DiceTrackerDB.prevCategoryIndex or 0)) and 1 or 0
+        end
 
-    local _, out = FFNetwork:forward(input)
-    local idx, prob = 1, out[1]
-    for i = 2, 3 do if out[i] > prob then idx, prob = i, out[i] end end
-    local catMap = {"Low", "7", "High"}
-    if prob < 0.6 or not DiceTrackerDB.buckets[bucket] or (DiceTrackerDB.buckets[bucket].count or 0) < 20 then
-        return frequencyPredict(bucket)
-    else
-        return catMap[idx]
-    end
+        local _, out = FFNetwork:forward(input)
+        local idx, prob = 1, out[1]
+        for i = 2, 3 do if out[i] > prob then idx, prob = i, out[i] end end
+        local catMap = {"Low", "7", "High"}
+        if prob < 0.6 or not DiceTrackerDB.buckets[bucket] or (DiceTrackerDB.buckets[bucket].count or 0) < 20 then
+            result = (select(1, frequencyPredict(bucket)))
+        else
+            result = catMap[idx]
+        end
+    end)
+    return result or "7"
 end
 local function initializeUI()
     if statsFrame then return end
@@ -378,6 +392,26 @@ local function initializeDefaultData()
             ,prevCategoryIndex = 0
             ,lastTossTime = 0
         }
+    end
+end
+
+-- Safely execute a function and reset data if an error occurs
+local function safeCall(func)
+    local ok, res = pcall(func)
+    if not ok then
+        print("DiceTracker: database error, resetting data")
+        initializeDefaultData()
+    end
+    return ok, res
+end
+
+-- Upgrade stored data to the current version if needed
+local function migrateDatabase()
+    if not DiceTrackerDB.version then
+        DiceTrackerDB.version = CURRENT_VERSION
+    elseif DiceTrackerDB.version < CURRENT_VERSION then
+        -- Future migration logic goes here
+        DiceTrackerDB.version = CURRENT_VERSION
     end
 end
 
@@ -1202,17 +1236,19 @@ end
 -- Adjusted Addon Initialization and Event Handling
 function initializeAddonData()
 -- Check and initialize DiceTrackerDB if it doesn't exist
-if not DiceTrackerDB then
-print("Initializing DiceTrackerDB with default data...")
-initializeDefaultData()
-end
+    if not DiceTrackerDB then
+        print("Initializing DiceTrackerDB with default data...")
+        initializeDefaultData()
+    end
 
 -- Load saved variables
-if DiceTrackerSavedVariables then
-    for key, value in pairs(DiceTrackerSavedVariables) do
-        DiceTrackerDB[key] = value
+    if DiceTrackerSavedVariables then
+        for key, value in pairs(DiceTrackerSavedVariables) do
+            DiceTrackerDB[key] = value
+        end
     end
-end
+
+    migrateDatabase()
 
     -- Ensure LSTM network data structures are initialized
     DiceTrackerDB.learningData.lstmNetworkData.outcomeCountForTraining = DiceTrackerDB.learningData.lstmNetworkData.outcomeCountForTraining or 0
@@ -1222,10 +1258,13 @@ end
     DiceTrackerDB.buckets = DiceTrackerDB.buckets or {}
     DiceTrackerDB.prevCategoryIndex = DiceTrackerDB.prevCategoryIndex or 0
     DiceTrackerDB.lastTossTime = DiceTrackerDB.lastTossTime or 0
-    FFNetwork.W1 = DiceTrackerDB.weights.W1
-    FFNetwork.b1 = DiceTrackerDB.weights.b1
-    FFNetwork.W2 = DiceTrackerDB.weights.W2
-    FFNetwork.b2 = DiceTrackerDB.weights.b2
+
+    safeCall(function()
+        FFNetwork.W1 = DiceTrackerDB.weights.W1
+        FFNetwork.b1 = DiceTrackerDB.weights.b1
+        FFNetwork.W2 = DiceTrackerDB.weights.W2
+        FFNetwork.b2 = DiceTrackerDB.weights.b2
+    end)
     FFNetwork:initialize()
 
 -- Initialize the LSTM network
@@ -1413,6 +1452,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "CHAT_MSG_EMOTE" then
         local msg, player = ...
         if msg and msg:find("casually tosses his %[Worn Troll Dice%]") then
+            if tossBuffer.player and time() - tossBuffer.time <= 10 then
+                tossBuffer.rolls = {}
+            end
             tossBuffer.player = Ambiguate(player, "none")
             tossBuffer.time = time()
             tossBuffer.rolls = {}
