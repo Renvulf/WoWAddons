@@ -619,7 +619,8 @@ local outputSequence = {}
 for t = 1, #inputs do
     local xt = self:preprocessData(inputs[t])
 
-    local hSize = #self.hiddenState
+    local inputLen  = #xt
+    local hiddenLen = #self.hiddenState
     local ftInput = self:elementWiseMultiply(self.inputWeights.f, xt)
     local itInput = self:elementWiseMultiply(self.inputWeights.i, xt)
     local otInput = self:elementWiseMultiply(self.inputWeights.o, xt)
@@ -632,19 +633,31 @@ for t = 1, #inputs do
 
     local ft, it, ot
     if ftInput and xt and fhWeights and self.hiddenState then
-        ft = sigmoid(self:dotProduct(ftInput, xt, hSize) + self:dotProduct(fhWeights, self.hiddenState, hSize) + self.biasWeights.f)
+        ft = sigmoid(
+            self:dotProduct(ftInput, xt, inputLen) +
+            self:dotProduct(fhWeights, self.hiddenState, hiddenLen) +
+            self.biasWeights.f
+        )
     else
         print("Warning: Missing arguments for ft calculation. Setting ft to 0.")
         ft = 0
     end
     if itInput and xt and ihWeights and self.hiddenState then
-        it = sigmoid(self:dotProduct(itInput, xt, hSize) + self:dotProduct(ihWeights, self.hiddenState, hSize) + self.biasWeights.i)
+        it = sigmoid(
+            self:dotProduct(itInput, xt, inputLen) +
+            self:dotProduct(ihWeights, self.hiddenState, hiddenLen) +
+            self.biasWeights.i
+        )
     else
         print("Warning: Missing arguments for it calculation. Setting it to 0.")
         it = 0
     end
     if otInput and xt and ohWeights and self.hiddenState then
-        ot = sigmoid(self:dotProduct(otInput, xt, hSize) + self:dotProduct(ohWeights, self.hiddenState, hSize) + self.biasWeights.o)
+        ot = sigmoid(
+            self:dotProduct(otInput, xt, inputLen) +
+            self:dotProduct(ohWeights, self.hiddenState, hiddenLen) +
+            self.biasWeights.o
+        )
     else
         print("Warning: Missing arguments for ot calculation. Setting ot to 0.")
         ot = 0
@@ -737,10 +750,24 @@ end
 -- Backpropagate through time
 for t = #inputs, 1, -1 do
     local xt = inputs[t]
+    local inputLen  = #xt
+    local hiddenLen = #self.hiddenState
 
-    local ft = sigmoid(self:dotProduct(self.inputWeights.f, xt, self.hiddenSize) + self:dotProduct(self.hiddenWeights.f, self.hiddenState, self.hiddenSize) + self.biasWeights.f)
-    local it = sigmoid(self:dotProduct(self.inputWeights.i, xt, self.hiddenSize) + self:dotProduct(self.hiddenWeights.i, self.hiddenState, self.hiddenSize) + self.biasWeights.i)
-    local ot = sigmoid(self:dotProduct(self.inputWeights.o, xt, self.hiddenSize) + self:dotProduct(self.hiddenWeights.o, self.hiddenState, self.hiddenSize) + self.biasWeights.o)
+    local ft = sigmoid(
+        self:dotProduct(self.inputWeights.f, xt, inputLen) +
+        self:dotProduct(self.hiddenWeights.f, self.hiddenState, hiddenLen) +
+        self.biasWeights.f
+    )
+    local it = sigmoid(
+        self:dotProduct(self.inputWeights.i, xt, inputLen) +
+        self:dotProduct(self.hiddenWeights.i, self.hiddenState, hiddenLen) +
+        self.biasWeights.i
+    )
+    local ot = sigmoid(
+        self:dotProduct(self.inputWeights.o, xt, inputLen) +
+        self:dotProduct(self.hiddenWeights.o, self.hiddenState, hiddenLen) +
+        self.biasWeights.o
+    )
 
     local ct_candidate = {}
     for i = 1, self.hiddenSize do
