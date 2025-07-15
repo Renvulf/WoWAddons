@@ -1288,7 +1288,8 @@ end
 -- Convert roll values to one-hot encoded vectors
 local roll1Vector = {}
 local roll2Vector = {}
-for i = 1, LSTMNetwork.inputSize do
+-- Only a d6 is used, so limit the one-hot vectors to six slots
+for i = 1, 6 do
     roll1Vector[i] = (i == roll1) and 1 or 0
     roll2Vector[i] = (i == roll2) and 1 or 0
 end
@@ -1300,6 +1301,7 @@ if #DiceTrackerDB.pendingRolls[player] == 1 then
     -- Process the current roll pair and update stats
     local totalRoll = roll1 + roll2
     local category = (totalRoll >= 2 and totalRoll <= 6 and "low") or (totalRoll == 7 and "seven") or (totalRoll >= 8 and totalRoll <= 12 and "high")
+    print("DEBUG: rolls=", roll1, roll2, " total=", totalRoll, " category=", category)
 
     if category then
         -- Initialize DiceTrackerDB.stats if it doesn't exist
@@ -1328,8 +1330,11 @@ if #DiceTrackerDB.pendingRolls[player] == 1 then
             DiceTrackerDB.statisticsData.numHighOutcomes = DiceTrackerDB.statisticsData.numHighOutcomes + 1
         end
 
-        -- Update sliding window with one-hot encoded roll pair
-        table.insert(DiceTrackerDB.learningData.lstmNetworkData.slidingWindow, {roll1Vector, roll2Vector})
+        -- Update sliding window with a flattened feature vector
+        local featureVector = {}
+        for _, v in ipairs(roll1Vector) do table.insert(featureVector, v) end
+        for _, v in ipairs(roll2Vector) do table.insert(featureVector, v) end
+        table.insert(DiceTrackerDB.learningData.lstmNetworkData.slidingWindow, featureVector)
         if #DiceTrackerDB.learningData.lstmNetworkData.slidingWindow > DiceTrackerDB.learningData.lstmNetworkData.slidingWindowSize then
             table.remove(DiceTrackerDB.learningData.lstmNetworkData.slidingWindow, 1)
         end
@@ -1369,10 +1374,8 @@ DiceTrackerDB.stats.accuracy = totalPredictions > 0 and (correctPredictions / to
 local expectedOutputs = {category == "low" and 1 or 0, category == "seven" and 1 or 0, category == "high" and 1 or 0}
 
         local inputs = {}
-        for _, rollPair in ipairs(DiceTrackerDB.learningData.lstmNetworkData.slidingWindow) do
-            for _, roll in ipairs(rollPair) do
-                table.insert(inputs, roll)
-            end
+        for _, featureVector in ipairs(DiceTrackerDB.learningData.lstmNetworkData.slidingWindow) do
+            table.insert(inputs, featureVector)
         end
 
         local outputs = LSTMNetwork:forwardPass(inputs)
@@ -1396,10 +1399,8 @@ local expectedOutputs = {category == "low" and 1 or 0, category == "seven" and 1
     -- Make a new prediction for the next roll
     if LSTMNetwork:isFullyInitialized() then
         local inputs = {}
-        for _, rollPair in ipairs(DiceTrackerDB.learningData.lstmNetworkData.slidingWindow) do
-            for _, roll in ipairs(rollPair) do
-                table.insert(inputs, roll)
-            end
+        for _, featureVector in ipairs(DiceTrackerDB.learningData.lstmNetworkData.slidingWindow) do
+            table.insert(inputs, featureVector)
         end
 
         DiceTrackerDB.stats.lastPrediction, DiceTrackerDB.stats.lastPredictionConfidence = LSTMNetwork:predict(inputs)
@@ -1504,6 +1505,17 @@ DiceTrackerDB.learningData.lstmNetworkData.targets = {}
 end
 
 function LSTMNetwork:dotProduct(a, b, size)
+    -- Sanity check to ensure all values are numeric before multiplication
+    if type(a) == "table" then
+        for i = 1, size do
+            assert(type(a[i]) == "number", "dotProduct: non-number in table a at index " .. i)
+        end
+    end
+    if type(b) == "table" then
+        for i = 1, size do
+            assert(type(b[i]) == "number", "dotProduct: non-number in table b at index " .. i)
+        end
+    end
     -- handle scalar * scalar
     if type(a) == "number" and type(b) == "number" then
         return a * b
