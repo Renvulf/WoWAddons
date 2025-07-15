@@ -176,52 +176,6 @@ local function frequencyPredict(bucket)
     return cat or "7", prob or 0
 end
 
--- Process a pair of rolls from a single dice toss
--- Handle a completed dice toss and update all tracking data
-local function ProcessPair(tossTime, roll1, roll2)
-    safeCall(function()
-        -- Validate roll values before using them
-        if type(roll1) ~= "number" or type(roll2) ~= "number" then return end
-        if roll1 < 1 or roll1 > 6 or roll2 < 1 or roll2 > 6 then return end
-
-        local sum = roll1 + roll2
-        local categoryIndex
-        local category
-        if sum >= 2 and sum <= 6 then
-            categoryIndex, category = 1, "Low"
-        elseif sum == 7 then
-            categoryIndex, category = 2, "7"
-        else
-            categoryIndex, category = 3, "High"
-        end
-
-        local bucket = getBucket(tossTime)
-        DiceTrackerDB.buckets[bucket] = DiceTrackerDB.buckets[bucket] or {count = 0, Low = 0, ["7"] = 0, High = 0}
-        local b = DiceTrackerDB.buckets[bucket]
-        b.count = b.count + 1
-        b[category] = (b[category] or 0) + 1
-
-        local input = {}
-        for i = 1, 12 do input[i] = (i == bucket) and 1 or 0 end
-        local delta = (DiceTrackerDB.lastTossTime and (tossTime - DiceTrackerDB.lastTossTime) or 60)
-        if delta < 0 or delta > 3600 then delta = 60 end
-        input[13] = delta / 60
-        for i = 1, 3 do
-            input[13 + i] = (i == (DiceTrackerDB.prevCategoryIndex or 0)) and 1 or 0
-        end
-
-        local target = {0, 0, 0}
-        target[categoryIndex] = 1
-        local ok = pcall(function() FFNetwork:train(input, target) end)
-        if not ok then FFNetwork:initialize() end
-
-        DiceTrackerDB.prevCategoryIndex = categoryIndex
-        DiceTrackerDB.lastTossTime = tossTime
-
-        processRollPair(tossBuffer.player or "", roll1, roll2)
-    end)
-end
-
 -- Public API to predict the next outcome
 function addonTable:Predict()
     local result
@@ -1472,14 +1426,22 @@ frame:SetScript("OnEvent", function(self, event, ...)
         end
     elseif event == "CHAT_MSG_SYSTEM" then
         local message = ...
-        local player, roll = message:match("^(.+) rolls (%d+) %(1%-6%)$")
+        -- match the roll message from the dice, allowing any text within the parentheses
+        local player, roll = message:match("^(.-) rolls (%d+) %b()$")
         player = player and Ambiguate(player, "none") or nil
+
         if tossBuffer.player and player == tossBuffer.player and roll then
             table.insert(tossBuffer.rolls, tonumber(roll))
             if #tossBuffer.rolls == 2 then
-                ProcessPair(tossBuffer.time, tossBuffer.rolls[1], tossBuffer.rolls[2])
+                -- hand the two-dice result off to your real tracker:
+                processRollPair(tossBuffer.player,
+                                tossBuffer.rolls[1],
+                                tossBuffer.rolls[2])
+                -- reset for the next toss:
                 tossBuffer.player = nil
-                tossBuffer.rolls = {}
+                tossBuffer.rolls  = {}
+                -- immediately refresh the UI
+                addonTable.updateUI()
             end
         end
         if tossBuffer.player and time() - tossBuffer.time > 10 then
