@@ -1341,12 +1341,17 @@ processRollPair = function(player, roll1, roll2)
     end
 
     -- Check if DiceTrackerDB.pendingRolls exists, and initialize it if necessary
+
     if not DiceTrackerDB.pendingRolls then
         DiceTrackerDB.pendingRolls = {}
     end
-if not DiceTrackerDB.pendingRolls[player] then
-DiceTrackerDB.pendingRolls[player] = {}
-end
+    if not DiceTrackerDB.pendingRolls[player] then
+        DiceTrackerDB.pendingRolls[player] = {}
+    end
+
+    -- Timestamp and bucket for this toss
+    local now    = time()
+    local bucket = getBucket(now)
 
 -- Convert roll values to one-hot encoded vectors
 local roll1Vector = {}
@@ -1365,6 +1370,37 @@ if #DiceTrackerDB.pendingRolls[player] == 1 then
     local totalRoll = roll1 + roll2
     local category = (totalRoll >= 2 and totalRoll <= 6 and "low") or (totalRoll == 7 and "seven") or (totalRoll >= 8 and totalRoll <= 12 and "high")
     print("DEBUG: rolls=", roll1, roll2, " total=", totalRoll, " category=", category)
+
+    -- Update frequency bucket for time-based predictions
+    local keyMap = { low = "Low", seven = "7", high = "High" }
+    local key    = keyMap[category]
+    local b = DiceTrackerDB.buckets[bucket]
+    if not b then
+        b = { Low = 0, ["7"] = 0, High = 0, count = 0 }
+    end
+    b[key]  = b[key] + 1
+    b.count = b.count + 1
+    DiceTrackerDB.buckets[bucket] = b
+    DiceTrackerDB.dirtyFlags.buckets = true
+
+    -- Prepare input for the feed-forward predictor and train it
+    local inputFF = {}
+    for i = 1, 12 do
+        inputFF[i] = (i == bucket) and 1 or 0
+    end
+    local delta = (DiceTrackerDB.lastTossTime and (now - DiceTrackerDB.lastTossTime) or 60)
+    if delta < 0 or delta > 3600 then delta = 60 end
+    inputFF[13] = delta / 60
+    for i = 1, 3 do
+        inputFF[13 + i] = (i == (DiceTrackerDB.prevCategoryIndex or 0)) and 1 or 0
+    end
+    local target = {
+        category == "low"   and 1 or 0,
+        category == "seven" and 1 or 0,
+        category == "high"  and 1 or 0,
+    }
+    FFNetwork:train(inputFF, target)
+    DiceTrackerDB.dirtyFlags.weights = true
 
     if category then
         -- Initialize DiceTrackerDB.stats if it doesn't exist
@@ -1473,6 +1509,11 @@ local expectedOutputs = {category == "low" and 1 or 0, category == "seven" and 1
         end
 
         DiceTrackerDB.stats.lastPrediction, DiceTrackerDB.stats.lastPredictionConfidence = LSTMNetwork:predict(inputs)
+        local mapIdx = { low = 1, seven = 2, high = 3 }
+        DiceTrackerDB.prevCategoryIndex = mapIdx[DiceTrackerDB.stats.lastPrediction] or 0
+        DiceTrackerDB.lastTossTime      = now
+        DiceTrackerDB.dirtyFlags.prevCategoryIndex = true
+        DiceTrackerDB.dirtyFlags.lastTossTime      = true
     else
         print("LSTM Network is not fully initialized. Skipping prediction.")
     end
