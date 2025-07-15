@@ -7,6 +7,8 @@ local CURRENT_VERSION = 1
 local DiceTrackerDB
 local statsFrame, statsText, predictionText, recommendationText
 local safeCall
+-- Forward declaration for roll processing helper
+local processRollPair
 
 local LSTMNetwork = {
     inputWeights = {},
@@ -175,8 +177,13 @@ local function frequencyPredict(bucket)
 end
 
 -- Process a pair of rolls from a single dice toss
+-- Handle a completed dice toss and update all tracking data
 local function ProcessPair(tossTime, roll1, roll2)
     safeCall(function()
+        -- Validate roll values before using them
+        if type(roll1) ~= "number" or type(roll2) ~= "number" then return end
+        if roll1 < 1 or roll1 > 6 or roll2 < 1 or roll2 > 6 then return end
+
         local sum = roll1 + roll2
         local categoryIndex
         local category
@@ -218,6 +225,7 @@ end
 -- Public API to predict the next outcome
 function addonTable:Predict()
     local result
+    local confidence
     safeCall(function()
         local now = time()
         local bucket = getBucket(now)
@@ -239,8 +247,9 @@ function addonTable:Predict()
         else
             result = catMap[idx]
         end
+        confidence = prob
     end)
-    return result or "7"
+    return result or "7", confidence or 0
 end
 local function initializeUI()
     if statsFrame then return end
@@ -1268,11 +1277,8 @@ function initializeAddonData()
     end)
     FFNetwork:initialize()
 
--- Initialize the LSTM network
-LSTMNetwork:initialize()
-
--- Check and initialize the LSTM network
-checkAndInitializeLSTMNetwork()
+    -- Initialize or load the LSTM network structure
+    checkAndInitializeLSTMNetwork()
 
 -- Evaluate and adapt the LSTM network
 LSTMNetwork:evaluateAndAdapt()
@@ -1283,7 +1289,8 @@ addonTable.updateUI()
 DiceTrackerDB.initialized = true
 
 end
-function processRollPair(player, roll1, roll2)
+-- Train the neural network with the latest observed roll pair
+processRollPair = function(player, roll1, roll2)
 -- Check if DiceTrackerDB.pendingRolls exists, and initialize it if necessary
 if not DiceTrackerDB.pendingRolls then
 DiceTrackerDB.pendingRolls = {}
@@ -1452,7 +1459,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
         initializeAddonData()
     elseif event == "CHAT_MSG_EMOTE" then
         local msg, player = ...
-        if msg and msg:find("casually tosses %a+ %[Worn Troll Dice%]") then
+        -- Detect the emote indicating a dice toss
+        if msg and msg:find("casually tosses .-%[Worn Troll Dice%]") then
             if tossBuffer.player and time() - tossBuffer.time <= 10 then
                 tossBuffer.rolls = {}
             end
