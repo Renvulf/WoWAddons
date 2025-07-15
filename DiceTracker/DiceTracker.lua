@@ -1378,9 +1378,10 @@ local expectedOutputs = {category == "low" and 1 or 0, category == "seven" and 1
             table.insert(inputs, featureVector)
         end
 
+        -- Run the sequence through the network and backpropagate using the
+        -- complete output sequence.
         local outputs = LSTMNetwork:forwardPass(inputs)
-        local lastOutput = outputs[#outputs]
-        LSTMNetwork:backwardPass({inputs}, lastOutput, {expectedOutputs})
+        LSTMNetwork:backwardPass(inputs, outputs, {expectedOutputs})
 
         -- Add inputs and targets to learning data
         table.insert(DiceTrackerDB.learningData.lstmNetworkData.inputs, inputs)
@@ -1493,9 +1494,9 @@ end
 for i = 1, #DiceTrackerDB.learningData.lstmNetworkData.inputs do
     local input = DiceTrackerDB.learningData.lstmNetworkData.inputs[i]
     local target = DiceTrackerDB.learningData.lstmNetworkData.targets[i]
+    -- Use the entire output sequence for backpropagation
     local outputs = self:forwardPass(input)
-    local lastOutput = outputs[#outputs]
-    self:backwardPass({input}, lastOutput, {target})
+    self:backwardPass(input, outputs, {target})
 end
 
 -- After training, clear the inputs and targets to start fresh
