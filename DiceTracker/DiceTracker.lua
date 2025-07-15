@@ -663,9 +663,14 @@ for t = 1, #inputs do
         ot = 0
     end
 
+    -- Compute candidate cell state using full vector dot products to avoid empty tables
+    -- This mirrors the approach used for the forget, input and output gates above
+    local ct_x = self:dotProduct(ctInput, xt, inputLen)
+    local ct_h = self:dotProduct(chWeights, self.hiddenState, hiddenLen)
+
     local ct_candidate = {}
     for i = 1, self.hiddenSize do
-        ct_candidate[i] = tanh(self:dotProduct(ctInput[i] or {}, xt[i] or 0, 1) + self:dotProduct(chWeights[i] or {}, self.hiddenState[i] or 0, 1) + self.biasWeights.c)
+        ct_candidate[i] = tanh(ct_x + ct_h + self.biasWeights.c)
     end
 
     if #self.cellState == 0 then
