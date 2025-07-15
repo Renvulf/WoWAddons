@@ -6,6 +6,7 @@ local CURRENT_VERSION = 1
 -- Initialize variables
 local DiceTrackerDB
 local statsFrame, statsText, predictionText, recommendationText
+local safeCall
 
 local LSTMNetwork = {
     inputWeights = {},
@@ -396,7 +397,7 @@ local function initializeDefaultData()
 end
 
 -- Safely execute a function and reset data if an error occurs
-local function safeCall(func)
+function safeCall(func)
     local ok, res = pcall(func)
     if not ok then
         print("DiceTracker: database error, resetting data")
@@ -1451,7 +1452,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         initializeAddonData()
     elseif event == "CHAT_MSG_EMOTE" then
         local msg, player = ...
-        if msg and msg:find("casually tosses his %[Worn Troll Dice%]") then
+        if msg and msg:find("casually tosses %a+ %[Worn Troll Dice%]") then
             if tossBuffer.player and time() - tossBuffer.time <= 10 then
                 tossBuffer.rolls = {}
             end
@@ -1593,8 +1594,6 @@ SlashCmdList["DICETRACKER"] = function(msg)
         DiceTrackerDB.buckets = {}
         DiceTrackerDB.prevCategoryIndex = 0
         print("DiceTracker: data reset")
-    elseif msg == "predict" then
-        print("DiceTracker predicts:", addonTable:Predict())
     elseif msg == "toggleui" then
         if statsFrame and statsFrame:IsShown() then
             statsFrame:Hide()
@@ -1603,7 +1602,7 @@ SlashCmdList["DICETRACKER"] = function(msg)
             if statsFrame then statsFrame:Show() end
         end
     else
-        print("/dicetracker reset | predict | toggleui")
+        print("/dicetracker reset | toggleui")
     end
 end
 function LSTMNetwork:elementWiseAdd(a, b)
