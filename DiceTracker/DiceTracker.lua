@@ -1307,10 +1307,16 @@ DiceTrackerDB.initialized = true
 end
 -- Train the neural network with the latest observed roll pair
 processRollPair = function(player, roll1, roll2)
--- Check if DiceTrackerDB.pendingRolls exists, and initialize it if necessary
-if not DiceTrackerDB.pendingRolls then
-DiceTrackerDB.pendingRolls = {}
-end
+    -- Abort if the network hasn't been set up yet
+    if not LSTMNetwork:isFullyInitialized() then
+        print("LSTM Network not initialized, skipping training.")
+        return
+    end
+
+    -- Check if DiceTrackerDB.pendingRolls exists, and initialize it if necessary
+    if not DiceTrackerDB.pendingRolls then
+        DiceTrackerDB.pendingRolls = {}
+    end
 if not DiceTrackerDB.pendingRolls[player] then
 DiceTrackerDB.pendingRolls[player] = {}
 end
@@ -1408,10 +1414,15 @@ local expectedOutputs = {category == "low" and 1 or 0, category == "seven" and 1
             table.insert(inputs, featureVector)
         end
 
-        -- Run the sequence through the network and backpropagate using the
-        -- complete output sequence.
-        local outputs = LSTMNetwork:forwardPass(inputs)
-        LSTMNetwork:backwardPass(inputs, outputs, expectedOutputs)
+        -- Run the sequence through the network and backpropagate only if the
+        -- network is fully initialized. This prevents nil errors during
+        -- startup when weights may not be ready.
+        if LSTMNetwork:isFullyInitialized() then
+            local outputs = LSTMNetwork:forwardPass(inputs)
+            LSTMNetwork:backwardPass(inputs, outputs, expectedOutputs)
+        else
+            print("LSTM Network not fully initialized, skipping training step.")
+        end
 
         -- Add inputs and targets to learning data
         table.insert(DiceTrackerDB.learningData.lstmNetworkData.inputs, inputs)
