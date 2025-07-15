@@ -996,28 +996,32 @@ for i = 1, self.hiddenSize do
         self.vWhi[flatIndex] = beta2 * (self.vWhi[flatIndex] or 0) + (1 - beta2) * math.pow((dWhi[j] or 0), 2)
         local mWhiHat = self.mWhi[flatIndex] / (1 - math.pow(beta1, self.epoch + 1))
         local vWhiHat = self.vWhi[flatIndex] / (1 - math.pow(beta2, self.epoch + 1))
-        self.hiddenWeights.i[flatIndex] = self.hiddenWeights.i[flatIndex] - self.learningRate * mWhiHat / (math.sqrt(vWhiHat) + epsilon)
+        self.hiddenWeights.i[flatIndex] = (self.hiddenWeights.i[flatIndex] or 0) -
+            self.learningRate * mWhiHat / (math.sqrt(vWhiHat) + epsilon)
 
         -- Forget gate weights
         self.mWhf[flatIndex] = beta1 * (self.mWhf[flatIndex] or 0) + (1 - beta1) * (dWhf[j] or 0)
         self.vWhf[flatIndex] = beta2 * (self.vWhf[flatIndex] or 0) + (1 - beta2) * math.pow((dWhf[j] or 0), 2)
         local mWhfHat = self.mWhf[flatIndex] / (1 - math.pow(beta1, self.epoch + 1))
         local vWhfHat = self.vWhf[flatIndex] / (1 - math.pow(beta2, self.epoch + 1))
-        self.hiddenWeights.f[flatIndex] = self.hiddenWeights.f[flatIndex] - self.learningRate * mWhfHat / (math.sqrt(vWhfHat) + epsilon)
+        self.hiddenWeights.f[flatIndex] = (self.hiddenWeights.f[flatIndex] or 0) -
+            self.learningRate * mWhfHat / (math.sqrt(vWhfHat) + epsilon)
 
         -- Output gate weights
         self.mWho[flatIndex] = beta1 * (self.mWho[flatIndex] or 0) + (1 - beta1) * (dWho[j] or 0)
         self.vWho[flatIndex] = beta2 * (self.vWho[flatIndex] or 0) + (1 - beta2) * math.pow((dWho[j] or 0), 2)
         local mWhoHat = self.mWho[flatIndex] / (1 - math.pow(beta1, self.epoch + 1))
         local vWhoHat = self.vWho[flatIndex] / (1 - math.pow(beta2, self.epoch + 1))
-        self.hiddenWeights.o[flatIndex] = self.hiddenWeights.o[flatIndex] - self.learningRate * mWhoHat / (math.sqrt(vWhoHat) + epsilon)
+        self.hiddenWeights.o[flatIndex] = (self.hiddenWeights.o[flatIndex] or 0) -
+            self.learningRate * mWhoHat / (math.sqrt(vWhoHat) + epsilon)
 
         -- Candidate cell state weights
         self.mWhc[flatIndex] = beta1 * (self.mWhc[flatIndex] or 0) + (1 - beta1) * (dWhc[j] or 0)
         self.vWhc[flatIndex] = beta2 * (self.vWhc[flatIndex] or 0) + (1 - beta2) * math.pow((dWhc[j] or 0), 2)
         local mWhcHat = self.mWhc[flatIndex] / (1 - math.pow(beta1, self.epoch + 1))
         local vWhcHat = self.vWhc[flatIndex] / (1 - math.pow(beta2, self.epoch + 1))
-        self.hiddenWeights.c[flatIndex] = self.hiddenWeights.c[flatIndex] - self.learningRate * mWhcHat / (math.sqrt(vWhcHat) + epsilon)
+        self.hiddenWeights.c[flatIndex] = (self.hiddenWeights.c[flatIndex] or 0) -
+            self.learningRate * mWhcHat / (math.sqrt(vWhcHat) + epsilon)
     end
 end
 
@@ -1027,13 +1031,16 @@ for i = 1, self.outputSize do
         self.vWy[i][j] = beta2 * (self.vWy[i][j] or 0) + (1 - beta2) * math.pow((dWy[i][j] or 0), 2)
         local mWyHat = self.mWy[i][j] / (1 - math.pow(beta1, self.epoch + 1))
         local vWyHat = self.vWy[i][j] / (1 - math.pow(beta2, self.epoch + 1))
-        self.outputWeights[j][i] = self.outputWeights[j][i] - self.learningRate * mWyHat / (math.sqrt(vWyHat) + epsilon)
+        self.outputWeights[j] = self.outputWeights[j] or {}
+        self.outputWeights[j][i] = (self.outputWeights[j][i] or 0) -
+            self.learningRate * mWyHat / (math.sqrt(vWyHat) + epsilon)
     end
     self.mby[i] = beta1 * (self.mby[i] or 0) + (1 - beta1) * (dby[i] or 0)
     self.vby[i] = beta2 * (self.vby[i] or 0) + (1 - beta2) * math.pow((dby[i] or 0), 2)
     local mbyHat = self.mby[i] / (1 - math.pow(beta1, self.epoch + 1))
     local vbyHat = self.vby[i] / (1 - math.pow(beta2, self.epoch + 1))
-    self.outputBiases[i] = self.outputBiases[i] - self.learningRate * mbyHat / (math.sqrt(vbyHat) + epsilon)
+    self.outputBiases[i] = (self.outputBiases[i] or 0) -
+        self.learningRate * mbyHat / (math.sqrt(vbyHat) + epsilon)
 end
 
 -- Update biases
