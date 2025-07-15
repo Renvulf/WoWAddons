@@ -1445,6 +1445,7 @@ frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("CHAT_MSG_EMOTE")
+frame:RegisterEvent("CHAT_MSG_TEXT_EMOTE")
 frame:RegisterEvent("CHAT_MSG_SYSTEM")
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
@@ -1457,10 +1458,11 @@ frame:SetScript("OnEvent", function(self, event, ...)
         saveAddonData()
     elseif event == "PLAYER_ENTERING_WORLD" then
         initializeAddonData()
-    elseif event == "CHAT_MSG_EMOTE" then
+    elseif event == "CHAT_MSG_EMOTE" or event == "CHAT_MSG_TEXT_EMOTE" then
         local msg, player = ...
-        -- Detect the emote indicating a dice toss
-        if msg and msg:find("casually tosses .-%[Worn Troll Dice%]") then
+        -- Detect the emote indicating a dice toss from the Worn Troll Dice toy
+        -- Match the text regardless of item link color codes or gendered pronouns
+        if msg and msg:find("casually tosses") and msg:find("%[Worn Troll Dice%]") then
             if tossBuffer.player and time() - tossBuffer.time <= 10 then
                 tossBuffer.rolls = {}
             end
