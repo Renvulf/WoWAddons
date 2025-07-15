@@ -914,8 +914,19 @@ self:updateWeights(dWxi, dWhi, dWxf, dWhf, dWxo, dWho, dWxc, dWhc, dWy, dby, dbi
 
 end
 function LSTMNetwork:updateWeights(dWxi, dWhi, dWxf, dWhf, dWxo, dWho, dWxc, dWhc, dWy, dby, dbi, dbf, dbo, dbc)
--- Hyperparameters for Adam optimization
-local beta1 = 0.9
+    -- ensure each gate table exists
+    for _, gate in ipairs({"i", "f", "o", "c"}) do
+        self.inputWeights[gate]  = self.inputWeights[gate]  or {}
+        self.hiddenWeights[gate] = self.hiddenWeights[gate] or {}
+    end
+    -- ensure biases exist
+    self.biasWeights.i = self.biasWeights.i or 0
+    self.biasWeights.f = self.biasWeights.f or 0
+    self.biasWeights.o = self.biasWeights.o or 0
+    self.biasWeights.c = self.biasWeights.c or 0
+
+    -- Hyperparameters for Adam optimization
+    local beta1 = 0.9
 local beta2 = 0.999
 local epsilon = 1e-8
 
@@ -1243,21 +1254,20 @@ end
 end
 -- Enhanced Neural Network Initialization Check
 function checkAndInitializeLSTMNetwork()
-if LSTMNetwork.initialized then
-print("LSTM Network initialization skipped, already initialized.")
-return
-end
+    -- Force re-init if the network was previously initialized
+    if LSTMNetwork.initialized then
+        LSTMNetwork.initialized = false
+    end
 
-if DiceTrackerDB.learningData.lstmNetworkData.serializedStructure then
-    print("Loading saved LSTM Network structure...")
-    LSTMNetwork:loadStructure(DiceTrackerDB.learningData.lstmNetworkData.serializedStructure)
-else
-    print("Initializing LSTM Network...")
-    LSTMNetwork:initialize()
-end
+    if DiceTrackerDB.learningData.lstmNetworkData.serializedStructure then
+        print("Loading saved LSTM Network structure...")
+        LSTMNetwork:loadStructure(DiceTrackerDB.learningData.lstmNetworkData.serializedStructure)
+    else
+        print("Initializing LSTM Network...")
+        LSTMNetwork:initialize()
+    end
 
-saveAddonData()
-
+    saveAddonData()
 end
 -- Adjusted Addon Initialization and Event Handling
 function initializeAddonData()
