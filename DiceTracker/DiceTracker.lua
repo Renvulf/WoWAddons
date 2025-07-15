@@ -1499,6 +1499,11 @@ DiceTrackerDB.learningData.lstmNetworkData.targets = {}
 end
 
 function LSTMNetwork:dotProduct(a, b, size)
+    -- handle scalar * scalar
+    if type(a) == "number" and type(b) == "number" then
+        return a * b
+    end
+
     if type(a) == "number" and type(b) == "table" then
         local result = 0
         for i = 1, size do
@@ -1530,7 +1535,7 @@ function LSTMNetwork:dotProduct(a, b, size)
         end
         return result
     else
-        error("dotProduct expects two tables or a table and a number as arguments")
+        error("dotProduct expects two tables, a table and a number, or two numbers")
     end
 end
 
