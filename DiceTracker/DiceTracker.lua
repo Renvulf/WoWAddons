@@ -33,6 +33,14 @@ local LSTMNetwork = {
     epoch = 0
 }
 
+-- Ensure cellState and hiddenState are properly sized
+function LSTMNetwork:resetStates()
+    for i = 1, self.hiddenSize do
+        self.cellState[i] = 0
+        self.hiddenState[i] = 0
+    end
+end
+
 -- Localize math functions for performance and to avoid globals
 local exp, log, random = math.exp, math.log, math.random
 local floor, max = math.floor, math.max
@@ -593,19 +601,18 @@ nnData.epoch = nnData.epoch + 1
 self.epoch = self.epoch + 1
 end
 function LSTMNetwork:preprocessData(data)
-local processedData = {}
-if type(data) == "table" then
-for i = 1, self.inputSize do
-processedData[i] = data[i] or 0
-end
-elseif type(data) == "number" then
-processedData = {data}
-else
--- Handle other data types if necessary
-print("Warning: Unsupported data type in preprocessData:", type(data))
-processedData = {0}
-end
-return processedData
+    local processed = {}
+    if type(data) == "table" then
+        for i = 1, self.inputSize do
+            processed[i] = tonumber(data[i]) or 0
+        end
+    else
+        -- fallback when given a single number or unexpected type
+        for i = 1, self.inputSize do
+            processed[i] = (i == 1 and tonumber(data) or 0) or 0
+        end
+    end
+    return processed
 end
 function LSTMNetwork:forwardPass(inputs)
 -- Add error handling and validation checks
@@ -713,16 +720,20 @@ return outputSequence
 
 end
 function LSTMNetwork:backwardPass(inputs, outputs, targets)
--- Add error handling and validation checks
-if not inputs or not outputs or not targets or #inputs == 0 or #outputs == 0 or #targets == 0 then
-print("Error: Empty or invalid input, output, or target data in backwardPass.")
-return
-end
+    if #inputs == 0 or #outputs == 0 then
+        print("Error: Empty inputs/outputs in backwardPass.")
+        return
+    end
 
--- Preprocess each input in the inputs table
-for i = 1, #inputs do
-    inputs[i] = self:preprocessData(inputs[i])
-end
+    -- Ensure the network has a valid state
+    if #self.hiddenState == 0 then
+        self:resetStates()
+    end
+
+    -- Preprocess all inputs
+    for t = 1, #inputs do
+        inputs[t] = self:preprocessData(inputs[t])
+    end
 
 -- Initialize gradients
 local dWxi, dWhi, dWxf, dWhf, dWxo, dWho, dWxc, dWhc = {}, {}, {}, {}, {}, {}, {}, {}
@@ -774,9 +785,16 @@ for t = #inputs, 1, -1 do
         self.biasWeights.o
     )
 
+    -- compute the candidate cell update exactly once per time step
+    local ctInput = self:elementWiseMultiply(self.inputWeights.c, xt)
+    local chInput = self:elementWiseMultiply(self.hiddenWeights.c, self.hiddenState)
+    local ct_x    = self:dotProduct(ctInput, xt, inputLen)
+    local ct_h    = self:dotProduct(chInput, self.hiddenState, hiddenLen)
+    local baseCt  = tanh(ct_x + ct_h + self.biasWeights.c)
+
     local ct_candidate = {}
-    for i = 1, self.hiddenSize do
-        ct_candidate[i] = tanh(self:dotProduct(self.inputWeights.c[i] or {}, xt[i] or 0, 1) + self:dotProduct(self.hiddenWeights.c[i] or {}, self.hiddenState[i] or 0, 1) + self.biasWeights.c)
+    for j = 1, self.hiddenSize do
+        ct_candidate[j] = baseCt
     end
 
     local dy = {}
@@ -1381,7 +1399,7 @@ local expectedOutputs = {category == "low" and 1 or 0, category == "seven" and 1
         -- Run the sequence through the network and backpropagate using the
         -- complete output sequence.
         local outputs = LSTMNetwork:forwardPass(inputs)
-        LSTMNetwork:backwardPass(inputs, outputs, {expectedOutputs})
+        LSTMNetwork:backwardPass(inputs, outputs, expectedOutputs)
 
         -- Add inputs and targets to learning data
         table.insert(DiceTrackerDB.learningData.lstmNetworkData.inputs, inputs)
@@ -1496,7 +1514,7 @@ for i = 1, #DiceTrackerDB.learningData.lstmNetworkData.inputs do
     local target = DiceTrackerDB.learningData.lstmNetworkData.targets[i]
     -- Use the entire output sequence for backpropagation
     local outputs = self:forwardPass(input)
-    self:backwardPass(input, outputs, {target})
+    self:backwardPass(input, outputs, target)
 end
 
 -- After training, clear the inputs and targets to start fresh
