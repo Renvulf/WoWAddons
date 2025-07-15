@@ -925,6 +925,23 @@ function LSTMNetwork:updateWeights(dWxi, dWhi, dWxf, dWhf, dWxo, dWho, dWxc, dWh
     self.biasWeights.o = self.biasWeights.o or 0
     self.biasWeights.c = self.biasWeights.c or 0
 
+    -- make sure our Adam tables and output tables are all in place
+    self.outputWeights  = self.outputWeights  or {}
+    self.outputBiases   = self.outputBiases   or {}
+    self.mWy            = self.mWy            or {}
+    self.vWy            = self.vWy            or {}
+    self.mby            = self.mby            or {}
+    self.vby            = self.vby            or {}
+
+    for i = 1, self.outputSize do
+        self.mWy[i]           = self.mWy[i]           or {}
+        self.vWy[i]           = self.vWy[i]           or {}
+        self.outputWeights[i] = self.outputWeights[i] or {}
+        -- bias-moment entries
+        self.mby[i]           = self.mby[i]           or 0
+        self.vby[i]           = self.vby[i]           or 0
+    end
+
     -- Hyperparameters for Adam optimization
     local beta1 = 0.9
 local beta2 = 0.999
