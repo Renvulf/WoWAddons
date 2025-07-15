@@ -958,28 +958,33 @@ for i = 1, self.inputSize do
         self.vWxi[flatIndex] = beta2 * (self.vWxi[flatIndex] or 0) + (1 - beta2) * math.pow((dWxi[j] or 0), 2)
         local mWxiHat = self.mWxi[flatIndex] / (1 - math.pow(beta1, self.epoch + 1))
         local vWxiHat = self.vWxi[flatIndex] / (1 - math.pow(beta2, self.epoch + 1))
-        self.inputWeights.i[flatIndex] = self.inputWeights.i[flatIndex] - self.learningRate * mWxiHat / (math.sqrt(vWxiHat) + epsilon)
+        -- Guard against nil weights by treating missing values as zero
+        self.inputWeights.i[flatIndex] = (self.inputWeights.i[flatIndex] or 0) -
+            self.learningRate * mWxiHat / (math.sqrt(vWxiHat) + epsilon)
 
         -- Forget gate weights
         self.mWxf[flatIndex] = beta1 * (self.mWxf[flatIndex] or 0) + (1 - beta1) * (dWxf[j] or 0)
         self.vWxf[flatIndex] = beta2 * (self.vWxf[flatIndex] or 0) + (1 - beta2) * math.pow((dWxf[j] or 0), 2)
         local mWxfHat = self.mWxf[flatIndex] / (1 - math.pow(beta1, self.epoch + 1))
         local vWxfHat = self.vWxf[flatIndex] / (1 - math.pow(beta2, self.epoch + 1))
-        self.inputWeights.f[flatIndex] = self.inputWeights.f[flatIndex] - self.learningRate * mWxfHat / (math.sqrt(vWxfHat) + epsilon)
+        self.inputWeights.f[flatIndex] = (self.inputWeights.f[flatIndex] or 0) -
+            self.learningRate * mWxfHat / (math.sqrt(vWxfHat) + epsilon)
 
         -- Output gate weights
         self.mWxo[flatIndex] = beta1 * (self.mWxo[flatIndex] or 0) + (1 - beta1) * (dWxo[j] or 0)
         self.vWxo[flatIndex] = beta2 * (self.vWxo[flatIndex] or 0) + (1 - beta2) * math.pow((dWxo[j] or 0), 2)
         local mWxoHat = self.mWxo[flatIndex] / (1 - math.pow(beta1, self.epoch + 1))
         local vWxoHat = self.vWxo[flatIndex] / (1 - math.pow(beta2, self.epoch + 1))
-        self.inputWeights.o[flatIndex] = self.inputWeights.o[flatIndex] - self.learningRate * mWxoHat / (math.sqrt(vWxoHat) + epsilon)
+        self.inputWeights.o[flatIndex] = (self.inputWeights.o[flatIndex] or 0) -
+            self.learningRate * mWxoHat / (math.sqrt(vWxoHat) + epsilon)
 
         -- Candidate cell state weights
         self.mWxc[flatIndex] = beta1 * (self.mWxc[flatIndex] or 0) + (1 - beta1) * (dWxc[j] or 0)
         self.vWxc[flatIndex] = beta2 * (self.vWxc[flatIndex] or 0) + (1 - beta2) * math.pow((dWxc[j] or 0), 2)
         local mWxcHat = self.mWxc[flatIndex] / (1 - math.pow(beta1, self.epoch + 1))
         local vWxcHat = self.vWxc[flatIndex] / (1 - math.pow(beta2, self.epoch + 1))
-        self.inputWeights.c[flatIndex] = self.inputWeights.c[flatIndex] - self.learningRate * mWxcHat / (math.sqrt(vWxcHat) + epsilon)
+        self.inputWeights.c[flatIndex] = (self.inputWeights.c[flatIndex] or 0) -
+            self.learningRate * mWxcHat / (math.sqrt(vWxcHat) + epsilon)
     end
 end
 
