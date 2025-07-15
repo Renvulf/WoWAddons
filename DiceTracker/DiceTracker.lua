@@ -27,7 +27,206 @@ local LSTMNetwork = {
     epoch = 0
 }
 
+-- Localize math functions for performance and to avoid globals
+local exp, log, random = math.exp, math.log, math.random
+local floor, max = math.floor, math.max
+
+-- Simple feed-forward neural network for dice prediction
+local FFNetwork = {inputSize = 16, hiddenSize = 8, outputSize = 3, eta = 0.01}
+
+function FFNetwork:initialize()
+    self.W1 = self.W1 or {}
+    self.b1 = self.b1 or {}
+    self.W2 = self.W2 or {}
+    self.b2 = self.b2 or {}
+
+    for i = 1, self.hiddenSize do
+        self.W1[i] = self.W1[i] or {}
+        self.b1[i] = self.b1[i] or 0
+        for j = 1, self.inputSize do
+            if type(self.W1[i][j]) ~= "number" then
+                self.W1[i][j] = (random() * 2 - 1) * 0.1
+            end
+        end
+    end
+
+    for i = 1, self.hiddenSize do
+        self.W2[i] = self.W2[i] or {}
+        for k = 1, self.outputSize do
+            if type(self.W2[i][k]) ~= "number" then
+                self.W2[i][k] = (random() * 2 - 1) * 0.1
+            end
+        end
+    end
+
+    for k = 1, self.outputSize do
+        self.b2[k] = self.b2[k] or 0
+    end
+end
+
+-- Forward pass returning hidden activations and softmax probabilities
+function FFNetwork:forward(input)
+    local hidden = {}
+    for i = 1, self.hiddenSize do
+        local sum = self.b1[i]
+        for j = 1, self.inputSize do
+            sum = sum + (self.W1[i][j] or 0) * (input[j] or 0)
+        end
+        hidden[i] = 1 / (1 + exp(-sum))
+    end
+
+    local out = {}
+    for k = 1, self.outputSize do
+        local sum = self.b2[k]
+        for i = 1, self.hiddenSize do
+            sum = sum + (self.W2[i][k] or 0) * hidden[i]
+        end
+        out[k] = sum
+    end
+
+    local total = 0
+    for k = 1, self.outputSize do
+        out[k] = exp(out[k])
+        total = total + out[k]
+    end
+    for k = 1, self.outputSize do
+        out[k] = out[k] / total
+    end
+
+    return hidden, out
+end
+
+-- Single step of gradient descent
+function FFNetwork:train(input, target)
+    local hidden, out = self:forward(input)
+    local deltaOut = {}
+    for k = 1, self.outputSize do
+        deltaOut[k] = (out[k] - target[k])
+    end
+
+    for i = 1, self.hiddenSize do
+        for k = 1, self.outputSize do
+            local grad = deltaOut[k] * hidden[i]
+            self.W2[i][k] = self.W2[i][k] - self.eta * grad
+        end
+    end
+    for k = 1, self.outputSize do
+        self.b2[k] = self.b2[k] - self.eta * deltaOut[k]
+    end
+
+    local deltaHidden = {}
+    for i = 1, self.hiddenSize do
+        local sum = 0
+        for k = 1, self.outputSize do
+            sum = sum + deltaOut[k] * self.W2[i][k]
+        end
+        deltaHidden[i] = sum * hidden[i] * (1 - hidden[i])
+    end
+
+    for i = 1, self.hiddenSize do
+        for j = 1, self.inputSize do
+            local grad = deltaHidden[i] * (input[j] or 0)
+            self.W1[i][j] = self.W1[i][j] - self.eta * grad
+        end
+        self.b1[i] = self.b1[i] - self.eta * deltaHidden[i]
+    end
+
+    -- Persist updated weights safely
+    local ok = pcall(function()
+        DiceTrackerDB.weights.W1 = self.W1
+        DiceTrackerDB.weights.b1 = self.b1
+        DiceTrackerDB.weights.W2 = self.W2
+        DiceTrackerDB.weights.b2 = self.b2
+    end)
+    if not ok then
+        print("DiceTracker: Error saving weights, resetting database")
+        DiceTrackerDB.weights = {W1={}, b1={}, W2={}, b2={}}
+    end
+end
+
 -- UI Initialization and Stats Update
+
+-- Buffer for tracking dice toss events
+local tossBuffer = {player = nil, time = 0, rolls = {}}
+
+local function getBucket(t)
+    return floor((t % 60) / 5) + 1
+end
+
+local function frequencyPredict(bucket)
+    local data = DiceTrackerDB.buckets[bucket]
+    if not data or (data.count or 0) == 0 then
+        return "7", 0
+    end
+    local counts = {data.Low or 0, data["7"] or 0, data.High or 0}
+    local total = counts[1] + counts[2] + counts[3]
+    local idx, maxC = 1, counts[1]
+    if counts[2] > maxC then idx, maxC = 2, counts[2] end
+    if counts[3] > maxC then idx, maxC = 3, counts[3] end
+    local cats = {"Low", "7", "High"}
+    return cats[idx], maxC / total
+end
+
+-- Process a pair of rolls from a single dice toss
+local function ProcessPair(tossTime, roll1, roll2)
+    local sum = roll1 + roll2
+    local categoryIndex
+    local category
+    if sum >= 2 and sum <= 6 then
+        categoryIndex, category = 1, "Low"
+    elseif sum == 7 then
+        categoryIndex, category = 2, "7"
+    else
+        categoryIndex, category = 3, "High"
+    end
+
+    local bucket = getBucket(tossTime)
+    DiceTrackerDB.buckets[bucket] = DiceTrackerDB.buckets[bucket] or {count = 0, Low = 0, ["7"] = 0, High = 0}
+    local b = DiceTrackerDB.buckets[bucket]
+    b.count = b.count + 1
+    b[category] = (b[category] or 0) + 1
+
+    local input = {}
+    for i = 1, 12 do input[i] = (i == bucket) and 1 or 0 end
+    local delta = (DiceTrackerDB.lastTossTime and (tossTime - DiceTrackerDB.lastTossTime) or 60)
+    input[13] = delta / 60
+    for i = 1, 3 do
+        input[13 + i] = (i == (DiceTrackerDB.prevCategoryIndex or 0)) and 1 or 0
+    end
+
+    local target = {0, 0, 0}
+    target[categoryIndex] = 1
+    local ok = pcall(function() FFNetwork:train(input, target) end)
+    if not ok then FFNetwork:initialize() end
+
+    DiceTrackerDB.prevCategoryIndex = categoryIndex
+    DiceTrackerDB.lastTossTime = tossTime
+
+    processRollPair(tossBuffer.player or "", roll1, roll2)
+end
+
+-- Public API to predict the next outcome
+function addonTable:Predict()
+    local now = time()
+    local bucket = getBucket(now)
+    local input = {}
+    for i = 1, 12 do input[i] = (i == bucket) and 1 or 0 end
+    local delta = (DiceTrackerDB.lastTossTime and (now - DiceTrackerDB.lastTossTime) or 60)
+    input[13] = delta / 60
+    for i = 1, 3 do
+        input[13 + i] = (i == (DiceTrackerDB.prevCategoryIndex or 0)) and 1 or 0
+    end
+
+    local _, out = FFNetwork:forward(input)
+    local idx, prob = 1, out[1]
+    for i = 2, 3 do if out[i] > prob then idx, prob = i, out[i] end end
+    local catMap = {"Low", "7", "High"}
+    if prob < 0.6 or not DiceTrackerDB.buckets[bucket] or (DiceTrackerDB.buckets[bucket].count or 0) < 20 then
+        return frequencyPredict(bucket)
+    else
+        return catMap[idx]
+    end
+end
 local function initializeUI()
     if statsFrame then return end
 
@@ -173,6 +372,11 @@ local function initializeDefaultData()
             saveInterval = 100,  -- Save data every 100 rolls
             rollsSinceLastSave = 0,  -- Counter for rolls since last save
             dirtyFlags = {}  -- Dirty flags for incremental saving
+            ,weights = {W1={}, b1={}, W2={}, b2={}}
+            ,buckets = {}
+            ,version = 1
+            ,prevCategoryIndex = 0
+            ,lastTossTime = 0
         }
     end
 end
@@ -1010,8 +1214,19 @@ if DiceTrackerSavedVariables then
     end
 end
 
--- Ensure LSTM network data structures are initialized
-DiceTrackerDB.learningData.lstmNetworkData.outcomeCountForTraining = DiceTrackerDB.learningData.lstmNetworkData.outcomeCountForTraining or 0
+    -- Ensure LSTM network data structures are initialized
+    DiceTrackerDB.learningData.lstmNetworkData.outcomeCountForTraining = DiceTrackerDB.learningData.lstmNetworkData.outcomeCountForTraining or 0
+
+    -- Ensure predictor data structures are initialized
+    DiceTrackerDB.weights = DiceTrackerDB.weights or {W1={}, b1={}, W2={}, b2={}}
+    DiceTrackerDB.buckets = DiceTrackerDB.buckets or {}
+    DiceTrackerDB.prevCategoryIndex = DiceTrackerDB.prevCategoryIndex or 0
+    DiceTrackerDB.lastTossTime = DiceTrackerDB.lastTossTime or 0
+    FFNetwork.W1 = DiceTrackerDB.weights.W1
+    FFNetwork.b1 = DiceTrackerDB.weights.b1
+    FFNetwork.W2 = DiceTrackerDB.weights.W2
+    FFNetwork.b2 = DiceTrackerDB.weights.b2
+    FFNetwork:initialize()
 
 -- Initialize the LSTM network
 LSTMNetwork:initialize()
@@ -1182,27 +1397,43 @@ local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
+frame:RegisterEvent("CHAT_MSG_EMOTE")
 frame:RegisterEvent("CHAT_MSG_SYSTEM")
 frame:SetScript("OnEvent", function(self, event, ...)
-if event == "ADDON_LOADED" then
-local addonName = ...
-if addonName == "DiceTracker" then
-initializeAddonData()
-print("DiceTracker loaded.")
-end
-elseif event == "PLAYER_LOGOUT" then
--- Ensure to save the data upon logging out.
-saveAddonData()
-elseif event == "PLAYER_ENTERING_WORLD" then
-initializeAddonData()
-elseif event == "CHAT_MSG_SYSTEM" then
-local message = ...
-local player, roll1 = message:match("^(.+) rolls (%d+) %(1%-6%)$")
-local roll2 = message:match("^.+ rolls (%d+) %(1%-6%)$")
-if player and roll1 and roll2 then
-processRollPair(player, tonumber(roll1), tonumber(roll2))
-end
-end
+    if event == "ADDON_LOADED" then
+        local addonName = ...
+        if addonName == "DiceTracker" then
+            initializeAddonData()
+            print("DiceTracker loaded.")
+        end
+    elseif event == "PLAYER_LOGOUT" then
+        saveAddonData()
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        initializeAddonData()
+    elseif event == "CHAT_MSG_EMOTE" then
+        local msg, player = ...
+        if msg and msg:find("casually tosses his %[Worn Troll Dice%]") then
+            tossBuffer.player = Ambiguate(player, "none")
+            tossBuffer.time = time()
+            tossBuffer.rolls = {}
+        end
+    elseif event == "CHAT_MSG_SYSTEM" then
+        local message = ...
+        local player, roll = message:match("^(.+) rolls (%d+) %(1%-6%)$")
+        player = player and Ambiguate(player, "none") or nil
+        if tossBuffer.player and player == tossBuffer.player and roll then
+            table.insert(tossBuffer.rolls, tonumber(roll))
+            if #tossBuffer.rolls == 2 then
+                ProcessPair(tossBuffer.time, tossBuffer.rolls[1], tossBuffer.rolls[2])
+                tossBuffer.player = nil
+                tossBuffer.rolls = {}
+            end
+        end
+        if tossBuffer.player and time() - tossBuffer.time > 10 then
+            tossBuffer.player = nil
+            tossBuffer.rolls = {}
+        end
+    end
 end)
 -- Define the retrainModelWithLatestData method
 function LSTMNetwork:retrainModelWithLatestData()
@@ -1309,6 +1540,29 @@ result[i] = 0
 end
 end
 return result
+end
+
+-- Slash commands for user interaction
+SLASH_DICETRACKER1 = "/dicetracker"
+SlashCmdList["DICETRACKER"] = function(msg)
+    msg = msg and msg:lower() or ""
+    if msg == "reset" then
+        DiceTrackerDB.weights = {W1={}, b1={}, W2={}, b2={}}
+        DiceTrackerDB.buckets = {}
+        DiceTrackerDB.prevCategoryIndex = 0
+        print("DiceTracker: data reset")
+    elseif msg == "predict" then
+        print("DiceTracker predicts:", addonTable:Predict())
+    elseif msg == "toggleui" then
+        if statsFrame and statsFrame:IsShown() then
+            statsFrame:Hide()
+        else
+            addonTable.updateUI()
+            if statsFrame then statsFrame:Show() end
+        end
+    else
+        print("/dicetracker reset | predict | toggleui")
+    end
 end
 function LSTMNetwork:elementWiseAdd(a, b)
 local maxSize = math.max(#a, #b)
