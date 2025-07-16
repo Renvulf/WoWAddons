@@ -1714,16 +1714,18 @@ processRollPair = function(player, roll1, roll2)
         local target = {cat==1 and 1 or 0, cat==2 and 1 or 0, cat==3 and 1 or 0}
 
         local function doTrainingPasses()
+            -- Only train once the network is fully initialized
+            if not LSTMNetwork:isFullyInitialized() then return end
             local passes = 3
             local ticker
             ticker = C_Timer.NewTicker(0.05, function()
                 if passes > 0 then
-                    local ok = pcall(function()
+                    local ok, err = pcall(function()
                         LSTMNetwork:forwardPass(seq)
                         LSTMNetwork:backwardPass(seq, LSTMNetwork:forwardPass(seq), target)
                     end)
                     if not ok then
-                        print("DiceTracker: LSTM training error (ignored)")
+                        print("DiceTracker: LSTM training error: " .. tostring(err))
                     end
                     passes = passes - 1
                 else
@@ -1894,10 +1896,22 @@ SLASH_DICETRACKER1 = "/dicetracker"
 SlashCmdList["DICETRACKER"] = function(msg)
     msg = msg and msg:lower() or ""
     if msg == "reset" then
-        DiceTrackerDB.weights = {W1={}, b1={}, W2={}, b2={}}
-        DiceTrackerDB.buckets = {}
-        DiceTrackerDB.prevCategoryIndex = 0
-        print("DiceTracker: data reset")
+        -- 1) Clear out SavedVariables so nothing is reloaded on next login
+        DiceTrackerSavedVariables = nil
+
+        -- 2) Reinitialize all in-memory data tables
+        initializeDefaultData()
+        migrateDatabase()
+
+        -- 3) Rebuild both neural networks with fresh weights
+        checkAndInitializeLSTMNetwork()
+        FFNetwork:initialize()
+
+        -- 4) Force the UI to refresh showing zeroed stats
+        addonTable.updateUI()
+
+        print("DiceTracker: fully reset to default state")
+        return
     elseif msg == "toggleui" then
         if statsFrame and statsFrame:IsShown() then
             statsFrame:Hide()
