@@ -661,6 +661,39 @@ function LSTMNetwork:initialize()
         self.hiddenState[i] = 0
     end
 
+    -- ensure optimizer-moment tables exist
+    local opt = DiceTrackerDB.learningData.optimizerState
+    opt.Wxi = opt.Wxi or {m={}, v={}, t=0}
+    opt.Whi = opt.Whi or {m={}, v={}, t=0}
+    opt.Wxf = opt.Wxf or {m={}, v={}, t=0}
+    opt.Whf = opt.Whf or {m={}, v={}, t=0}
+    opt.Wxo = opt.Wxo or {m={}, v={}, t=0}
+    opt.Who = opt.Who or {m={}, v={}, t=0}
+    opt.Wxc = opt.Wxc or {m={}, v={}, t=0}
+    opt.Whc = opt.Whc or {m={}, v={}, t=0}
+    opt.Wy  = opt.Wy  or {m={}, v={}, t=0}
+    opt.bi  = opt.bi  or {m=0, v=0, t=0}
+    opt.bf  = opt.bf  or {m=0, v=0, t=0}
+    opt.bo  = opt.bo  or {m=0, v=0, t=0}
+    opt.bc  = opt.bc  or {m=0, v=0, t=0}
+    opt.by  = opt.by  or {m={}, v={}, t=0}
+
+    -- now bind them onto the network so nothing is nil
+    self.mWxi, self.vWxi = opt.Wxi.m, opt.Wxi.v
+    self.mWhi, self.vWhi = opt.Whi.m, opt.Whi.v
+    self.mWxf, self.vWxf = opt.Wxf.m, opt.Wxf.v
+    self.mWhf, self.vWhf = opt.Whf.m, opt.Whf.v
+    self.mWxo, self.vWxo = opt.Wxo.m, opt.Wxo.v
+    self.mWho, self.vWho = opt.Who.m, opt.Who.v
+    self.mWxc, self.vWxc = opt.Wxc.m, opt.Wxc.v
+    self.mWhc, self.vWhc = opt.Whc.m, opt.Whc.v
+    self.mWy,  self.vWy  = opt.Wy.m,  opt.Wy.v
+    self.mbi, self.vbi   = opt.bi.m, opt.bi.v
+    self.mbf, self.vbf   = opt.bf.m, opt.bf.v
+    self.mbo, self.vbo   = opt.bo.m, opt.bo.v
+    self.mbc, self.vbc   = opt.bc.m, opt.bc.v
+    self.mby, self.vby   = opt.by.m, opt.by.v
+
     self.initialized = true
     print("LSTM Network initialized.")
 end
@@ -1896,18 +1929,22 @@ SLASH_DICETRACKER1 = "/dicetracker"
 SlashCmdList["DICETRACKER"] = function(msg)
     msg = msg and msg:lower() or ""
     if msg == "reset" then
-        -- 1) Clear out SavedVariables so nothing is reloaded on next login
+        -- 1) Clear saved-on-disk table so nothing persists
         DiceTrackerSavedVariables = nil
 
-        -- 2) Reinitialize all in-memory data tables
+        -- 2) Clear the in-memory table so defaults are rebuilt
+        DiceTrackerDB = nil
+
+        -- 3) Rebuild all data structures from scratch
         initializeDefaultData()
         migrateDatabase()
-
-        -- 3) Rebuild both neural networks with fresh weights
         checkAndInitializeLSTMNetwork()
         FFNetwork:initialize()
 
-        -- 4) Force the UI to refresh showing zeroed stats
+        -- 4) Persist the fresh database immediately
+        saveAddonData()
+
+        -- 5) Refresh the UI to show a clean slate
         addonTable.updateUI()
 
         print("DiceTracker: fully reset to default state")
