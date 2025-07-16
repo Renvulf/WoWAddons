@@ -1135,30 +1135,67 @@ end
 
 end
 function LSTMNetwork:updateWeights(dWxi, dWhi, dWxf, dWhf, dWxo, dWho, dWxc, dWhc, dWy, dby, dbi, dbf, dbo, dbc)
-    -- ensure each gate table exists
-    for _, gate in ipairs({"i", "f", "o", "c"}) do
+    -- guard against missing initialization
+    if not self.initialized or not DiceTrackerDB or not DiceTrackerDB.learningData then
+        self:initialize()
+    end
+
+    -- 1) grab optimizer state
+    local opt = DiceTrackerDB.learningData.optimizerState
+
+    -- 2) ensure all Adam moment tables exist
+    opt.Wxi = opt.Wxi or { m = {}, v = {}, t = 0 }
+    opt.Whi = opt.Whi or { m = {}, v = {}, t = 0 }
+    opt.Wxf = opt.Wxf or { m = {}, v = {}, t = 0 }
+    opt.Whf = opt.Whf or { m = {}, v = {}, t = 0 }
+    opt.Wxo = opt.Wxo or { m = {}, v = {}, t = 0 }
+    opt.Who = opt.Who or { m = {}, v = {}, t = 0 }
+    opt.Wxc = opt.Wxc or { m = {}, v = {}, t = 0 }
+    opt.Whc = opt.Whc or { m = {}, v = {}, t = 0 }
+    opt.Wy  = opt.Wy  or { m = {}, v = {}, t = 0 }
+    opt.bi  = opt.bi  or { m = 0,   v = 0,   t = 0 }
+    opt.bf  = opt.bf  or { m = 0,   v = 0,   t = 0 }
+    opt.bo  = opt.bo  or { m = 0,   v = 0,   t = 0 }
+    opt.bc  = opt.bc  or { m = 0,   v = 0,   t = 0 }
+    opt.by  = opt.by  or { m = {},  v = {},  t = 0 }
+
+    -- 3) re-bind onto self so indexing never fails
+    self.mWxi, self.vWxi = opt.Wxi.m, opt.Wxi.v
+    self.mWhi, self.vWhi = opt.Whi.m, opt.Whi.v
+    self.mWxf, self.vWxf = opt.Wxf.m, opt.Wxf.v
+    self.mWhf, self.vWhf = opt.Whf.m, opt.Whf.v
+    self.mWxo, self.vWxo = opt.Wxo.m, opt.Wxo.v
+    self.mWho, self.vWho = opt.Who.m, opt.Who.v
+    self.mWxc, self.vWxc = opt.Wxc.m, opt.Wxc.v
+    self.mWhc, self.vWhc = opt.Whc.m, opt.Whc.v
+    self.mWy,  self.vWy  = opt.Wy.m,  opt.Wy.v
+    self.mbi,  self.vbi  = opt.bi.m,  opt.bi.v
+    self.mbf,  self.vbf  = opt.bf.m,  opt.bf.v
+    self.mbo,  self.vbo  = opt.bo.m,  opt.bo.v
+    self.mbc,  self.vbc  = opt.bc.m,  opt.bc.v
+    self.mby,  self.vby  = opt.by.m,  opt.by.v
+
+    -- ensure gate and bias tables exist
+    for _, gate in ipairs({"i","f","o","c"}) do
         self.inputWeights[gate]  = self.inputWeights[gate]  or {}
         self.hiddenWeights[gate] = self.hiddenWeights[gate] or {}
     end
-    -- ensure biases exist
     self.biasWeights.i = self.biasWeights.i or 0
     self.biasWeights.f = self.biasWeights.f or 0
     self.biasWeights.o = self.biasWeights.o or 0
     self.biasWeights.c = self.biasWeights.c or 0
 
-    -- make sure our Adam tables and output tables are all in place
+    -- make sure output-related tables exist
     self.outputWeights  = self.outputWeights  or {}
     self.outputBiases   = self.outputBiases   or {}
     self.mWy            = self.mWy            or {}
     self.vWy            = self.vWy            or {}
     self.mby            = self.mby            or {}
     self.vby            = self.vby            or {}
-
     for i = 1, self.outputSize do
         self.mWy[i]           = self.mWy[i]           or {}
         self.vWy[i]           = self.vWy[i]           or {}
         self.outputWeights[i] = self.outputWeights[i] or {}
-        -- bias-moment entries
         self.mby[i]           = self.mby[i]           or 0
         self.vby[i]           = self.vby[i]           or 0
     end
@@ -1167,39 +1204,6 @@ function LSTMNetwork:updateWeights(dWxi, dWhi, dWxf, dWhf, dWxo, dWho, dWxc, dWh
     local beta1 = 0.9
     local beta2 = 0.999
     local epsilon = 1e-8
-
-    -- Initialize Adam's m and v for each weight and bias
-    local opt = DiceTrackerDB.learningData.optimizerState
-    opt.Wxi = opt.Wxi or {m={}, v={}, t=0}
-    opt.Whi = opt.Whi or {m={}, v={}, t=0}
-    opt.Wxf = opt.Wxf or {m={}, v={}, t=0}
-    opt.Whf = opt.Whf or {m={}, v={}, t=0}
-    opt.Wxo = opt.Wxo or {m={}, v={}, t=0}
-    opt.Who = opt.Who or {m={}, v={}, t=0}
-    opt.Wxc = opt.Wxc or {m={}, v={}, t=0}
-    opt.Whc = opt.Whc or {m={}, v={}, t=0}
-    opt.Wy  = opt.Wy  or {m={}, v={}, t=0}
-    opt.bi  = opt.bi  or {m=0, v=0, t=0}
-    opt.bf  = opt.bf  or {m=0, v=0, t=0}
-    opt.bo  = opt.bo  or {m=0, v=0, t=0}
-    opt.bc  = opt.bc  or {m=0, v=0, t=0}
-    opt.by  = opt.by  or {m={}, v={}, t=0}
-
-    self.mWxi, self.vWxi = opt.Wxi.m, opt.Wxi.v
-    self.mWhi, self.vWhi = opt.Whi.m, opt.Whi.v
-    self.mWxf, self.vWxf = opt.Wxf.m, opt.Wxf.v
-    self.mWhf, self.vWhf = opt.Whf.m, opt.Whf.v
-    self.mWxo, self.vWxo = opt.Wxo.m, opt.Wxo.v
-    self.vWxo = self.vWxo or {}
-    self.mWho, self.vWho = opt.Who.m, opt.Who.v
-    self.mWxc, self.vWxc = opt.Wxc.m, opt.Wxc.v
-    self.mWhc, self.vWhc = opt.Whc.m, opt.Whc.v
-    self.mWy,  self.vWy  = opt.Wy.m,  opt.Wy.v
-    self.mbi, self.vbi = opt.bi.m, opt.bi.v
-    self.mbf, self.vbf = opt.bf.m, opt.bf.v
-    self.mbo, self.vbo = opt.bo.m, opt.bo.v
-    self.mbc, self.vbc = opt.bc.m, opt.bc.v
-    self.mby, self.vby = opt.by.m, opt.by.v
 
 -- Update weights and biases
 for i = 1, self.inputSize do
