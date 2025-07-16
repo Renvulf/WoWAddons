@@ -267,7 +267,7 @@ end
 local function frequencyPredict(bucket)
     local data = DiceTrackerDB.buckets[bucket]
     if not data or (data.count or 0) == 0 then
-        return "7", 0
+        return "seven", 0
     end
     -- Laplace smoothing to avoid zero probabilities
     local counts = {(data.Low or 0) + 1, (data["7"] or 0) + 1, (data.High or 0) + 1}
@@ -275,7 +275,7 @@ local function frequencyPredict(bucket)
     local idx, maxC = 1, counts[1]
     if counts[2] > maxC then idx, maxC = 2, counts[2] end
     if counts[3] > maxC then idx, maxC = 3, counts[3] end
-    local cats = {"Low", "7", "High"}
+    local cats = {"low", "seven", "high"}
     return cats[idx], maxC / total
 end
 
@@ -334,10 +334,12 @@ function addonTable:Predict()
     if accuracy < 0.4 then ffThreshold = 0.55 end
     if accuracy < 0.3 then ffThreshold = 0.5 end
 
+    local categoryMap = {"low", "seven", "high"}
+
     if LSTMNetwork:isFullyInitialized() then
         local cat, conf = LSTMNetwork:predict(input)
         if conf >= lstmThreshold then
-            return cat:sub(1,1):upper() .. cat:sub(2), conf
+            return cat, conf
         end
     end
 
@@ -346,7 +348,7 @@ function addonTable:Predict()
     for i = 2, 3 do
         if out[i] > prob then idx, prob = i, out[i] end
     end
-    local cats = {"Low","7","High"}
+    local cats = categoryMap
 
     local bucket = getBucket(now)
     if prob < ffThreshold
@@ -418,11 +420,11 @@ function addonTable.updateUI()
 
     local accuracyPercentage = accuracy * 100
     local color = {r = 1, g = 1, b = 1}
-    if accuracyPercentage < 38 then
+    if accuracyPercentage < 40 then
         color = {r = 1, g = 0, b = 0}
-    elseif accuracyPercentage >= 39 and accuracyPercentage <= 49 then
+    elseif accuracyPercentage < 50 then
         color = {r = 1, g = 1, b = 0}
-    elseif accuracyPercentage >= 50 then
+    else
         color = {r = 0, g = 1, b = 0}
     end
     recommendationText:SetTextColor(color.r, color.g, color.b)
@@ -1348,26 +1350,12 @@ return table
 end
 -- Save Functionality
 function saveAddonData()
-local serializedStructure = LSTMNetwork:serializeStructure()
-DiceTrackerDB.learningData.lstmNetworkData.serializedStructure = serializedStructure
-DiceTrackerDB.learningData.lstmNetworkData.cellState = LSTMNetwork.cellState
-DiceTrackerDB.learningData.lstmNetworkData.hiddenState = LSTMNetwork.hiddenState
+    local serializedStructure = LSTMNetwork:serializeStructure()
+    DiceTrackerDB.learningData.lstmNetworkData.serializedStructure = serializedStructure
+    DiceTrackerDB.learningData.lstmNetworkData.cellState = LSTMNetwork.cellState
+    DiceTrackerDB.learningData.lstmNetworkData.hiddenState = LSTMNetwork.hiddenState
 
--- Incremental saving
-local dirtyData = {}
-for key, value in pairs(DiceTrackerDB.dirtyFlags) do
-    if value then
-        dirtyData[key] = DiceTrackerDB[key]
-        DiceTrackerDB.dirtyFlags[key] = nil
-    end
-end
-
--- Save the dirty data
-DiceTrackerSavedVariables = DiceTrackerSavedVariables or {}
-for key, value in pairs(dirtyData) do
-    DiceTrackerSavedVariables[key] = value
-end
-
+    DiceTrackerSavedVariables = DiceTrackerDB
 end
 -- Enhanced Neural Network Initialization Check
 function checkAndInitializeLSTMNetwork()
@@ -1434,8 +1422,6 @@ DiceTrackerDB.initialized = true
 end
 -- Train the neural network with the latest observed roll pair
 processRollPair = function(player, roll1, roll2)
-    if not LSTMNetwork:isFullyInitialized() then return end
-
     local now = time()
     if DiceTrackerDB.lastTossTime and (now - DiceTrackerDB.lastTossTime) > 300 then
         LSTMNetwork:resetStates()
@@ -1455,66 +1441,72 @@ processRollPair = function(player, roll1, roll2)
     b.count = (b.count or 0) + 1
     DiceTrackerDB.buckets[bucket] = b
 
-    FFNetwork:train(fv, {cat==1 and 1 or 0, cat==2 and 1 or 0, cat==3 and 1 or 0})
-
     DiceTrackerDB.stats = DiceTrackerDB.stats or {low=0, seven=0, high=0, totalRolls=0, correctPredictions=0, incorrectPredictions=0, accuracy=0}
-    DiceTrackerDB.stats[catName] = (DiceTrackerDB.stats[catName] or 0) + 1
-    DiceTrackerDB.stats.totalRolls = (DiceTrackerDB.stats.totalRolls or 0) + 1
+    local stats = DiceTrackerDB.stats
+    stats[catName] = (stats[catName] or 0) + 1
+    stats.totalRolls = (stats.totalRolls or 0) + 1
 
-    local correct = DiceTrackerDB.stats.lastPrediction == catName
-    if correct then
-        DiceTrackerDB.stats.correctPredictions = (DiceTrackerDB.stats.correctPredictions or 0) + 1
-    else
-        DiceTrackerDB.stats.incorrectPredictions = (DiceTrackerDB.stats.incorrectPredictions or 0) + 1
-    end
-    local c = DiceTrackerDB.stats.correctPredictions or 0
-    local ic = DiceTrackerDB.stats.incorrectPredictions or 0
-    local tp = c + ic
-    DiceTrackerDB.stats.accuracy = tp > 0 and c/tp or 0
-
-    -- record for LSTM: one-hot roll vectors
-    local rollVec = {}
-    for i=1,6 do rollVec[i] = (i==roll1) and 1 or 0 end
-    for i=1,6 do rollVec[6+i] = (i==roll2) and 1 or 0 end
-
-    local win = DiceTrackerDB.learningData.lstmNetworkData.slidingWindow
-    table.insert(win, rollVec)
-    if #win > DiceTrackerDB.learningData.lstmNetworkData.slidingWindowSize then
-        table.remove(win, 1)
+    if stats.lastPrediction then
+        local lastPred = stats.lastPrediction:lower()
+        local correct = (lastPred == catName)
+        if correct then
+            stats.correctPredictions = (stats.correctPredictions or 0) + 1
+        else
+            stats.incorrectPredictions = (stats.incorrectPredictions or 0) + 1
+        end
+        local c = stats.correctPredictions or 0
+        local ic = stats.incorrectPredictions or 0
+        local tp = c + ic
+        stats.accuracy = tp > 0 and c/tp or 0
     end
 
-    local seq    = {rollVec}
-    local target = {cat==1 and 1 or 0, cat==2 and 1 or 0, cat==3 and 1 or 0}
+    if LSTMNetwork:isFullyInitialized() then
+        FFNetwork:train(fv, {cat==1 and 1 or 0, cat==2 and 1 or 0, cat==3 and 1 or 0})
 
-    local function doTrainingPasses()
-        local passes = 3
-        local ticker
-        ticker = C_Timer.NewTicker(0.05, function()
-            if passes > 0 then
-                local ok = pcall(function()
-                    LSTMNetwork:forwardPass(seq)
-                    LSTMNetwork:backwardPass(seq, LSTMNetwork:forwardPass(seq), target)
-                end)
-                if not ok then
-                    print("DiceTracker: LSTM training error (ignored)")
+        -- record for LSTM: one-hot roll vectors
+        local rollVec = {}
+        for i=1,6 do rollVec[i] = (i==roll1) and 1 or 0 end
+        for i=1,6 do rollVec[6+i] = (i==roll2) and 1 or 0 end
+
+        local win = DiceTrackerDB.learningData.lstmNetworkData.slidingWindow
+        table.insert(win, rollVec)
+        if #win > DiceTrackerDB.learningData.lstmNetworkData.slidingWindowSize then
+            table.remove(win, 1)
+        end
+
+        local seq    = {rollVec}
+        local target = {cat==1 and 1 or 0, cat==2 and 1 or 0, cat==3 and 1 or 0}
+
+        local function doTrainingPasses()
+            local passes = 3
+            local ticker
+            ticker = C_Timer.NewTicker(0.05, function()
+                if passes > 0 then
+                    local ok = pcall(function()
+                        LSTMNetwork:forwardPass(seq)
+                        LSTMNetwork:backwardPass(seq, LSTMNetwork:forwardPass(seq), target)
+                    end)
+                    if not ok then
+                        print("DiceTracker: LSTM training error (ignored)")
+                    end
+                    passes = passes - 1
+                else
+                    ticker:Cancel()
                 end
-                passes = passes - 1
-            else
-                ticker:Cancel()
-            end
-        end)
-    end
-    doTrainingPasses()
+            end)
+        end
+        doTrainingPasses()
 
-    table.insert(DiceTrackerDB.learningData.lstmNetworkData.inputs, seq)
-    local hist = DiceTrackerDB.learningData.lstmNetworkData.inputs
-    if #hist > 5000 then
-        for i=1,#hist-5000 do table.remove(hist,1) end
-    end
-    table.insert(DiceTrackerDB.learningData.lstmNetworkData.targets, target)
-    local th = DiceTrackerDB.learningData.lstmNetworkData.targets
-    if #th > 5000 then
-        for i=1,#th-5000 do table.remove(th,1) end
+        table.insert(DiceTrackerDB.learningData.lstmNetworkData.inputs, seq)
+        local hist = DiceTrackerDB.learningData.lstmNetworkData.inputs
+        if #hist > 5000 then
+            for i=1,#hist-5000 do table.remove(hist,1) end
+        end
+        table.insert(DiceTrackerDB.learningData.lstmNetworkData.targets, target)
+        local th = DiceTrackerDB.learningData.lstmNetworkData.targets
+        if #th > 5000 then
+            for i=1,#th-5000 do table.remove(th,1) end
+        end
     end
 
     scheduleSave()
@@ -1523,7 +1515,7 @@ processRollPair = function(player, roll1, roll2)
     DiceTrackerDB.prevCategoryIndex = cat
 
     DiceTrackerDB.stats.lastPrediction, DiceTrackerDB.stats.lastPredictionConfidence = addonTable:Predict()
-    maybeUpdateUI()
+    maybeUpdateUI(true)
 end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
