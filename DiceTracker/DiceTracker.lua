@@ -47,7 +47,9 @@ local floor, max = math.floor, math.max
 
 -- Simple feed-forward neural network for dice prediction
 -- Input size increased to include cyclical time features
-local FFNetwork = {inputSize = 20, hiddenSize = 8, outputSize = 3, eta = 0.01}
+-- Feed-forward network used as a lightweight fall back predictor
+-- Increased hidden size for a bit more capacity
+local FFNetwork = {inputSize = 20, hiddenSize = 16, outputSize = 3, eta = 0.01}
 
 function FFNetwork:initialize()
     self.W1 = self.W1 or {}
@@ -55,27 +57,49 @@ function FFNetwork:initialize()
     self.W2 = self.W2 or {}
     self.b2 = self.b2 or {}
 
+    -- Adam optimizer moment estimates
+    self.mW1, self.vW1 = self.mW1 or {}, self.vW1 or {}
+    self.mW2, self.vW2 = self.mW2 or {}, self.vW2 or {}
+    self.mb1, self.vb1 = self.mb1 or {}, self.vb1 or {}
+    self.mb2, self.vb2 = self.mb2 or {}, self.vb2 or {}
+    self.t = self.t or 0
+
+    local std1 = math.sqrt(2 / (self.inputSize + self.hiddenSize))
+    local std2 = math.sqrt(2 / (self.hiddenSize + self.outputSize))
+
     for i = 1, self.hiddenSize do
         self.W1[i] = self.W1[i] or {}
+        self.mW1[i] = self.mW1[i] or {}
+        self.vW1[i] = self.vW1[i] or {}
         self.b1[i] = self.b1[i] or 0
+        self.mb1[i] = self.mb1[i] or 0
+        self.vb1[i] = self.vb1[i] or 0
         for j = 1, self.inputSize do
             if type(self.W1[i][j]) ~= "number" then
-                self.W1[i][j] = (random() * 2 - 1) * 0.1
+                self.W1[i][j] = normalDistribution(0, std1)
             end
+            self.mW1[i][j] = self.mW1[i][j] or 0
+            self.vW1[i][j] = self.vW1[i][j] or 0
         end
     end
 
     for i = 1, self.hiddenSize do
         self.W2[i] = self.W2[i] or {}
+        self.mW2[i] = self.mW2[i] or {}
+        self.vW2[i] = self.vW2[i] or {}
         for k = 1, self.outputSize do
             if type(self.W2[i][k]) ~= "number" then
-                self.W2[i][k] = (random() * 2 - 1) * 0.1
+                self.W2[i][k] = normalDistribution(0, std2)
             end
+            self.mW2[i][k] = self.mW2[i][k] or 0
+            self.vW2[i][k] = self.vW2[i][k] or 0
         end
     end
 
     for k = 1, self.outputSize do
         self.b2[k] = self.b2[k] or 0
+        self.mb2[k] = self.mb2[k] or 0
+        self.vb2[k] = self.vb2[k] or 0
     end
 end
 
@@ -119,14 +143,37 @@ function FFNetwork:train(input, target)
         deltaOut[k] = (out[k] - target[k])
     end
 
+    local beta1, beta2 = 0.9, 0.999
+    local eps = 1e-8
+    self.t = self.t + 1
+
+    local maxDelta = 0
+
+    -- Update W2 and b2 using Adam
     for i = 1, self.hiddenSize do
         for k = 1, self.outputSize do
             local grad = deltaOut[k] * hidden[i]
-            self.W2[i][k] = self.W2[i][k] - self.eta * grad
+            self.mW2[i][k] = beta1 * self.mW2[i][k] + (1 - beta1) * grad
+            self.vW2[i][k] = beta2 * self.vW2[i][k] + (1 - beta2) * grad * grad
+            local mHat = self.mW2[i][k] / (1 - math.pow(beta1, self.t))
+            local vHat = self.vW2[i][k] / (1 - math.pow(beta2, self.t))
+            local update = self.eta * mHat / (math.sqrt(vHat) + eps)
+            local old = self.W2[i][k]
+            self.W2[i][k] = old - update
+            local diff = math.abs(update)
+            if diff > maxDelta then maxDelta = diff end
         end
     end
     for k = 1, self.outputSize do
-        self.b2[k] = self.b2[k] - self.eta * deltaOut[k]
+        self.mb2[k] = beta1 * self.mb2[k] + (1 - beta1) * deltaOut[k]
+        self.vb2[k] = beta2 * self.vb2[k] + (1 - beta2) * deltaOut[k] * deltaOut[k]
+        local mHat = self.mb2[k] / (1 - math.pow(beta1, self.t))
+        local vHat = self.vb2[k] / (1 - math.pow(beta2, self.t))
+        local update = self.eta * mHat / (math.sqrt(vHat) + eps)
+        local old = self.b2[k]
+        self.b2[k] = old - update
+        local diff = math.abs(update)
+        if diff > maxDelta then maxDelta = diff end
     end
 
     local deltaHidden = {}
@@ -138,24 +185,43 @@ function FFNetwork:train(input, target)
         deltaHidden[i] = sum * hidden[i] * (1 - hidden[i])
     end
 
+    -- Update W1 and b1 using Adam
     for i = 1, self.hiddenSize do
         for j = 1, self.inputSize do
             local grad = deltaHidden[i] * (input[j] or 0)
-            self.W1[i][j] = self.W1[i][j] - self.eta * grad
+            self.mW1[i][j] = beta1 * self.mW1[i][j] + (1 - beta1) * grad
+            self.vW1[i][j] = beta2 * self.vW1[i][j] + (1 - beta2) * grad * grad
+            local mHat = self.mW1[i][j] / (1 - math.pow(beta1, self.t))
+            local vHat = self.vW1[i][j] / (1 - math.pow(beta2, self.t))
+            local update = self.eta * mHat / (math.sqrt(vHat) + eps)
+            local old = self.W1[i][j]
+            self.W1[i][j] = old - update
+            local diff = math.abs(update)
+            if diff > maxDelta then maxDelta = diff end
         end
-        self.b1[i] = self.b1[i] - self.eta * deltaHidden[i]
+        self.mb1[i] = beta1 * self.mb1[i] + (1 - beta1) * deltaHidden[i]
+        self.vb1[i] = beta2 * self.vb1[i] + (1 - beta2) * deltaHidden[i] * deltaHidden[i]
+        local mHat = self.mb1[i] / (1 - math.pow(beta1, self.t))
+        local vHat = self.vb1[i] / (1 - math.pow(beta2, self.t))
+        local update = self.eta * mHat / (math.sqrt(vHat) + eps)
+        local old = self.b1[i]
+        self.b1[i] = old - update
+        local diff = math.abs(update)
+        if diff > maxDelta then maxDelta = diff end
     end
 
-    -- Persist updated weights safely
-    local ok = pcall(function()
-        DiceTrackerDB.weights.W1 = self.W1
-        DiceTrackerDB.weights.b1 = self.b1
-        DiceTrackerDB.weights.W2 = self.W2
-        DiceTrackerDB.weights.b2 = self.b2
-    end)
-    if not ok then
-        print("DiceTracker: Error saving weights, resetting database")
-        DiceTrackerDB.weights = {W1={}, b1={}, W2={}, b2={}}
+    -- Persist updated weights only if they changed appreciably
+    if maxDelta > 1e-4 then
+        local ok = pcall(function()
+            DiceTrackerDB.weights.W1 = self.W1
+            DiceTrackerDB.weights.b1 = self.b1
+            DiceTrackerDB.weights.W2 = self.W2
+            DiceTrackerDB.weights.b2 = self.b2
+        end)
+        if not ok then
+            print("DiceTracker: Error saving weights, resetting database")
+            DiceTrackerDB.weights = {W1={}, b1={}, W2={}, b2={}}
+        end
     end
 end
 
@@ -173,7 +239,8 @@ local function frequencyPredict(bucket)
     if not data or (data.count or 0) == 0 then
         return "7", 0
     end
-    local counts = {data.Low or 0, data["7"] or 0, data.High or 0}
+    -- Laplace smoothing to avoid zero probabilities
+    local counts = {(data.Low or 0) + 1, (data["7"] or 0) + 1, (data.High or 0) + 1}
     local total = counts[1] + counts[2] + counts[3]
     local idx, maxC = 1, counts[1]
     if counts[2] > maxC then idx, maxC = 2, counts[2] end
@@ -230,9 +297,15 @@ function addonTable:Predict()
 
     local input = buildFeatureVector(now)
 
+    local lstmThreshold  = 0.5
+    local ffThreshold    = 0.6
+    local accuracy       = DiceTrackerDB.stats and DiceTrackerDB.stats.accuracy or 0
+    if accuracy < 0.4 then ffThreshold = 0.55 end
+    if accuracy < 0.3 then ffThreshold = 0.5 end
+
     if LSTMNetwork:isFullyInitialized() then
         local cat, conf = LSTMNetwork:predict(input)
-        if conf >= 0.5 then
+        if conf >= lstmThreshold then
             return cat:sub(1,1):upper() .. cat:sub(2), conf
         end
     end
@@ -245,7 +318,7 @@ function addonTable:Predict()
     local cats = {"Low","7","High"}
 
     local bucket = getBucket(now)
-    if prob < 0.6
+    if prob < ffThreshold
        or not DiceTrackerDB.buckets[bucket]
        or (DiceTrackerDB.buckets[bucket].count or 0) < 20
     then
@@ -322,6 +395,15 @@ function addonTable.updateUI()
         color = {r = 0, g = 1, b = 0}
     end
     recommendationText:SetTextColor(color.r, color.g, color.b)
+end
+
+-- Throttle UI refreshes to avoid excessive work
+addonTable.uiCounter = 0
+local function maybeUpdateUI(force)
+    addonTable.uiCounter = addonTable.uiCounter + 1
+    if force or addonTable.uiCounter % 2 == 0 then
+        addonTable.updateUI()
+    end
 end
 
 -- Neural Network Utility Functions
@@ -669,52 +751,28 @@ for t = 1, #inputs do
 
     local inputLen  = #xt
     local hiddenLen = #self.hiddenState
-    local ftInput = self:elementWiseMultiply(self.inputWeights.f, xt)
-    local itInput = self:elementWiseMultiply(self.inputWeights.i, xt)
-    local otInput = self:elementWiseMultiply(self.inputWeights.o, xt)
-    local ctInput = self:elementWiseMultiply(self.inputWeights.c, xt)
 
-    local fhWeights = self:elementWiseMultiply(self.hiddenWeights.f, self.hiddenState)
-    local ihWeights = self:elementWiseMultiply(self.hiddenWeights.i, self.hiddenState)
-    local ohWeights = self:elementWiseMultiply(self.hiddenWeights.o, self.hiddenState)
-    local chWeights = self:elementWiseMultiply(self.hiddenWeights.c, self.hiddenState)
+    local ft = sigmoid(
+        self:dotProduct(self.inputWeights.f, xt, inputLen) +
+        self:dotProduct(self.hiddenWeights.f, self.hiddenState, hiddenLen) +
+        self.biasWeights.f
+    )
 
-    local ft, it, ot
-    if ftInput and xt and fhWeights and self.hiddenState then
-        ft = sigmoid(
-            self:dotProduct(ftInput, xt, inputLen) +
-            self:dotProduct(fhWeights, self.hiddenState, hiddenLen) +
-            self.biasWeights.f
-        )
-    else
-        print("Warning: Missing arguments for ft calculation. Setting ft to 0.")
-        ft = 0
-    end
-    if itInput and xt and ihWeights and self.hiddenState then
-        it = sigmoid(
-            self:dotProduct(itInput, xt, inputLen) +
-            self:dotProduct(ihWeights, self.hiddenState, hiddenLen) +
-            self.biasWeights.i
-        )
-    else
-        print("Warning: Missing arguments for it calculation. Setting it to 0.")
-        it = 0
-    end
-    if otInput and xt and ohWeights and self.hiddenState then
-        ot = sigmoid(
-            self:dotProduct(otInput, xt, inputLen) +
-            self:dotProduct(ohWeights, self.hiddenState, hiddenLen) +
-            self.biasWeights.o
-        )
-    else
-        print("Warning: Missing arguments for ot calculation. Setting ot to 0.")
-        ot = 0
-    end
+    local it = sigmoid(
+        self:dotProduct(self.inputWeights.i, xt, inputLen) +
+        self:dotProduct(self.hiddenWeights.i, self.hiddenState, hiddenLen) +
+        self.biasWeights.i
+    )
 
-    -- Compute candidate cell state using full vector dot products to avoid empty tables
-    -- This mirrors the approach used for the forget, input and output gates above
-    local ct_x = self:dotProduct(ctInput, xt, inputLen)
-    local ct_h = self:dotProduct(chWeights, self.hiddenState, hiddenLen)
+    local ot = sigmoid(
+        self:dotProduct(self.inputWeights.o, xt, inputLen) +
+        self:dotProduct(self.hiddenWeights.o, self.hiddenState, hiddenLen) +
+        self.biasWeights.o
+    )
+
+    -- Compute candidate cell state directly from raw weights
+    local ct_x = self:dotProduct(self.inputWeights.c, xt, inputLen)
+    local ct_h = self:dotProduct(self.hiddenWeights.c, self.hiddenState, hiddenLen)
 
     local ct_candidate = {}
     for i = 1, self.hiddenSize do
@@ -827,10 +885,8 @@ for t = #inputs, 1, -1 do
     )
 
     -- compute the candidate cell update exactly once per time step
-    local ctInput = self:elementWiseMultiply(self.inputWeights.c, xt)
-    local chInput = self:elementWiseMultiply(self.hiddenWeights.c, self.hiddenState)
-    local ct_x    = self:dotProduct(ctInput, xt, inputLen)
-    local ct_h    = self:dotProduct(chInput, self.hiddenState, hiddenLen)
+    local ct_x    = self:dotProduct(self.inputWeights.c, xt, inputLen)
+    local ct_h    = self:dotProduct(self.hiddenWeights.c, self.hiddenState, hiddenLen)
     local baseCt  = tanh(ct_x + ct_h + self.biasWeights.c)
 
     local ct_candidate = {}
@@ -1466,7 +1522,7 @@ processRollPair = function(player, roll1, roll2)
     DiceTrackerDB.prevCategoryIndex = cat
 
     DiceTrackerDB.stats.lastPrediction, DiceTrackerDB.stats.lastPredictionConfidence = addonTable:Predict()
-    addonTable.updateUI()
+    maybeUpdateUI()
 end
 
 end
@@ -1517,7 +1573,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
                 tossBuffer.player = nil
                 tossBuffer.rolls  = {}
                 -- immediately refresh the UI
-                addonTable.updateUI()
+                maybeUpdateUI()
             end
         end
         if tossBuffer.player and time() - tossBuffer.time > 10 then
