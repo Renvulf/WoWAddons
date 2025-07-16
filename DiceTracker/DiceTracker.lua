@@ -45,6 +45,36 @@ end
 local exp, log, random = math.exp, math.log, math.random
 local floor, max = math.floor, math.max
 
+-- ─────── Neural Network Utility Functions ───────
+local function sigmoid(x)
+    return 1 / (1 + math.exp(-x))
+end
+
+local function tanh(x)
+    return (math.exp(x) - math.exp(-x)) / (math.exp(x) + math.exp(-x))
+end
+
+local function normalDistribution(mean, stddev)
+    local u1 = math.max(math.random(), 1e-6)
+    local u2 = math.random()
+    local z0 = math.sqrt(-2.0 * math.log(u1)) * math.cos(2.0 * math.pi * u2)
+    return z0 * stddev + mean
+end
+
+local function applyDropout(layerOutputs, dropoutRate)
+    if dropoutRate > 0 then
+        for i = 1, #layerOutputs do
+            if layerOutputs[i] and math.random() < dropoutRate then
+                layerOutputs[i] = 0
+            elseif layerOutputs[i] then
+                layerOutputs[i] = layerOutputs[i] / (1 - dropoutRate)
+            end
+        end
+    end
+    return layerOutputs
+end
+
+
 -- Simple feed-forward neural network for dice prediction
 -- Input size increased to include cyclical time features
 -- Feed-forward network used as a lightweight fall back predictor
@@ -405,36 +435,6 @@ local function maybeUpdateUI(force)
         addonTable.updateUI()
     end
 end
-
--- Neural Network Utility Functions
-local function sigmoid(x)
-    return 1 / (1 + math.exp(-x))
-end
-
-local function tanh(x)
-    return (math.exp(x) - math.exp(-x)) / (math.exp(x) + math.exp(-x))
-end
-
-local function normalDistribution(mean, stddev)
-    local u1 = math.max(math.random(), 1e-6)
-    local u2 = math.random()
-    local z0 = math.sqrt(-2.0 * math.log(u1)) * math.cos(2.0 * math.pi * u2)
-    return z0 * stddev + mean
-end
-
-local function applyDropout(layerOutputs, dropoutRate)
-    if dropoutRate > 0 then
-        for i = 1, #layerOutputs do
-            if layerOutputs[i] and math.random() < dropoutRate then
-                layerOutputs[i] = 0
-            elseif layerOutputs[i] then
-                layerOutputs[i] = layerOutputs[i] / (1 - dropoutRate)
-            end
-        end
-    end
-    return layerOutputs
-end
-
 -- Initialize DiceTrackerDB with default data
 local function initializeDefaultData()
     if not DiceTrackerDB then
