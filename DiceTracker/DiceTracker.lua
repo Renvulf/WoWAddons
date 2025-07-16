@@ -21,6 +21,8 @@ local LSTMNetwork = {
     training = true,
     dropoutRate = 0.2,
     regularizationRate = 0.001,
+    -- clip gradients if their norm becomes too large
+    gradientClip = 5,
     prevAccuracy = 0,
     performanceCheckpoints = {
         bestAccuracy = 0,
@@ -529,7 +531,11 @@ local function migrateDatabase()
     if not DiceTrackerDB.version then
         DiceTrackerDB.version = CURRENT_VERSION
     elseif DiceTrackerDB.version < CURRENT_VERSION then
-        -- Future migration logic goes here
+        -- add new optimizerState if missing
+        DiceTrackerDB.learningData = DiceTrackerDB.learningData or {}
+        DiceTrackerDB.learningData.optimizerState = DiceTrackerDB.learningData.optimizerState or {}
+
+        -- any other new fields can be initialized here
         DiceTrackerDB.version = CURRENT_VERSION
     end
 end
@@ -638,11 +644,11 @@ function LSTMNetwork:initialize()
         end
     end
 
-    -- Initialize output weights and biases using He initialization
+    -- Initialize output weights and biases using Xavier initialization
     for i = 1, self.hiddenSize do
         self.outputWeights[i] = {}
         for j = 1, self.outputSize do
-            self.outputWeights[i][j] = normalDistribution(0, math.sqrt(2 / self.hiddenSize))
+            self.outputWeights[i][j] = normalDistribution(0, math.sqrt(2 / (self.hiddenSize + self.outputSize)))
         end
     end
     for i = 1, self.outputSize do
@@ -1049,14 +1055,50 @@ dWhc[j] = dWhc[j] + regularizationTerm * (self.hiddenWeights.c[flatIndex] or 0)
 end
 end
 for i = 1, self.outputSize do
-for j = 1, self.hiddenSize do
-dWy[i][j] = dWy[i][j] + regularizationTerm * (self.outputWeights[j] and self.outputWeights[j][i] or 0)
-end
-dby[i] = dby[i] + regularizationTerm * self.outputBiases[i]
+    for j = 1, self.hiddenSize do
+        dWy[i][j] = dWy[i][j] + regularizationTerm * (self.outputWeights[j] and self.outputWeights[j][i] or 0)
+    end
+    dby[i] = dby[i] + regularizationTerm * self.outputBiases[i]
 end
 
--- Update weights and biases using the Adam optimization algorithm
-self:updateWeights(dWxi, dWhi, dWxf, dWhf, dWxo, dWho, dWxc, dWhc, dWy, dby, dbi, dbf, dbo, dbc)
+    -- Gradient clipping to stabilize training
+    local function accumulateNorm(t)
+        local s = 0
+        for _,v in pairs(t) do
+            if type(v) == "table" then
+                s = s + accumulateNorm(v)
+            elseif type(v) == "number" then
+                s = s + v * v
+            end
+        end
+        return s
+    end
+    local norm = 0
+    norm = norm + accumulateNorm(dWxi) + accumulateNorm(dWhi) + accumulateNorm(dWxf)
+    norm = norm + accumulateNorm(dWhf) + accumulateNorm(dWxo) + accumulateNorm(dWho)
+    norm = norm + accumulateNorm(dWxc) + accumulateNorm(dWhc) + accumulateNorm(dWy)
+    norm = norm + accumulateNorm(dby)
+    norm = math.sqrt(norm + dbi*dbi + dbf*dbf + dbo*dbo + dbc*dbc)
+    local clip = self.gradientClip or 5
+    if norm > clip then
+        local scale = clip / norm
+        local function scaleTable(t)
+            for k,v in pairs(t) do
+                if type(v) == "table" then
+                    scaleTable(v)
+                elseif type(v) == "number" then
+                    t[k] = v * scale
+                end
+            end
+        end
+        scaleTable(dWxi); scaleTable(dWhi); scaleTable(dWxf); scaleTable(dWhf);
+        scaleTable(dWxo); scaleTable(dWho); scaleTable(dWxc); scaleTable(dWhc);
+        scaleTable(dWy);  scaleTable(dby)
+        dbi = dbi * scale; dbf = dbf * scale; dbo = dbo * scale; dbc = dbc * scale
+    end
+
+    -- Update weights and biases using the Adam optimization algorithm
+    self:updateWeights(dWxi, dWhi, dWxf, dWhf, dWxo, dWho, dWxc, dWhc, dWy, dby, dbi, dbf, dbo, dbc)
 
 end
 function LSTMNetwork:updateWeights(dWxi, dWhi, dWxf, dWhf, dWxo, dWho, dWxc, dWhc, dWy, dby, dbi, dbf, dbo, dbc)
@@ -1415,54 +1457,71 @@ return table
 end
 -- Save Functionality
 function saveAddonData()
+    -- ensure we have a place to stash Adam's moment estimators
+    DiceTrackerDB.learningData = DiceTrackerDB.learningData or {}
+    DiceTrackerDB.learningData.optimizerState = DiceTrackerDB.learningData.optimizerState or {}
+    local opt = DiceTrackerDB.learningData.optimizerState
+
     local serializedStructure = LSTMNetwork:serializeStructure()
     DiceTrackerDB.learningData.lstmNetworkData.serializedStructure = serializedStructure
     DiceTrackerDB.learningData.lstmNetworkData.cellState = LSTMNetwork.cellState
     DiceTrackerDB.learningData.lstmNetworkData.hiddenState = LSTMNetwork.hiddenState
 
-    DiceTrackerDB.learningData.optimizerState.Wxi.m = LSTMNetwork.mWxi
-    DiceTrackerDB.learningData.optimizerState.Wxi.v = LSTMNetwork.vWxi
-    DiceTrackerDB.learningData.optimizerState.Whi.m = LSTMNetwork.mWhi
-    DiceTrackerDB.learningData.optimizerState.Whi.v = LSTMNetwork.vWhi
-    DiceTrackerDB.learningData.optimizerState.Wxf.m = LSTMNetwork.mWxf
-    DiceTrackerDB.learningData.optimizerState.Wxf.v = LSTMNetwork.vWxf
-    DiceTrackerDB.learningData.optimizerState.Whf.m = LSTMNetwork.mWhf
-    DiceTrackerDB.learningData.optimizerState.Whf.v = LSTMNetwork.vWhf
-    DiceTrackerDB.learningData.optimizerState.Wxo.m = LSTMNetwork.mWxo
-    DiceTrackerDB.learningData.optimizerState.Wxo.v = LSTMNetwork.vWxo
-    DiceTrackerDB.learningData.optimizerState.Who.m = LSTMNetwork.mWho
-    DiceTrackerDB.learningData.optimizerState.Who.v = LSTMNetwork.vWho
-    DiceTrackerDB.learningData.optimizerState.Wxc.m = LSTMNetwork.mWxc
-    DiceTrackerDB.learningData.optimizerState.Wxc.v = LSTMNetwork.vWxc
-    DiceTrackerDB.learningData.optimizerState.Whc.m = LSTMNetwork.mWhc
-    DiceTrackerDB.learningData.optimizerState.Whc.v = LSTMNetwork.vWhc
-    DiceTrackerDB.learningData.optimizerState.Wy.m  = LSTMNetwork.mWy
-    DiceTrackerDB.learningData.optimizerState.Wy.v  = LSTMNetwork.vWy
-    DiceTrackerDB.learningData.optimizerState.bi.m  = LSTMNetwork.mbi
-    DiceTrackerDB.learningData.optimizerState.bi.v  = LSTMNetwork.vbi
-    DiceTrackerDB.learningData.optimizerState.bf.m  = LSTMNetwork.mbf
-    DiceTrackerDB.learningData.optimizerState.bf.v  = LSTMNetwork.vbf
-    DiceTrackerDB.learningData.optimizerState.bo.m  = LSTMNetwork.mbo
-    DiceTrackerDB.learningData.optimizerState.bo.v  = LSTMNetwork.vbo
-    DiceTrackerDB.learningData.optimizerState.bc.m  = LSTMNetwork.mbc
-    DiceTrackerDB.learningData.optimizerState.bc.v  = LSTMNetwork.vbc
-    DiceTrackerDB.learningData.optimizerState.by.m  = LSTMNetwork.mby
-    DiceTrackerDB.learningData.optimizerState.by.v  = LSTMNetwork.vby
+    opt.Wxi = opt.Wxi or {}
+    opt.Whi = opt.Whi or {}
+    opt.Wxf = opt.Wxf or {}
+    opt.Whf = opt.Whf or {}
+    opt.Wxo = opt.Wxo or {}
+    opt.Who = opt.Who or {}
+    opt.Wxc = opt.Wxc or {}
+    opt.Whc = opt.Whc or {}
+    opt.Wy  = opt.Wy  or {}
+    opt.bi  = opt.bi  or {}
+    opt.bf  = opt.bf  or {}
+    opt.bo  = opt.bo  or {}
+    opt.bc  = opt.bc  or {}
+    opt.by  = opt.by  or {}
+
+    opt.Wxi.m = LSTMNetwork.mWxi
+    opt.Wxi.v = LSTMNetwork.vWxi
+    opt.Whi.m = LSTMNetwork.mWhi
+    opt.Whi.v = LSTMNetwork.vWhi
+    opt.Wxf.m = LSTMNetwork.mWxf
+    opt.Wxf.v = LSTMNetwork.vWxf
+    opt.Whf.m = LSTMNetwork.mWhf
+    opt.Whf.v = LSTMNetwork.vWhf
+    opt.Wxo.m = LSTMNetwork.mWxo
+    opt.Wxo.v = LSTMNetwork.vWxo
+    opt.Who.m = LSTMNetwork.mWho
+    opt.Who.v = LSTMNetwork.vWho
+    opt.Wxc.m = LSTMNetwork.mWxc
+    opt.Wxc.v = LSTMNetwork.vWxc
+    opt.Whc.m = LSTMNetwork.mWhc
+    opt.Whc.v = LSTMNetwork.vWhc
+    opt.Wy.m  = LSTMNetwork.mWy
+    opt.Wy.v  = LSTMNetwork.vWy
+    opt.bi.m  = LSTMNetwork.mbi
+    opt.bi.v  = LSTMNetwork.vbi
+    opt.bf.m  = LSTMNetwork.mbf
+    opt.bf.v  = LSTMNetwork.vbf
+    opt.bo.m  = LSTMNetwork.mbo
+    opt.bo.v  = LSTMNetwork.vbo
+    opt.bc.m  = LSTMNetwork.mbc
+    opt.bc.v  = LSTMNetwork.vbc
+    opt.by.m  = LSTMNetwork.mby
+    opt.by.v  = LSTMNetwork.vby
 
     DiceTrackerSavedVariables = DiceTrackerDB
 end
 -- Enhanced Neural Network Initialization Check
 function checkAndInitializeLSTMNetwork()
+    -- always prepare defaults
+    LSTMNetwork:initialize()
     if DiceTrackerDB.learningData.lstmNetworkData.serializedStructure then
-        print("Loading saved LSTM Network structure...")
         LSTMNetwork:loadStructure(DiceTrackerDB.learningData.lstmNetworkData.serializedStructure)
-        LSTMNetwork.cellState = DiceTrackerDB.learningData.lstmNetworkData.cellState or {}
-        LSTMNetwork.hiddenState = DiceTrackerDB.learningData.lstmNetworkData.hiddenState or {}
-    else
-        print("Initializing LSTM Network...")
-        LSTMNetwork:initialize()
+        LSTMNetwork.cellState = DiceTrackerDB.learningData.lstmNetworkData.cellState or LSTMNetwork.cellState
+        LSTMNetwork.hiddenState = DiceTrackerDB.learningData.lstmNetworkData.hiddenState or LSTMNetwork.hiddenState
     end
-
     saveAddonData()
 end
 -- Adjusted Addon Initialization and Event Handling
@@ -1479,6 +1538,9 @@ function initializeAddonData()
             DiceTrackerDB[key] = value
         end
     end
+
+    DiceTrackerDB.learningData = DiceTrackerDB.learningData or {}
+    DiceTrackerDB.learningData.optimizerState = DiceTrackerDB.learningData.optimizerState or {}
 
     migrateDatabase()
 
