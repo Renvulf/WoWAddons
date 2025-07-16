@@ -10,6 +10,9 @@ local safeCall
 -- Forward declaration for roll processing helper
 local processRollPair
 
+-- baseline times to keep client and server clocks aligned
+local baseServerTime, baseClientTime
+
 local LSTMNetwork = {
     inputWeights = {},
     hiddenWeights = {},
@@ -288,7 +291,10 @@ local function buildFeatureVector(now, guid)
 
     local delta = DiceTrackerDB.lastTossTime and (now - DiceTrackerDB.lastTossTime) or 60
     if delta < 0 or delta > 3600 then delta = 60 end
-    v[13] = delta / 60
+    local m = DiceTrackerDB.stats and DiceTrackerDB.stats.deltaMean or 60
+    local sd = math.sqrt(DiceTrackerDB.stats and DiceTrackerDB.stats.deltaVar or 1)
+    if sd == 0 then sd = 1 end
+    v[13] = (delta - m) / sd
 
     for i = 1, 3 do
         v[13 + i] = (i == (DiceTrackerDB.prevCategoryIndex or 0)) and 1 or 0
@@ -303,7 +309,11 @@ local function buildFeatureVector(now, guid)
     v[19] = math.sin(2*math.pi*weekTime/secondsInWeek)
     v[20] = math.cos(2*math.pi*weekTime/secondsInWeek)
 
-    local t = GetServerTime() + GetTime()
+    if not baseServerTime then
+        baseServerTime = GetServerTime()
+        baseClientTime = GetTime()
+    end
+    local t = baseServerTime + (GetTime() - baseClientTime)
     v[21] = math.sin(2*math.pi*t/60)
     v[22] = math.cos(2*math.pi*t/60)
 
@@ -456,7 +466,8 @@ end
 local function initializeDefaultData()
     if not DiceTrackerDB then
         DiceTrackerDB = {
-            stats = {low = 0, seven = 0, high = 0, totalRolls = 0, correctPredictions = 0, incorrectPredictions = 0, accuracy = 0},
+            stats = {low = 0, seven = 0, high = 0, totalRolls = 0, correctPredictions = 0, incorrectPredictions = 0, accuracy = 0,
+                     deltaMean = 60, deltaVar = 1, deltaCount = 0},
             learningData = {
                 slidingWindow  = {},
                 performance    = {
@@ -639,8 +650,11 @@ function LSTMNetwork:initialize()
 
     -- Xavier initialization for hidden weights
     for _, gate in ipairs({"f", "i", "o", "c"}) do
-        for i = 1, self.hiddenSize * self.hiddenSize do
-            self.hiddenWeights[gate][i] = normalDistribution(0, math.sqrt(2 / (self.hiddenSize + self.hiddenSize)))
+        for i = 1, self.hiddenSize do
+            self.hiddenWeights[gate][i] = {}
+            for j = 1, self.hiddenSize do
+                self.hiddenWeights[gate][i][j] = normalDistribution(0, math.sqrt(2 / (self.hiddenSize + self.hiddenSize)))
+            end
         end
     end
 
@@ -841,31 +855,22 @@ for t = 1, #inputs do
     local inputLen  = #xt
     local hiddenLen = #self.hiddenState
 
-    local ft = sigmoid(
-        self:dotProduct(self.inputWeights.f, xt, inputLen) +
-        self:dotProduct(self.hiddenWeights.f, self.hiddenState, hiddenLen) +
-        self.biasWeights.f
-    )
+    local f_hidden = self:dotProductMatrix(self.hiddenWeights.f, self.hiddenState)
+    local i_hidden = self:dotProductMatrix(self.hiddenWeights.i, self.hiddenState)
+    local o_hidden = self:dotProductMatrix(self.hiddenWeights.o, self.hiddenState)
+    local c_hidden = self:dotProductMatrix(self.hiddenWeights.c, self.hiddenState)
 
-    local it = sigmoid(
-        self:dotProduct(self.inputWeights.i, xt, inputLen) +
-        self:dotProduct(self.hiddenWeights.i, self.hiddenState, hiddenLen) +
-        self.biasWeights.i
-    )
+    local f_base = self:dotProductVector(self.inputWeights.f, xt) + self.biasWeights.f
+    local i_base = self:dotProductVector(self.inputWeights.i, xt) + self.biasWeights.i
+    local o_base = self:dotProductVector(self.inputWeights.o, xt) + self.biasWeights.o
+    local c_base = self:dotProductVector(self.inputWeights.c, xt) + self.biasWeights.c
 
-    local ot = sigmoid(
-        self:dotProduct(self.inputWeights.o, xt, inputLen) +
-        self:dotProduct(self.hiddenWeights.o, self.hiddenState, hiddenLen) +
-        self.biasWeights.o
-    )
-
-    -- Compute candidate cell state directly from raw weights
-    local ct_x = self:dotProduct(self.inputWeights.c, xt, inputLen)
-    local ct_h = self:dotProduct(self.hiddenWeights.c, self.hiddenState, hiddenLen)
-
-    local ct_candidate = {}
+    local ft, it, ot, ct_candidate = {}, {}, {}, {}
     for i = 1, self.hiddenSize do
-        ct_candidate[i] = tanh(ct_x + ct_h + self.biasWeights.c)
+        ft[i] = sigmoid((f_hidden[i] or 0) + f_base)
+        it[i] = sigmoid((i_hidden[i] or 0) + i_base)
+        ot[i] = sigmoid((o_hidden[i] or 0) + o_base)
+        ct_candidate[i] = tanh((c_hidden[i] or 0) + c_base)
     end
 
     if #self.cellState == 0 then
@@ -958,30 +963,22 @@ for t = #inputs, 1, -1 do
     local inputLen  = #xt
     local hiddenLen = #self.hiddenState
 
-    local ft = sigmoid(
-        self:dotProduct(self.inputWeights.f, xt, inputLen) +
-        self:dotProduct(self.hiddenWeights.f, self.hiddenState, hiddenLen) +
-        self.biasWeights.f
-    )
-    local it = sigmoid(
-        self:dotProduct(self.inputWeights.i, xt, inputLen) +
-        self:dotProduct(self.hiddenWeights.i, self.hiddenState, hiddenLen) +
-        self.biasWeights.i
-    )
-    local ot = sigmoid(
-        self:dotProduct(self.inputWeights.o, xt, inputLen) +
-        self:dotProduct(self.hiddenWeights.o, self.hiddenState, hiddenLen) +
-        self.biasWeights.o
-    )
+    local f_hidden = self:dotProductMatrix(self.hiddenWeights.f, self.hiddenState)
+    local i_hidden = self:dotProductMatrix(self.hiddenWeights.i, self.hiddenState)
+    local o_hidden = self:dotProductMatrix(self.hiddenWeights.o, self.hiddenState)
+    local c_hidden = self:dotProductMatrix(self.hiddenWeights.c, self.hiddenState)
 
-    -- compute the candidate cell update exactly once per time step
-    local ct_x    = self:dotProduct(self.inputWeights.c, xt, inputLen)
-    local ct_h    = self:dotProduct(self.hiddenWeights.c, self.hiddenState, hiddenLen)
-    local baseCt  = tanh(ct_x + ct_h + self.biasWeights.c)
+    local f_base = self:dotProductVector(self.inputWeights.f, xt) + self.biasWeights.f
+    local i_base = self:dotProductVector(self.inputWeights.i, xt) + self.biasWeights.i
+    local o_base = self:dotProductVector(self.inputWeights.o, xt) + self.biasWeights.o
+    local c_base = self:dotProductVector(self.inputWeights.c, xt) + self.biasWeights.c
 
-    local ct_candidate = {}
-    for j = 1, self.hiddenSize do
-        ct_candidate[j] = baseCt
+    local ft, it, ot, ct_candidate = {}, {}, {}, {}
+    for i = 1, self.hiddenSize do
+        ft[i] = sigmoid((f_hidden[i] or 0) + f_base)
+        it[i] = sigmoid((i_hidden[i] or 0) + i_base)
+        ot[i] = sigmoid((o_hidden[i] or 0) + o_base)
+        ct_candidate[i] = tanh((c_hidden[i] or 0) + c_base)
     end
 
     local dy = {}
@@ -1018,7 +1015,7 @@ for t = #inputs, 1, -1 do
         dWho[i] = (dWho[i] or 0) + dot[i] * hiddenStateValue
         dWxo[i] = (dWxo[i] or 0) + dot[i] * xtValue
         dbo = dbo + dot[i]
-        dot[i] = dot[i] * self.hiddenWeights.o[(i - 1) * self.hiddenSize + i]
+        dot[i] = dot[i] * (self.hiddenWeights.o[i] and self.hiddenWeights.o[i][i] or 0)
         dhnext[i] = dhnext[i] + dot[i]
     end
 
@@ -1038,9 +1035,9 @@ for t = #inputs, 1, -1 do
     for i = 1, self.hiddenSize do
         dft[i] = dcellState[i] * (self.cellState[i] or 0)
         dWxf[i] = (dWxf[i] or 0) + dft[i] * (xt[i] or 0)
-        dWhf[i] = (dWhf[i] or 0) + dft[i] * self.hiddenWeights.f[(i - 1) * self.hiddenSize + i]
+        dWhf[i] = (dWhf[i] or 0) + dft[i] * (self.hiddenWeights.f[i] and self.hiddenWeights.f[i][i] or 0)
         dbf = dbf + dft[i]
-        dft[i] = dft[i] * self.hiddenWeights.f[(i - 1) * self.hiddenSize + i]
+        dft[i] = dft[i] * (self.hiddenWeights.f[i] and self.hiddenWeights.f[i][i] or 0)
         dhnext[i] = dhnext[i] + dft[i]
         dcnext[i] = dcellState[i] * (self.inputWeights.f[i] or 0)
     end
@@ -1050,9 +1047,9 @@ for t = #inputs, 1, -1 do
     for i = 1, self.hiddenSize do
         dit[i] = dcellState[i] * ct_candidate[i]
         dWxi[i] = (dWxi[i] or 0) + dit[i] * (xt[i] or 0)
-        dWhi[i] = (dWhi[i] or 0) + dit[i] * self.hiddenWeights.i[(i - 1) * self.hiddenSize + i]
+        dWhi[i] = (dWhi[i] or 0) + dit[i] * (self.hiddenWeights.i[i] and self.hiddenWeights.i[i][i] or 0)
         dbi = dbi + dit[i]
-        dit[i] = dit[i] * self.hiddenWeights.i[(i - 1) * self.hiddenSize + i]
+        dit[i] = dit[i] * (self.hiddenWeights.i[i] and self.hiddenWeights.i[i][i] or 0)
         dhnext[i] = dhnext[i] + dit[i]
         dcnext[i] = dcnext[i] + dcellState[i] * it * (1 - math.pow(ct_candidate[i], 2))
     end
@@ -1062,9 +1059,9 @@ for t = #inputs, 1, -1 do
     for i = 1, self.hiddenSize do
         dct_candidate[i] = dcellState[i] * it * (1 - math.pow(ct_candidate[i], 2))
         dWxc[i] = (dWxc[i] or 0) + dct_candidate[i] * (xt[i] or 0)
-        dWhc[i] = (dWhc[i] or 0) + dct_candidate[i] * self.hiddenWeights.c[(i - 1) * self.hiddenSize + i]
+        dWhc[i] = (dWhc[i] or 0) + dct_candidate[i] * (self.hiddenWeights.c[i] and self.hiddenWeights.c[i][i] or 0)
         dbc = dbc + dct_candidate[i]
-        dct_candidate[i] = dct_candidate[i] * self.hiddenWeights.c[(i - 1) * self.hiddenSize + i]
+        dct_candidate[i] = dct_candidate[i] * (self.hiddenWeights.c[i] and self.hiddenWeights.c[i][i] or 0)
         dhnext[i] = dhnext[i] + dct_candidate[i]
     end
 end
@@ -1082,12 +1079,11 @@ for i = 1, self.inputSize do
 end
 for i = 1, self.hiddenSize do
     for j = 1, self.hiddenSize do
-local flatIndex = (i - 1) * self.hiddenSize + j
-dWhi[j] = dWhi[j] + regularizationTerm * (self.hiddenWeights.i[flatIndex] or 0)
-dWhf[j] = dWhf[j] + regularizationTerm * (self.hiddenWeights.f[flatIndex] or 0)
-dWho[j] = dWho[j] + regularizationTerm * (self.hiddenWeights.o[flatIndex] or 0)
-dWhc[j] = dWhc[j] + regularizationTerm * (self.hiddenWeights.c[flatIndex] or 0)
-end
+        dWhi[j] = dWhi[j] + regularizationTerm * ((self.hiddenWeights.i[i] and self.hiddenWeights.i[i][j]) or 0)
+        dWhf[j] = dWhf[j] + regularizationTerm * ((self.hiddenWeights.f[i] and self.hiddenWeights.f[i][j]) or 0)
+        dWho[j] = dWho[j] + regularizationTerm * ((self.hiddenWeights.o[i] and self.hiddenWeights.o[i][j]) or 0)
+        dWhc[j] = dWhc[j] + regularizationTerm * ((self.hiddenWeights.c[i] and self.hiddenWeights.c[i][j]) or 0)
+    end
 end
 for i = 1, self.outputSize do
     for j = 1, self.hiddenSize do
@@ -1254,7 +1250,7 @@ for i = 1, self.hiddenSize do
         self.vWhi[flatIndex] = beta2 * (self.vWhi[flatIndex] or 0) + (1 - beta2) * math.pow((dWhi[j] or 0), 2)
         local mWhiHat = self.mWhi[flatIndex] / (1 - math.pow(beta1, self.epoch + 1))
         local vWhiHat = self.vWhi[flatIndex] / (1 - math.pow(beta2, self.epoch + 1))
-        self.hiddenWeights.i[flatIndex] = (self.hiddenWeights.i[flatIndex] or 0) -
+        self.hiddenWeights.i[i][j] = (self.hiddenWeights.i[i][j] or 0) -
             self.learningRate * mWhiHat / (math.sqrt(vWhiHat) + epsilon)
 
         -- Forget gate weights
@@ -1262,7 +1258,7 @@ for i = 1, self.hiddenSize do
         self.vWhf[flatIndex] = beta2 * (self.vWhf[flatIndex] or 0) + (1 - beta2) * math.pow((dWhf[j] or 0), 2)
         local mWhfHat = self.mWhf[flatIndex] / (1 - math.pow(beta1, self.epoch + 1))
         local vWhfHat = self.vWhf[flatIndex] / (1 - math.pow(beta2, self.epoch + 1))
-        self.hiddenWeights.f[flatIndex] = (self.hiddenWeights.f[flatIndex] or 0) -
+        self.hiddenWeights.f[i][j] = (self.hiddenWeights.f[i][j] or 0) -
             self.learningRate * mWhfHat / (math.sqrt(vWhfHat) + epsilon)
 
         -- Output gate weights
@@ -1270,7 +1266,7 @@ for i = 1, self.hiddenSize do
         self.vWho[flatIndex] = beta2 * (self.vWho[flatIndex] or 0) + (1 - beta2) * math.pow((dWho[j] or 0), 2)
         local mWhoHat = self.mWho[flatIndex] / (1 - math.pow(beta1, self.epoch + 1))
         local vWhoHat = self.vWho[flatIndex] / (1 - math.pow(beta2, self.epoch + 1))
-        self.hiddenWeights.o[flatIndex] = (self.hiddenWeights.o[flatIndex] or 0) -
+        self.hiddenWeights.o[i][j] = (self.hiddenWeights.o[i][j] or 0) -
             self.learningRate * mWhoHat / (math.sqrt(vWhoHat) + epsilon)
 
         -- Candidate cell state weights
@@ -1278,7 +1274,7 @@ for i = 1, self.hiddenSize do
         self.vWhc[flatIndex] = beta2 * (self.vWhc[flatIndex] or 0) + (1 - beta2) * math.pow((dWhc[j] or 0), 2)
         local mWhcHat = self.mWhc[flatIndex] / (1 - math.pow(beta1, self.epoch + 1))
         local vWhcHat = self.vWhc[flatIndex] / (1 - math.pow(beta2, self.epoch + 1))
-        self.hiddenWeights.c[flatIndex] = (self.hiddenWeights.c[flatIndex] or 0) -
+        self.hiddenWeights.c[i][j] = (self.hiddenWeights.c[i][j] or 0) -
             self.learningRate * mWhcHat / (math.sqrt(vWhcHat) + epsilon)
     end
 end
@@ -1611,18 +1607,13 @@ DiceTrackerDB.initialized = true
 
     if not addonTable.retrainTicker then
         addonTable.retrainTicker = C_Timer.NewTicker(600, function()
-            local function sample(tbl, n)
+            local function prioritizedSample(buf, n)
+                table.sort(buf, function(a,b) return (a.priority or 0) > (b.priority or 0) end)
                 local res = {}
-                for i=1,n do
-                    if #tbl==0 then break end
-                    local idx = math.random(1, #tbl)
-                    table.insert(res, tbl[idx])
-                end
+                for i=1,math.min(n,#buf) do res[i] = buf[i] end
                 return res
             end
-            local batch = sample(DiceTrackerDB.learningData.slidingWindow, 32)
-            local replay = sample(DiceTrackerDB.learningData.replayBuffer, 32)
-            for _,v in ipairs(replay) do table.insert(batch, v) end
+            local batch = prioritizedSample(DiceTrackerDB.learningData.replayBuffer, 128)
             if #batch > 0 and LSTMNetwork.batchTrain then
                 LSTMNetwork:batchTrain(batch)
             end
@@ -1637,6 +1628,19 @@ processRollPair = function(player, roll1, roll2)
     DiceTrackerDB.lastPlayerGUID = guid
     if DiceTrackerDB.lastTossTime and (now - DiceTrackerDB.lastTossTime) > 300 then
         LSTMNetwork:resetStates()
+    end
+
+    local delta = DiceTrackerDB.lastTossTime and (now - DiceTrackerDB.lastTossTime) or 60
+    if delta < 0 or delta > 3600 then delta = 60 end
+    local st = DiceTrackerDB.stats
+    if st then
+        st.deltaCount = (st.deltaCount or 0) + 1
+        local count = st.deltaCount
+        local mean = st.deltaMean or 0
+        local newMean = mean + (delta - mean) / count
+        local var = st.deltaVar or 1
+        st.deltaVar = ((count - 1) * var + (delta - mean) * (delta - newMean)) / count
+        st.deltaMean = newMean
     end
 
     local fv = buildFeatureVector(now, guid)
@@ -1729,7 +1733,7 @@ processRollPair = function(player, roll1, roll2)
         local prob = DiceTrackerDB.stats.lastPredictionConfidence or 0
         if math.abs(prob - 0.5) < 0.1 then
             local rb = DiceTrackerDB.learningData.replayBuffer
-            table.insert(rb, {inputs=fv, cat=cat})
+            table.insert(rb, {inputs=fv, cat=cat, priority = 1 - math.abs(prob - 0.5)})
             if #rb > 1000 then table.remove(rb,1) end
         end
 
@@ -1800,6 +1804,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
         local addonName = ...
         if addonName == "DiceTracker" then
+            baseServerTime = GetServerTime()
+            baseClientTime = GetTime()
             initializeAddonData()
             FFNetwork:initialize()
             checkAndInitializeLSTMNetwork()
@@ -1886,14 +1892,31 @@ function LSTMNetwork:batchTrain(batch)
 end
 
 -- Robust dot product that gracefully handles non-numeric values
-function LSTMNetwork:dotProduct(a, b, size)
+function LSTMNetwork:dotProductVector(aVec, bVec)
+    if #aVec ~= #bVec then
+        error("dotProductVector size mismatch")
+    end
     local sum = 0
-    for i = 1, size do
-        local ai = tonumber(type(a) == "table" and a[i] or a) or 0
-        local bi = tonumber(type(b) == "table" and b[i] or b) or 0
+    for i = 1, #aVec do
+        local ai = tonumber(aVec[i]) or 0
+        local bi = tonumber(bVec[i]) or 0
         sum = sum + ai * bi
     end
     return sum
+end
+
+function LSTMNetwork:dotProductMatrix(mat, vec)
+    if #mat == 0 or #mat[1] ~= #vec then
+        error("dotProductMatrix shape mismatch")
+    end
+    local out = {}
+    for i = 1, #mat do
+        out[i] = 0
+        for j = 1, #vec do
+            out[i] = out[i] + (tonumber(mat[i][j]) or 0) * (tonumber(vec[j]) or 0)
+        end
+    end
+    return out
 end
 
 function elementWiseMultiplyHelper(a, b)
