@@ -309,7 +309,8 @@ local function scheduleSave()
         addonTable.saveTicker = C_Timer.NewTicker(1, function()
             if DiceTrackerDB then
                 DiceTrackerDB.isDirty = false
-                SavedVariables["DiceTrackerDB"] = DiceTrackerDB
+                -- Persist data using the existing saveAddonData helper
+                saveAddonData()
             end
             addonTable.saveTicker:Cancel()
             addonTable.saveTicker = nil
