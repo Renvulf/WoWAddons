@@ -79,7 +79,7 @@ end
 -- Input size increased to include cyclical time features
 -- Feed-forward network used as a lightweight fall back predictor
 -- Increased hidden size for a bit more capacity
-local FFNetwork = {inputSize = 20, hiddenSize = 16, outputSize = 3, eta = 0.01}
+local FFNetwork = {inputSize = 23, hiddenSize = 16, outputSize = 3, eta = 0.01}
 
 function FFNetwork:initialize()
     self.W1 = self.W1 or {}
@@ -279,7 +279,7 @@ local function frequencyPredict(bucket)
     return cats[idx], maxC / total
 end
 
-local function buildFeatureVector(now)
+local function buildFeatureVector(now, guid)
     local bucket = getBucket(now)
     local v = {}
     for i = 1, 12 do v[i] = (i == bucket) and 1 or 0 end
@@ -300,6 +300,18 @@ local function buildFeatureVector(now)
     v[18] = math.cos(2*math.pi*dayTime/secondsInDay)
     v[19] = math.sin(2*math.pi*weekTime/secondsInWeek)
     v[20] = math.cos(2*math.pi*weekTime/secondsInWeek)
+
+    local t = GetServerTime() + GetTime()
+    v[21] = math.sin(2*math.pi*t/60)
+    v[22] = math.cos(2*math.pi*t/60)
+
+    local hash = 0
+    if guid then
+        for i=1,#guid do
+            hash = (hash*31 + guid:byte(i)) % 100
+        end
+    end
+    v[23] = hash / 100
 
     return v
 end
@@ -326,7 +338,7 @@ function addonTable:Predict()
         LSTMNetwork:resetStates()
     end
 
-    local input = buildFeatureVector(now)
+    local input = buildFeatureVector(now, DiceTrackerDB.lastPlayerGUID)
 
     local lstmThreshold  = 0.5
     local ffThreshold    = 0.6
@@ -444,12 +456,21 @@ local function initializeDefaultData()
         DiceTrackerDB = {
             stats = {low = 0, seven = 0, high = 0, totalRolls = 0, correctPredictions = 0, incorrectPredictions = 0, accuracy = 0},
             learningData = {
+                slidingWindow  = {},
+                performance    = {
+                    recentErrors   = {},
+                    windowSize     = 1000,
+                    lastErrorRate  = 1.0,
+                    stagnationCount= 0,
+                },
+                optimizerState = {},
+                replayBuffer   = {},
                 lstmNetworkData = {
                     serializedStructure = nil,
                     inputs = {},
                     targets = {},
                     learningRate = 0.005,
-                    inputSize = 20,
+                    inputSize = 23,
                     hiddenSize = 64,
                     outputSize = 3,
                     trainAfterNOutcomes = 1,
@@ -523,6 +544,10 @@ function LSTMNetwork:initialize()
     if not DiceTrackerDB.learningData then
         DiceTrackerDB.learningData = {}
     end
+    DiceTrackerDB.learningData.slidingWindow  = DiceTrackerDB.learningData.slidingWindow or {}
+    DiceTrackerDB.learningData.performance    = DiceTrackerDB.learningData.performance or {recentErrors={}, windowSize=1000, lastErrorRate=1.0, stagnationCount=0}
+    DiceTrackerDB.learningData.optimizerState = DiceTrackerDB.learningData.optimizerState or {}
+    DiceTrackerDB.learningData.replayBuffer   = DiceTrackerDB.learningData.replayBuffer or {}
 
     -- Check if DiceTrackerDB.learningData.lstmNetworkData exists, and initialize it if necessary
     if not DiceTrackerDB.learningData.lstmNetworkData then
@@ -531,7 +556,7 @@ function LSTMNetwork:initialize()
             inputs = {},
             targets = {},
             learningRate = 0.005,
-            inputSize = 20,
+            inputSize = 23,
             hiddenSize = 64,
             outputSize = 3,
             trainAfterNOutcomes = 1,
@@ -556,7 +581,7 @@ function LSTMNetwork:initialize()
 
     local nnData = DiceTrackerDB.learningData.lstmNetworkData
     if nnData then
-        self.inputSize = nnData.inputSize or 20
+        self.inputSize = nnData.inputSize or 23
         self.hiddenSize = nnData.hiddenSize or 64
         self.outputSize = nnData.outputSize or 3
         self.learningRate = nnData.learningRate or 0.005
@@ -566,7 +591,7 @@ function LSTMNetwork:initialize()
         self.performanceCheckpoints.maxLayerCount = self.performanceCheckpoints.maxLayerCount or 5
         self.performanceCheckpoints.minLayerCount = self.performanceCheckpoints.minLayerCount or 2
     else
-        self.inputSize = 20
+        self.inputSize = 23
         self.hiddenSize = 64
         self.outputSize = 3
         self.learningRate = 0.005
@@ -668,6 +693,26 @@ function LSTMNetwork:addHiddenLayer()
         self.hiddenWeights[newLayerIndex].c[i] = normalDistribution(0, math.sqrt(2 / (self.hiddenSize + self.hiddenSize)))
     end
     -- Update other relevant parts of the network if necessary
+end
+
+function LSTMNetwork:addHiddenUnit(init)
+    init = init or 0
+    self.hiddenSize = self.hiddenSize + 1
+    self.cellState[self.hiddenSize] = 0
+    self.hiddenState[self.hiddenSize] = 0
+    self.outputWeights[self.hiddenSize] = {}
+    for j=1,self.outputSize do
+        self.outputWeights[self.hiddenSize][j] = init
+    end
+end
+
+function LSTMNetwork:removeHiddenUnit(idx)
+    idx = idx or self.hiddenSize
+    if self.hiddenSize <= 1 then return end
+    table.remove(self.cellState, idx)
+    table.remove(self.hiddenState, idx)
+    table.remove(self.outputWeights, idx)
+    self.hiddenSize = self.hiddenSize - 1
 end
 
 function LSTMNetwork:isReady()
@@ -843,6 +888,7 @@ local dWy, dby = {}, {}
 local dbi, dbf, dbo, dbc = 0, 0, 0, 0
 local dhnext = {}
 local dcnext = {}
+local opt = DiceTrackerDB.learningData.optimizerState
 
 -- Initialize dhnext, dcnext, and gradient tables with default values
 for i = 1, self.hiddenSize do
@@ -1044,38 +1090,41 @@ function LSTMNetwork:updateWeights(dWxi, dWhi, dWxf, dWhf, dWxo, dWho, dWxc, dWh
 
     -- Hyperparameters for Adam optimization
     local beta1 = 0.9
-local beta2 = 0.999
-local epsilon = 1e-8
+    local beta2 = 0.999
+    local epsilon = 1e-8
 
--- Initialize Adam's m and v for each weight and bias
-self.mWxi = self.mWxi or {}
-self.vWxi = self.vWxi or {}
-self.mWhi = self.mWhi or {}
-self.vWhi = self.vWhi or {}
-self.mWxf = self.mWxf or {}
-self.vWxf = self.vWxf or {}
-self.mWhf = self.mWhf or {}
-self.vWhf = self.vWhf or {}
-self.mWxo = self.mWxo or {}
-self.vWxo = self.vWxo or {}
-self.mWho = self.mWho or {}
-self.vWho = self.vWho or {}
-self.mWxc = self.mWxc or {}
-self.vWxc = self.vWxc or {}
-self.mWhc = self.mWhc or {}
-self.vWhc = self.vWhc or {}
-self.mWy = self.mWy or {}
-self.vWy = self.vWy or {}
-self.mbi = self.mbi or 0
-self.vbi = self.vbi or 0
-self.mbf = self.mbf or 0
-self.vbf = self.vbf or 0
-self.mbo = self.mbo or 0
-self.vbo = self.vbo or 0
-self.mbc = self.mbc or 0
-self.vbc = self.vbc or 0
-self.mby = self.mby or {}
-self.vby = self.vby or {}
+    -- Initialize Adam's m and v for each weight and bias
+    local opt = DiceTrackerDB.learningData.optimizerState
+    opt.Wxi = opt.Wxi or {m={}, v={}, t=0}
+    opt.Whi = opt.Whi or {m={}, v={}, t=0}
+    opt.Wxf = opt.Wxf or {m={}, v={}, t=0}
+    opt.Whf = opt.Whf or {m={}, v={}, t=0}
+    opt.Wxo = opt.Wxo or {m={}, v={}, t=0}
+    opt.Who = opt.Who or {m={}, v={}, t=0}
+    opt.Wxc = opt.Wxc or {m={}, v={}, t=0}
+    opt.Whc = opt.Whc or {m={}, v={}, t=0}
+    opt.Wy  = opt.Wy  or {m={}, v={}, t=0}
+    opt.bi  = opt.bi  or {m=0, v=0, t=0}
+    opt.bf  = opt.bf  or {m=0, v=0, t=0}
+    opt.bo  = opt.bo  or {m=0, v=0, t=0}
+    opt.bc  = opt.bc  or {m=0, v=0, t=0}
+    opt.by  = opt.by  or {m={}, v={}, t=0}
+
+    self.mWxi, self.vWxi = opt.Wxi.m, opt.Wxi.v
+    self.mWhi, self.vWhi = opt.Whi.m, opt.Whi.v
+    self.mWxf, self.vWxf = opt.Wxf.m, opt.Wxf.v
+    self.mWhf, self.vWhf = opt.Whf.m, opt.Whf.v
+    self.mWxo, self.vWxo = opt.Wxo.m, opt.Wxo.v
+    self.vWxo = self.vWxo or {}
+    self.mWho, self.vWho = opt.Who.m, opt.Who.v
+    self.mWxc, self.vWxc = opt.Wxc.m, opt.Wxc.v
+    self.mWhc, self.vWhc = opt.Whc.m, opt.Whc.v
+    self.mWy,  self.vWy  = opt.Wy.m,  opt.Wy.v
+    self.mbi, self.vbi = opt.bi.m, opt.bi.v
+    self.mbf, self.vbf = opt.bf.m, opt.bf.v
+    self.mbo, self.vbo = opt.bo.m, opt.bo.v
+    self.mbc, self.vbc = opt.bc.m, opt.bc.v
+    self.mby, self.vby = opt.by.m, opt.by.v
 
 -- Update weights and biases
 for i = 1, self.inputSize do
@@ -1195,6 +1244,22 @@ self.vbc = beta2 * self.vbc + (1 - beta2) * math.pow(dbc, 2)
 local mbcHat = self.mbc / (1 - math.pow(beta1, self.epoch + 1))
 local vbcHat = self.vbc / (1 - math.pow(beta2, self.epoch + 1))
 self.biasWeights.c = self.biasWeights.c - self.learningRate * mbcHat / (math.sqrt(vbcHat) + epsilon)
+
+    -- Persist optimizer timestep
+    opt.Wxi.t = (opt.Wxi.t or 0) + 1
+    opt.Whi.t = (opt.Whi.t or 0) + 1
+    opt.Wxf.t = (opt.Wxf.t or 0) + 1
+    opt.Whf.t = (opt.Whf.t or 0) + 1
+    opt.Wxo.t = (opt.Wxo.t or 0) + 1
+    opt.Who.t = (opt.Who.t or 0) + 1
+    opt.Wxc.t = (opt.Wxc.t or 0) + 1
+    opt.Whc.t = (opt.Whc.t or 0) + 1
+    opt.Wy.t  = (opt.Wy.t or 0)  + 1
+    opt.bi.t  = (opt.bi.t or 0)  + 1
+    opt.bf.t  = (opt.bf.t or 0)  + 1
+    opt.bo.t  = (opt.bo.t or 0)  + 1
+    opt.bc.t  = (opt.bc.t or 0)  + 1
+    opt.by.t  = (opt.by.t or 0)  + 1
 end
 function LSTMNetwork:evaluatePerformance()
 local currentAccuracy = self:getPerformanceMetric()
@@ -1325,7 +1390,7 @@ self.initialized = true
 -- Ensure hyperparameters are properly initialized
 local nnData = DiceTrackerDB.learningData.lstmNetworkData
 if nnData then
-    self.inputSize = nnData.inputSize or 20
+    self.inputSize = nnData.inputSize or 23
     self.hiddenSize = nnData.hiddenSize or 64
     self.outputSize = nnData.outputSize or 3
     self.learningRate = nnData.learningRate or 0.005
@@ -1354,6 +1419,35 @@ function saveAddonData()
     DiceTrackerDB.learningData.lstmNetworkData.serializedStructure = serializedStructure
     DiceTrackerDB.learningData.lstmNetworkData.cellState = LSTMNetwork.cellState
     DiceTrackerDB.learningData.lstmNetworkData.hiddenState = LSTMNetwork.hiddenState
+
+    DiceTrackerDB.learningData.optimizerState.Wxi.m = LSTMNetwork.mWxi
+    DiceTrackerDB.learningData.optimizerState.Wxi.v = LSTMNetwork.vWxi
+    DiceTrackerDB.learningData.optimizerState.Whi.m = LSTMNetwork.mWhi
+    DiceTrackerDB.learningData.optimizerState.Whi.v = LSTMNetwork.vWhi
+    DiceTrackerDB.learningData.optimizerState.Wxf.m = LSTMNetwork.mWxf
+    DiceTrackerDB.learningData.optimizerState.Wxf.v = LSTMNetwork.vWxf
+    DiceTrackerDB.learningData.optimizerState.Whf.m = LSTMNetwork.mWhf
+    DiceTrackerDB.learningData.optimizerState.Whf.v = LSTMNetwork.vWhf
+    DiceTrackerDB.learningData.optimizerState.Wxo.m = LSTMNetwork.mWxo
+    DiceTrackerDB.learningData.optimizerState.Wxo.v = LSTMNetwork.vWxo
+    DiceTrackerDB.learningData.optimizerState.Who.m = LSTMNetwork.mWho
+    DiceTrackerDB.learningData.optimizerState.Who.v = LSTMNetwork.vWho
+    DiceTrackerDB.learningData.optimizerState.Wxc.m = LSTMNetwork.mWxc
+    DiceTrackerDB.learningData.optimizerState.Wxc.v = LSTMNetwork.vWxc
+    DiceTrackerDB.learningData.optimizerState.Whc.m = LSTMNetwork.mWhc
+    DiceTrackerDB.learningData.optimizerState.Whc.v = LSTMNetwork.vWhc
+    DiceTrackerDB.learningData.optimizerState.Wy.m  = LSTMNetwork.mWy
+    DiceTrackerDB.learningData.optimizerState.Wy.v  = LSTMNetwork.vWy
+    DiceTrackerDB.learningData.optimizerState.bi.m  = LSTMNetwork.mbi
+    DiceTrackerDB.learningData.optimizerState.bi.v  = LSTMNetwork.vbi
+    DiceTrackerDB.learningData.optimizerState.bf.m  = LSTMNetwork.mbf
+    DiceTrackerDB.learningData.optimizerState.bf.v  = LSTMNetwork.vbf
+    DiceTrackerDB.learningData.optimizerState.bo.m  = LSTMNetwork.mbo
+    DiceTrackerDB.learningData.optimizerState.bo.v  = LSTMNetwork.vbo
+    DiceTrackerDB.learningData.optimizerState.bc.m  = LSTMNetwork.mbc
+    DiceTrackerDB.learningData.optimizerState.bc.v  = LSTMNetwork.vbc
+    DiceTrackerDB.learningData.optimizerState.by.m  = LSTMNetwork.mby
+    DiceTrackerDB.learningData.optimizerState.by.v  = LSTMNetwork.vby
 
     DiceTrackerSavedVariables = DiceTrackerDB
 end
@@ -1419,15 +1513,37 @@ addonTable.updateUI()
 
 DiceTrackerDB.initialized = true
 
+    if not addonTable.retrainTicker then
+        addonTable.retrainTicker = C_Timer.NewTicker(600, function()
+            local function sample(tbl, n)
+                local res = {}
+                for i=1,n do
+                    if #tbl==0 then break end
+                    local idx = math.random(1, #tbl)
+                    table.insert(res, tbl[idx])
+                end
+                return res
+            end
+            local batch = sample(DiceTrackerDB.learningData.slidingWindow, 32)
+            local replay = sample(DiceTrackerDB.learningData.replayBuffer, 32)
+            for _,v in ipairs(replay) do table.insert(batch, v) end
+            if #batch > 0 and LSTMNetwork.batchTrain then
+                LSTMNetwork:batchTrain(batch)
+            end
+        end)
+    end
+
 end
 -- Train the neural network with the latest observed roll pair
 processRollPair = function(player, roll1, roll2)
     local now = time()
+    local guid = UnitGUID(player)
+    DiceTrackerDB.lastPlayerGUID = guid
     if DiceTrackerDB.lastTossTime and (now - DiceTrackerDB.lastTossTime) > 300 then
         LSTMNetwork:resetStates()
     end
 
-    local fv = buildFeatureVector(now)
+    local fv = buildFeatureVector(now, guid)
 
     -- update bucket statistics, FF training, stats update...
     local bucket = getBucket(now)
@@ -1458,10 +1574,68 @@ processRollPair = function(player, roll1, roll2)
         local ic = stats.incorrectPredictions or 0
         local tp = c + ic
         stats.accuracy = tp > 0 and c/tp or 0
+
+        -- track prediction performance
+        local perf = DiceTrackerDB.learningData.performance
+        local err = correct and 0 or 1
+        table.insert(perf.recentErrors, err)
+        if #perf.recentErrors > 2000 then table.remove(perf.recentErrors, 1) end
+
+        local win = DiceTrackerDB.learningData.slidingWindow
+        table.insert(win, { rolls = {roll1, roll2}, cat = cat, timestamp = GetTime(), guid = guid })
+        if #win > perf.windowSize then table.remove(win, 1) end
+
+        perf.tossCount = (perf.tossCount or 0) + 1
+        if perf.tossCount % 100 == 0 then
+            local sum = 0
+            for i = #perf.recentErrors-99, #perf.recentErrors do
+                sum = sum + (perf.recentErrors[i] or 0)
+            end
+            local errRate = sum / 100
+            if errRate + 1e-4 < perf.lastErrorRate then
+                perf.windowSize = math.min(perf.windowSize * 1.1, 1e6)
+                perf.stagnationCount = 0
+            else
+                perf.windowSize = math.max(perf.windowSize * 0.9, 500)
+                perf.stagnationCount = (perf.stagnationCount or 0) + 1
+            end
+            perf.lastErrorRate = errRate
+            while #DiceTrackerDB.learningData.slidingWindow > perf.windowSize do
+                table.remove(DiceTrackerDB.learningData.slidingWindow, 1)
+            end
+
+            if perf.tossCount % 500 == 0 and perf.stagnationCount > 3 then
+                LSTMNetwork.dropoutRate = math.max(LSTMNetwork.dropoutRate * 0.9, 0.05)
+                LSTMNetwork.learningRate = LSTMNetwork.learningRate * 0.9
+                if errRate > 0.6 then
+                    if LSTMNetwork.addHiddenUnit then LSTMNetwork:addHiddenUnit() end
+                elseif errRate < 0.2 then
+                    if LSTMNetwork.removeHiddenUnit then LSTMNetwork:removeHiddenUnit() end
+                end
+                local pruneThreshold = 0.001
+                for i,wOut in ipairs(LSTMNetwork.outputWeights) do
+                    local norm = 0
+                    for j=1,#wOut do
+                        norm = norm + (wOut[j] or 0)^2
+                    end
+                    if norm < pruneThreshold then
+                        LSTMNetwork:removeHiddenUnit(i)
+                    end
+                end
+                perf.stagnationCount = 0
+            end
+        end
     end
 
     if LSTMNetwork:isFullyInitialized() then
         FFNetwork:train(fv, {cat==1 and 1 or 0, cat==2 and 1 or 0, cat==3 and 1 or 0})
+
+        local prob = DiceTrackerDB.stats.lastPredictionConfidence or 0
+        if math.abs(prob - 0.5) < 0.1 then
+            local rb = DiceTrackerDB.learningData.replayBuffer
+            table.insert(rb, {inputs=fv, cat=cat})
+            if #rb > 1000 then table.remove(rb,1) end
+        end
 
         -- record for LSTM: one-hot roll vectors
         local rollVec = {}
@@ -1592,6 +1766,19 @@ end
 DiceTrackerDB.learningData.lstmNetworkData.inputs = {}
 DiceTrackerDB.learningData.lstmNetworkData.targets = {}
 
+end
+
+function LSTMNetwork:batchTrain(batch)
+    for _,ex in ipairs(batch) do
+        local rollVec = {}
+        for i=1,6 do rollVec[i] = (i==ex.rolls[1]) and 1 or 0 end
+        for i=1,6 do rollVec[6+i] = (i==ex.rolls[2]) and 1 or 0 end
+        local seq = {rollVec}
+        local target = {ex.cat==1 and 1 or 0, ex.cat==2 and 1 or 0, ex.cat==3 and 1 or 0}
+        local out = self:forwardPass(seq)
+        self:backwardPass(seq, out, target)
+    end
+    self:postTrainingAdjustments()
 end
 
 -- Robust dot product that gracefully handles non-numeric values
