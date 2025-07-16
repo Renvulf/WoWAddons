@@ -1524,8 +1524,6 @@ processRollPair = function(player, roll1, roll2)
     DiceTrackerDB.stats.lastPrediction, DiceTrackerDB.stats.lastPredictionConfidence = addonTable:Predict()
     maybeUpdateUI()
 end
-
-end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGOUT")
