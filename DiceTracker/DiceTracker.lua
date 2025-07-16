@@ -1595,16 +1595,11 @@ function initializeAddonData()
     if not ok then
         print("DiceTracker: error loading weights", err)
     end
-    FFNetwork:initialize()
 
-    -- Initialize or load the LSTM network structure
-    checkAndInitializeLSTMNetwork()
+    -- Networks will be initialized by the event handler
 
--- Evaluate and adapt the LSTM network
-LSTMNetwork:evaluateAndAdapt()
-
--- Update the UI
-addonTable.updateUI()
+    -- Update the UI
+    addonTable.updateUI()
 
 DiceTrackerDB.initialized = true
 
@@ -1800,12 +1795,18 @@ frame:SetScript("OnEvent", function(self, event, ...)
         local addonName = ...
         if addonName == "DiceTracker" then
             initializeAddonData()
+            FFNetwork:initialize()
+            checkAndInitializeLSTMNetwork()
+            LSTMNetwork:evaluateAndAdapt()
             print("DiceTracker loaded.")
         end
     elseif event == "PLAYER_LOGOUT" then
         saveAddonData()
     elseif event == "PLAYER_ENTERING_WORLD" then
         initializeAddonData()
+        FFNetwork:initialize()
+        checkAndInitializeLSTMNetwork()
+        LSTMNetwork:evaluateAndAdapt()
     elseif event == "CHAT_MSG_EMOTE" or event == "CHAT_MSG_TEXT_EMOTE" then
         local msg, player = ...
         -- Detect the emote indicating a dice toss from the Worn Troll Dice toy
