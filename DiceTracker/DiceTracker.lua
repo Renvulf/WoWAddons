@@ -541,10 +541,10 @@ local function migrateDatabase()
 end
 
 function LSTMNetwork:initialize()
-    if self.initialized then
-        print("LSTM Network already initialized.")
-        return
-    end
+    -- track whether we are initializing for the first time
+    local already = self.initialized
+    -- mark as initialized so repeated calls do not re-create tables
+    self.initialized = true
 
     -- Check if DiceTrackerDB.learningData exists, and initialize it if necessary
     if not DiceTrackerDB.learningData then
@@ -694,8 +694,10 @@ function LSTMNetwork:initialize()
     self.mbc, self.vbc   = opt.bc.m, opt.bc.v
     self.mby, self.vby   = opt.by.m, opt.by.v
 
-    self.initialized = true
-    print("LSTM Network initialized.")
+    -- only announce initialization the first time
+    if not already then
+        print("LSTM Network initialized.")
+    end
 end
 
 function LSTMNetwork:getNumHiddenLayers()
