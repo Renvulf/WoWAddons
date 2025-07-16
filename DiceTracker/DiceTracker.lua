@@ -46,7 +46,8 @@ local exp, log, random = math.exp, math.log, math.random
 local floor, max = math.floor, math.max
 
 -- Simple feed-forward neural network for dice prediction
-local FFNetwork = {inputSize = 16, hiddenSize = 8, outputSize = 3, eta = 0.01}
+-- Input size increased to include cyclical time features
+local FFNetwork = {inputSize = 20, hiddenSize = 8, outputSize = 3, eta = 0.01}
 
 function FFNetwork:initialize()
     self.W1 = self.W1 or {}
@@ -168,49 +169,57 @@ local function getBucket(t)
 end
 
 local function frequencyPredict(bucket)
-    local ok, cat, prob = safeCall(function()
-        local data = DiceTrackerDB.buckets[bucket]
-        if not data or (data.count or 0) == 0 then
-            return "7", 0
-        end
-        local counts = {data.Low or 0, data["7"] or 0, data.High or 0}
-        local total = counts[1] + counts[2] + counts[3]
-        local idx, maxC = 1, counts[1]
-        if counts[2] > maxC then idx, maxC = 2, counts[2] end
-        if counts[3] > maxC then idx, maxC = 3, counts[3] end
-        local cats = {"Low", "7", "High"}
-        return cats[idx], maxC / total
-    end)
-    return cat or "7", prob or 0
+    local data = DiceTrackerDB.buckets[bucket]
+    if not data or (data.count or 0) == 0 then
+        return "7", 0
+    end
+    local counts = {data.Low or 0, data["7"] or 0, data.High or 0}
+    local total = counts[1] + counts[2] + counts[3]
+    local idx, maxC = 1, counts[1]
+    if counts[2] > maxC then idx, maxC = 2, counts[2] end
+    if counts[3] > maxC then idx, maxC = 3, counts[3] end
+    local cats = {"Low", "7", "High"}
+    return cats[idx], maxC / total
 end
 
 -- Public API to predict the next outcome
 function addonTable:Predict()
     local result
     local confidence
-    safeCall(function()
-        local now = time()
-        local bucket = getBucket(now)
-        local input = {}
-        for i = 1, 12 do input[i] = (i == bucket) and 1 or 0 end
-        local delta = (DiceTrackerDB.lastTossTime and (now - DiceTrackerDB.lastTossTime) or 60)
-        if delta < 0 or delta > 3600 then delta = 60 end
-        input[13] = delta / 60
-        for i = 1, 3 do
-            input[13 + i] = (i == (DiceTrackerDB.prevCategoryIndex or 0)) and 1 or 0
-        end
+    local now = time()
+    if DiceTrackerDB.lastTossTime and now - DiceTrackerDB.lastTossTime > 300 then
+        LSTMNetwork:resetStates()
+    end
+    local bucket = getBucket(now)
+    local input = {}
+    for i = 1, 12 do input[i] = (i == bucket) and 1 or 0 end
+    local delta = (DiceTrackerDB.lastTossTime and (now - DiceTrackerDB.lastTossTime) or 60)
+    if delta < 0 or delta > 3600 then delta = 60 end
+    input[13] = delta / 60
+    for i = 1, 3 do
+        input[13 + i] = (i == (DiceTrackerDB.prevCategoryIndex or 0)) and 1 or 0
+    end
+    -- Cyclical time features (clock of day and day of week)
+    local secondsInDay = 24 * 60 * 60
+    local secondsInWeek = 7 * secondsInDay
+    local dayTime = now % secondsInDay
+    local weekTime = now % secondsInWeek
+    input[17] = math.sin(2 * math.pi * dayTime / secondsInDay)
+    input[18] = math.cos(2 * math.pi * dayTime / secondsInDay)
+    input[19] = math.sin(2 * math.pi * weekTime / secondsInWeek)
+    input[20] = math.cos(2 * math.pi * weekTime / secondsInWeek)
 
-        local _, out = FFNetwork:forward(input)
-        local idx, prob = 1, out[1]
-        for i = 2, 3 do if out[i] > prob then idx, prob = i, out[i] end end
-        local catMap = {"Low", "7", "High"}
-        if prob < 0.6 or not DiceTrackerDB.buckets[bucket] or (DiceTrackerDB.buckets[bucket].count or 0) < 20 then
-            result = (select(1, frequencyPredict(bucket)))
-        else
-            result = catMap[idx]
-        end
+    local _, out = FFNetwork:forward(input)
+    local idx, prob = 1, out[1]
+    for i = 2, 3 do if out[i] > prob then idx, prob = i, out[i] end end
+    local catMap = {"Low", "7", "High"}
+    if prob < 0.6 or not DiceTrackerDB.buckets[bucket] or (DiceTrackerDB.buckets[bucket].count or 0) < 20 then
+        result, confidence = frequencyPredict(bucket)
+    else
+        result = catMap[idx]
         confidence = prob
-    end)
+    end
+
     return result or "7", confidence or 0
 end
 local function initializeUI()
@@ -1252,6 +1261,8 @@ end
 function saveAddonData()
 local serializedStructure = LSTMNetwork:serializeStructure()
 DiceTrackerDB.learningData.lstmNetworkData.serializedStructure = serializedStructure
+DiceTrackerDB.learningData.lstmNetworkData.cellState = LSTMNetwork.cellState
+DiceTrackerDB.learningData.lstmNetworkData.hiddenState = LSTMNetwork.hiddenState
 
 -- Incremental saving
 local dirtyData = {}
@@ -1271,14 +1282,11 @@ end
 end
 -- Enhanced Neural Network Initialization Check
 function checkAndInitializeLSTMNetwork()
-    -- Force re-init if the network was previously initialized
-    if LSTMNetwork.initialized then
-        LSTMNetwork.initialized = false
-    end
-
     if DiceTrackerDB.learningData.lstmNetworkData.serializedStructure then
         print("Loading saved LSTM Network structure...")
         LSTMNetwork:loadStructure(DiceTrackerDB.learningData.lstmNetworkData.serializedStructure)
+        LSTMNetwork.cellState = DiceTrackerDB.learningData.lstmNetworkData.cellState or {}
+        LSTMNetwork.hiddenState = DiceTrackerDB.learningData.lstmNetworkData.hiddenState or {}
     else
         print("Initializing LSTM Network...")
         LSTMNetwork:initialize()
@@ -1312,12 +1320,15 @@ function initializeAddonData()
     DiceTrackerDB.prevCategoryIndex = DiceTrackerDB.prevCategoryIndex or 0
     DiceTrackerDB.lastTossTime = DiceTrackerDB.lastTossTime or 0
 
-    safeCall(function()
+    local ok, err = pcall(function()
         FFNetwork.W1 = DiceTrackerDB.weights.W1
         FFNetwork.b1 = DiceTrackerDB.weights.b1
         FFNetwork.W2 = DiceTrackerDB.weights.W2
         FFNetwork.b2 = DiceTrackerDB.weights.b2
     end)
+    if not ok then
+        print("DiceTracker: error loading weights", err)
+    end
     FFNetwork:initialize()
 
     -- Initialize or load the LSTM network structure
@@ -1351,6 +1362,9 @@ processRollPair = function(player, roll1, roll2)
 
     -- Timestamp and bucket for this toss
     local now    = time()
+    if DiceTrackerDB.lastTossTime and now - DiceTrackerDB.lastTossTime > 300 then
+        LSTMNetwork:resetStates()
+    end
     local bucket = getBucket(now)
 
 -- Convert roll values to one-hot encoded vectors
@@ -1394,6 +1408,14 @@ if #DiceTrackerDB.pendingRolls[player] == 1 then
     for i = 1, 3 do
         inputFF[13 + i] = (i == (DiceTrackerDB.prevCategoryIndex or 0)) and 1 or 0
     end
+    local secondsInDay = 24 * 60 * 60
+    local secondsInWeek = 7 * secondsInDay
+    local dayTime = now % secondsInDay
+    local weekTime = now % secondsInWeek
+    inputFF[17] = math.sin(2 * math.pi * dayTime / secondsInDay)
+    inputFF[18] = math.cos(2 * math.pi * dayTime / secondsInDay)
+    inputFF[19] = math.sin(2 * math.pi * weekTime / secondsInWeek)
+    inputFF[20] = math.cos(2 * math.pi * weekTime / secondsInWeek)
     local target = {
         category == "low"   and 1 or 0,
         category == "seven" and 1 or 0,
@@ -1494,8 +1516,12 @@ local expectedOutputs = {category == "low" and 1 or 0, category == "seven" and 1
         -- Increment the outcome count for training
         DiceTrackerDB.learningData.lstmNetworkData.outcomeCountForTraining = DiceTrackerDB.learningData.lstmNetworkData.outcomeCountForTraining + 1
 
-        -- Train the model after each new outcome
-        LSTMNetwork:retrainModelWithLatestData()
+        if DiceTrackerDB.learningData.lstmNetworkData.outcomeCountForTraining %
+           DiceTrackerDB.learningData.lstmNetworkData.slidingWindowAdjustInterval == 0 then
+            LSTMNetwork:retrainModelWithLatestData()
+            DiceTrackerDB.learningData.lstmNetworkData.cellState = LSTMNetwork.cellState
+            DiceTrackerDB.learningData.lstmNetworkData.hiddenState = LSTMNetwork.hiddenState
+        end
     end
 
     -- Clear the processed roll pair
@@ -1614,84 +1640,28 @@ DiceTrackerDB.learningData.lstmNetworkData.targets = {}
 
 end
 
+-- Robust dot product that gracefully handles non-numeric values
 function LSTMNetwork:dotProduct(a, b, size)
-    -- Sanity check to ensure all values are numeric before multiplication
-    if type(a) == "table" then
-        for i = 1, size do
-            assert(type(a[i]) == "number", "dotProduct: non-number in table a at index " .. i)
-        end
+    local sum = 0
+    for i = 1, size do
+        local ai = tonumber(type(a) == "table" and a[i] or a) or 0
+        local bi = tonumber(type(b) == "table" and b[i] or b) or 0
+        sum = sum + ai * bi
     end
-    if type(b) == "table" then
-        for i = 1, size do
-            assert(type(b[i]) == "number", "dotProduct: non-number in table b at index " .. i)
-        end
-    end
-    -- handle scalar * scalar
-    if type(a) == "number" and type(b) == "number" then
-        return a * b
-    end
-
-    if type(a) == "number" and type(b) == "table" then
-        local result = 0
-        for i = 1, size do
-            if type(b[i]) == "number" then
-                result = result + a * b[i]
-            else
-                error("dotProduct: Invalid value in table b at index " .. i)
-            end
-        end
-        return result
-    elseif type(a) == "table" and type(b) == "number" then
-        local result = 0
-        for i = 1, size do
-            if type(a[i]) == "number" then
-                result = result + a[i] * b
-            else
-                error("dotProduct: Invalid value in table a at index " .. i)
-            end
-        end
-        return result
-    elseif type(a) == "table" and type(b) == "table" then
-        local result = 0
-        for i = 1, size do
-            if type(a[i]) == "number" and type(b[i]) == "number" then
-                result = result + a[i] * b[i]
-            else
-                error("dotProduct: Invalid values in tables a and b at index " .. i)
-            end
-        end
-        return result
-    else
-        error("dotProduct expects two tables, a table and a number, or two numbers")
-    end
+    return sum
 end
 
 function elementWiseMultiplyHelper(a, b)
-local maxLength = math.max(#a, #b)
-
--- Resize the shorter table to match the length of the longer table
-if #a < maxLength then
-    for i = #a + 1, maxLength do
-        a[i] = 0
+    local maxLen = math.max(#a, #b)
+    local result = {}
+    for i = 1, maxLen do
+        local ai = tonumber(a[i]) or 0
+        local bi = tonumber(b[i]) or 0
+        result[i] = ai * bi
     end
-elseif #b < maxLength then
-    for i = #b + 1, maxLength do
-        b[i] = 0
-    end
+    return result
 end
 
-local result = {}
-for i = 1, maxLength do
-    if type(a[i]) == "number" and type(b[i]) == "number" then
-        result[i] = a[i] * b[i]
-    else
-        print("Warning: Skipping non-numeric value in elementWiseMultiply:", a[i], b[i])
-        result[i] = 0
-    end
-end
-return result
-
-end
 function LSTMNetwork:elementWiseMultiply(a, b)
 if type(a) == "number" and type(b) == "table" then
 return elementWiseMultiplyHelper({a}, b)
