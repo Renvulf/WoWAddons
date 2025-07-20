@@ -834,9 +834,53 @@ local function InitializeIncomingControls()
     end
 end
 
+-- ============================================================================
+-- Enforce *all* saved settings immediately
+-- ============================================================================
+local function ApplySavedSettings()
+    -- 1) Combat-text CVars & checkboxes
+    for key, data in pairs(optionCheckboxes) do
+        local enabled = FontMagicPCDB[key]
+        if data.cvar and type(SetCVar)=="function" and GetCVar(data.cvar) then
+            pcall(SetCVar, data.cvar, enabled and "1" or "0")
+        end
+        if data.box then
+            data.box:SetChecked(enabled)
+        end
+    end
+
+    -- 2) Incoming damage / healing
+    if type(COMBAT_TEXT_TYPE_INFO) == "table" then
+        if not FontMagicPCDB.incomingDamage then
+            COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
+            COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
+            COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = nil
+            COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
+        else
+            COMBAT_TEXT_TYPE_INFO.DAMAGE       = originalInfo.DAMAGE
+            COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = originalInfo.DAMAGE_CRIT
+            COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = originalInfo.SPELL_DAMAGE
+            COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = originalInfo.SPELL_DAMAGE_CRIT
+        end
+
+        if not FontMagicPCDB.incomingHealing then
+            COMBAT_TEXT_TYPE_INFO.HEAL      = nil
+            COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
+        else
+            COMBAT_TEXT_TYPE_INFO.HEAL      = originalInfo.HEAL
+            COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = originalInfo.HEAL_CRIT
+        end
+
+        if cbIncDam then cbIncDam:SetChecked(FontMagicPCDB.incomingDamage) end
+        if cbIncHeal then cbIncHeal:SetChecked(FontMagicPCDB.incomingHealing) end
+    end
+end
+
 -- 14) EVENT HANDLER SETUP ---------------------------------------------------
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGOUT")
+-- fire once all CVars and combat text have initialised
+frame:RegisterEvent("PLAYER_LOGIN")
 frame:SetScript("OnEvent", function(self, event, name)
     if event == "ADDON_LOADED" and name == addonName then
         -- store Blizzard's default fonts before applying any custom path so we
@@ -846,15 +890,6 @@ frame:SetScript("OnEvent", function(self, event, name)
         end
         if not blizzDefaultCombatFont and type(COMBAT_TEXT_FONT) == "string" then
             blizzDefaultCombatFont = COMBAT_TEXT_FONT
-        end
-
-        -- apply saved checkbox states in case the frame was
-        -- created before SavedVariables were available
-        if cbIncDam then
-            cbIncDam:SetChecked(FontMagicPCDB.incomingDamage)
-        end
-        if cbIncHeal then
-            cbIncHeal:SetChecked(FontMagicPCDB.incomingHealing)
         end
 
         -- if combat text is already loaded, enforce the saved settings now
@@ -885,9 +920,14 @@ frame:SetScript("OnEvent", function(self, event, name)
                 UIDropDownMenu_SetText(dropdowns[g], f:gsub("%.otf$",""):gsub("%.ttf$",""))
             end
         end
+        ApplySavedSettings()  -- ensure nothing slips through
     elseif event == "ADDON_LOADED" and name == "Blizzard_CombatText" then
         -- combat text addon has loaded after FontMagic; initialise controls now
         InitializeIncomingControls()
+        ApplySavedSettings()
+    elseif event == "PLAYER_LOGIN" then
+        -- all other addons loaded, CVars available
+        ApplySavedSettings()
     elseif event == "PLAYER_LOGOUT" then
         -- store the latest checkbox states on logout to ensure persistence
         if cbIncDam then
