@@ -630,8 +630,10 @@ defaultBtn:SetScript("OnClick", function()
     end
     FontMagicPCDB.incomingHealing = true
     if type(COMBAT_TEXT_TYPE_INFO) == "table" then
-        COMBAT_TEXT_TYPE_INFO.HEAL      = originalInfo.HEAL
-        COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = originalInfo.HEAL_CRIT
+        COMBAT_TEXT_TYPE_INFO.HEAL              = originalInfo.HEAL
+        COMBAT_TEXT_TYPE_INFO.HEAL_CRIT         = originalInfo.HEAL_CRIT
+        COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL     = originalInfo.PERIODIC_HEAL
+        COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL_CRIT= originalInfo.PERIODIC_HEAL_CRIT
     end
 
     print("|cFF00FF00[FontMagic]|r Default Font Applied. Please restart WoW to apply.")
@@ -775,6 +777,9 @@ local function InitializeIncomingControls()
         for k, v in pairs(COMBAT_TEXT_TYPE_INFO) do
             originalInfo[k] = v
         end
+        -- capture periodic healing so it can be restored when toggling
+        originalInfo.PERIODIC_HEAL      = COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL
+        originalInfo.PERIODIC_HEAL_CRIT = COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL_CRIT
         if not FontMagicPCDB.incomingDamage then
             COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
             COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
@@ -782,8 +787,10 @@ local function InitializeIncomingControls()
             COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
         end
         if not FontMagicPCDB.incomingHealing then
-            COMBAT_TEXT_TYPE_INFO.HEAL      = nil
-            COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
+            COMBAT_TEXT_TYPE_INFO.HEAL              = nil
+            COMBAT_TEXT_TYPE_INFO.HEAL_CRIT         = nil
+            COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL     = nil
+            COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL_CRIT= nil
         end
     end
 
@@ -821,11 +828,15 @@ local function InitializeIncomingControls()
             FontMagicPCDB.incomingHealing = self:GetChecked()
             if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
             if not self:GetChecked() then
-                COMBAT_TEXT_TYPE_INFO.HEAL      = nil
-                COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
+                COMBAT_TEXT_TYPE_INFO.HEAL              = nil
+                COMBAT_TEXT_TYPE_INFO.HEAL_CRIT         = nil
+                COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL     = nil
+                COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL_CRIT= nil
             else
-                COMBAT_TEXT_TYPE_INFO.HEAL      = originalInfo.HEAL
-                COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = originalInfo.HEAL_CRIT
+                COMBAT_TEXT_TYPE_INFO.HEAL              = originalInfo.HEAL
+                COMBAT_TEXT_TYPE_INFO.HEAL_CRIT         = originalInfo.HEAL_CRIT
+                COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL     = originalInfo.PERIODIC_HEAL
+                COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL_CRIT= originalInfo.PERIODIC_HEAL_CRIT
             end
         end)
         cbIncHeal:ClearAllPoints()
@@ -864,11 +875,15 @@ local function ApplySavedSettings()
         end
 
         if not FontMagicPCDB.incomingHealing then
-            COMBAT_TEXT_TYPE_INFO.HEAL      = nil
-            COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
+            COMBAT_TEXT_TYPE_INFO.HEAL              = nil
+            COMBAT_TEXT_TYPE_INFO.HEAL_CRIT         = nil
+            COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL     = nil
+            COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL_CRIT= nil
         else
-            COMBAT_TEXT_TYPE_INFO.HEAL      = originalInfo.HEAL
-            COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = originalInfo.HEAL_CRIT
+            COMBAT_TEXT_TYPE_INFO.HEAL              = originalInfo.HEAL
+            COMBAT_TEXT_TYPE_INFO.HEAL_CRIT         = originalInfo.HEAL_CRIT
+            COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL     = originalInfo.PERIODIC_HEAL
+            COMBAT_TEXT_TYPE_INFO.PERIODIC_HEAL_CRIT= originalInfo.PERIODIC_HEAL_CRIT
         end
 
         if cbIncDam then cbIncDam:SetChecked(FontMagicPCDB.incomingDamage) end
