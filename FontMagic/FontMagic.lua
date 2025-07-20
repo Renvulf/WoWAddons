@@ -460,6 +460,8 @@ editBox:SetScript("OnTextChanged", function(self) preview:SetText(self:GetText()
 local optionCheckboxes = {}
 -- placeholders for incoming damage/healing checkboxes (Retail only)
 local cbIncDam, cbIncHeal
+-- track whether incoming damage/healing controls have been initialised
+local incomingInit = false
 local opts = {
     {k="combatHealing",  l="Show Combat Healing",  c="floatingCombatTextCombatHealing"},
     {k="combatDamage",   l="Show Combat Damage",   c="floatingCombatTextCombatDamage"},
@@ -744,6 +746,94 @@ minimapButton:SetScript("OnUpdate", function(self)
     PositionMinimapButton(self, self.lastAngle)
 end)
 
+--[[
+    Initialise incoming damage and healing controls.
+
+    When Blizzard_CombatText loads before this addon, COMBAT_TEXT_TYPE_INFO
+    already exists and the user's saved preferences should be enforced
+    immediately.  This helper sets up the checkboxes and applies the stored
+    visibility options on demand.
+--]]
+local function InitializeIncomingControls()
+    if incomingInit then return end
+    if not (IsAddOnLoaded and IsAddOnLoaded("Blizzard_CombatText"))
+       and type(COMBAT_TEXT_TYPE_INFO) ~= "table" then
+        return -- combat text addon not yet available
+    end
+    incomingInit = true
+
+    -- capture Blizzard's default combat text fonts and type info
+    if not blizzDefaultDamageFont and type(DAMAGE_TEXT_FONT) == "string" then
+        blizzDefaultDamageFont = DAMAGE_TEXT_FONT
+    end
+    if not blizzDefaultCombatFont and type(COMBAT_TEXT_FONT) == "string" then
+        blizzDefaultCombatFont = COMBAT_TEXT_FONT
+    end
+
+    originalInfo = {}
+    if type(COMBAT_TEXT_TYPE_INFO) == "table" then
+        for k, v in pairs(COMBAT_TEXT_TYPE_INFO) do
+            originalInfo[k] = v
+        end
+        if not FontMagicPCDB.incomingDamage then
+            COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
+            COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
+            COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = nil
+            COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
+        end
+        if not FontMagicPCDB.incomingHealing then
+            COMBAT_TEXT_TYPE_INFO.HEAL      = nil
+            COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
+        end
+    end
+
+    if InterfaceOptions_AddCategory then
+        InterfaceOptions_AddCategory(frame)
+    end
+
+    local newRow = math.floor(#opts/2)
+    local baseX, baseY = 0, -16 - newRow*30
+
+    if not cbIncDam then
+        cbIncDam = CreateCheckbox(frame, "Show Incoming Damage", 0, 0,
+            FontMagicPCDB.incomingDamage, function(self)
+            FontMagicPCDB.incomingDamage = self:GetChecked()
+            if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
+            if not self:GetChecked() then
+                COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
+                COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
+                COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = nil
+                COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
+            else
+                COMBAT_TEXT_TYPE_INFO.DAMAGE       = originalInfo.DAMAGE
+                COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = originalInfo.DAMAGE_CRIT
+                COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = originalInfo.SPELL_DAMAGE
+                COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = originalInfo.SPELL_DAMAGE_CRIT
+            end
+        end)
+        cbIncDam:ClearAllPoints()
+        cbIncDam:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX, baseY)
+    end
+
+    if not cbIncHeal then
+        cbIncHeal = CreateCheckbox(frame, "Show Incoming Healing", 0, 0,
+            FontMagicPCDB.incomingHealing, function(self)
+            FontMagicPCDB.incomingHealing = self:GetChecked()
+            if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
+            if not self:GetChecked() then
+                COMBAT_TEXT_TYPE_INFO.HEAL      = nil
+                COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
+            else
+                COMBAT_TEXT_TYPE_INFO.HEAL      = originalInfo.HEAL
+                COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = originalInfo.HEAL_CRIT
+            end
+        end)
+        cbIncHeal:ClearAllPoints()
+        cbIncHeal:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT",
+            baseX + CB_COL_W + 16, baseY)
+    end
+end
+
 -- 14) EVENT HANDLER SETUP ---------------------------------------------------
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGOUT")
@@ -765,6 +855,11 @@ frame:SetScript("OnEvent", function(self, event, name)
         end
         if cbIncHeal then
             cbIncHeal:SetChecked(FontMagicPCDB.incomingHealing)
+        end
+
+        -- if combat text is already loaded, enforce the saved settings now
+        if type(COMBAT_TEXT_TYPE_INFO) == "table" then
+            InitializeIncomingControls()
         end
 
         if InterfaceOptions_AddCategory then
@@ -791,80 +886,8 @@ frame:SetScript("OnEvent", function(self, event, name)
             end
         end
     elseif event == "ADDON_LOADED" and name == "Blizzard_CombatText" then
-        -- record Blizzard's default font paths once the combat text addon is
-        -- loaded; this guarantees the globals have been initialised before we
-        -- possibly overwrite them with a custom selection
-        if not blizzDefaultDamageFont and type(DAMAGE_TEXT_FONT) == "string" then
-            blizzDefaultDamageFont = DAMAGE_TEXT_FONT
-        end
-        if not blizzDefaultCombatFont and type(COMBAT_TEXT_FONT) == "string" then
-            blizzDefaultCombatFont = COMBAT_TEXT_FONT
-        end
-
-        -- snapshot Blizzard's default combat text type info now that it's loaded
-        originalInfo = {}
-        if type(COMBAT_TEXT_TYPE_INFO) == "table" then
-            for k, v in pairs(COMBAT_TEXT_TYPE_INFO) do
-                originalInfo[k] = v
-            end
-        end
-
-        -- apply saved incoming damage/heal toggles only after the table exists
-        if not FontMagicPCDB.incomingDamage and type(COMBAT_TEXT_TYPE_INFO) == "table" then
-            COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
-            COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
-            COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = nil
-            COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
-        end
-        if not FontMagicPCDB.incomingHealing and type(COMBAT_TEXT_TYPE_INFO) == "table" then
-            COMBAT_TEXT_TYPE_INFO.HEAL      = nil
-            COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
-        end
-
-        -- only now add the options panel to interface options
-        if InterfaceOptions_AddCategory then
-            InterfaceOptions_AddCategory(frame)
-        end
-
-        -- Retail-only incoming damage/healing checkboxes
-        do
-            local newRow = math.floor(#opts/2)
-            local baseX, baseY = 0, -16 - newRow*30
-
-            cbIncDam = CreateCheckbox(frame, "Show Incoming Damage", 0, 0,
-                FontMagicPCDB.incomingDamage, function(self)
-                FontMagicPCDB.incomingDamage = self:GetChecked()
-                if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
-                if not self:GetChecked() then
-                    COMBAT_TEXT_TYPE_INFO.DAMAGE       = nil
-                    COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = nil
-                    COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = nil
-                    COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = nil
-                else
-                    COMBAT_TEXT_TYPE_INFO.DAMAGE       = originalInfo.DAMAGE
-                    COMBAT_TEXT_TYPE_INFO.DAMAGE_CRIT  = originalInfo.DAMAGE_CRIT
-                    COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE = originalInfo.SPELL_DAMAGE
-                    COMBAT_TEXT_TYPE_INFO.SPELL_DAMAGE_CRIT = originalInfo.SPELL_DAMAGE_CRIT
-                end
-            end)
-            cbIncDam:ClearAllPoints()
-            cbIncDam:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX, baseY)
-
-            cbIncHeal = CreateCheckbox(frame, "Show Incoming Healing", 0, 0,
-                FontMagicPCDB.incomingHealing, function(self)
-                FontMagicPCDB.incomingHealing = self:GetChecked()
-                if type(COMBAT_TEXT_TYPE_INFO) ~= "table" then return end
-                if not self:GetChecked() then
-                    COMBAT_TEXT_TYPE_INFO.HEAL      = nil
-                    COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = nil
-                else
-                    COMBAT_TEXT_TYPE_INFO.HEAL      = originalInfo.HEAL
-                    COMBAT_TEXT_TYPE_INFO.HEAL_CRIT = originalInfo.HEAL_CRIT
-                end
-            end)
-            cbIncHeal:ClearAllPoints()
-            cbIncHeal:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", baseX + CB_COL_W + 16, baseY)
-        end
+        -- combat text addon has loaded after FontMagic; initialise controls now
+        InitializeIncomingControls()
     elseif event == "PLAYER_LOGOUT" then
         -- store the latest checkbox states on logout to ensure persistence
         if cbIncDam then
