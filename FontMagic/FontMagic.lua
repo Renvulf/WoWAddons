@@ -41,13 +41,20 @@ if not FontMagicDB then
     -- (approximately 225 degrees around the minimap).  This avoids the
     -- initial position being hidden beneath default UI elements on a fresh
     -- installation, particularly in WoW Classic.
-    FontMagicDB = { minimapAngle = 225 }
+    FontMagicDB = { minimapAngle = 225, minimapHide = false }
 elseif FontMagicDB.minimapAngle == nil then
     -- In case a previous version created the DB without this key, ensure a
     -- sensible default.
     FontMagicDB.minimapAngle = 225
+    if FontMagicDB.minimapHide == nil then FontMagicDB.minimapHide = false end
+elseif FontMagicDB.minimapHide == nil then
+    -- Ensure the hide flag exists for old DB versions
+    FontMagicDB.minimapHide = false
 end
 FontMagicPCDB = FontMagicPCDB or {}
+
+-- forward declare so slash commands can toggle visibility before creation
+local minimapButton
 
 local PERCHAR_DEFAULTS = {
     combatHealing  = tonumber(GetCVar("floatingCombatTextCombatHealing")) == 1,
@@ -659,7 +666,21 @@ SLASH_FCT1, SLASH_FCT2 = "/FCT", "/fct"
 SLASH_FCT3, SLASH_FCT4 = "/FLOAT", "/float"
 SLASH_FCT5, SLASH_FCT6 = "/FLOATING", "/floating"
 SLASH_FCT7, SLASH_FCT8 = "/FLOATINGTEXT", "/floatingtext"
-SlashCmdList["FCT"] = function()
+SlashCmdList["FCT"] = function(msg)
+    -- normalise message for case-insensitive matching and remove whitespace
+    msg = tostring(msg or ""):match("^%s*(.-)%s*$"):lower()
+
+    if msg == "hide" then
+        if minimapButton then minimapButton:Hide() end
+        FontMagicDB.minimapHide = true
+        print("|cFF00FF00[FontMagic]|r Minimap icon hidden. Use /float show to restore.")
+        return
+    elseif msg == "show" then
+        if minimapButton then minimapButton:Show() end
+        FontMagicDB.minimapHide = false
+        return
+    end
+
     if frame:IsShown() then
         frame:Hide()
         return
@@ -686,7 +707,7 @@ SlashCmdList["FCT"] = function()
 end
 
 -- 13) MINIMAP ICON
-local minimapButton = CreateFrame("Button", addonName .. "MinimapButton", Minimap)
+minimapButton = CreateFrame("Button", addonName .. "MinimapButton", Minimap)
 minimapButton:SetSize(20, 20)
 minimapButton:SetFrameStrata("MEDIUM")
 minimapButton:SetFrameLevel(8)
@@ -732,6 +753,11 @@ minimapButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
 minimapButton.lastAngle = minimapButton.lastAngle or FontMagicDB.minimapAngle
 -- place the button immediately rather than waiting for the first OnUpdate
 PositionMinimapButton(minimapButton, minimapButton.lastAngle)
+
+-- honour saved visibility preference
+if FontMagicDB.minimapHide then
+    minimapButton:Hide()
+end
 
 minimapButton:SetScript("OnUpdate", function(self)
     if self.isMoving then
