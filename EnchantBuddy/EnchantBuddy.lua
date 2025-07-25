@@ -98,8 +98,12 @@ function EnchantBuddy_PreClick(self)
       local itemID = info and info.itemID
       if info and not info.isLocked and itemID and C_Item.IsItemDisenchantableBySpell(itemID, DISENCHANT_SPELL_ID) then
         addon.nextBag = bag
-        addon.nextSlot = slot + 1
-        if addon.nextSlot > slotCount then
+        -- keep scanning the same slot on the next pass because the bag
+        -- compresses after an item is removed. This avoids skipping items
+        -- that shift into the current slot.
+        addon.nextSlot = slot
+        -- move to the next bag once we reach the final slot
+        if addon.nextSlot >= slotCount then
           addon.nextBag = (addon.nextBag + 1) % TOTAL_BAGS
           addon.nextSlot = 1
         end
