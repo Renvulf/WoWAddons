@@ -27,25 +27,28 @@ local function EnsureOptionsLoaded()
 end
 
 -- track scan position
-addon.nextBag, addon.nextSlot = 0, 1
+-- indices correspond to entries in BAG_IDS
+addon.nextBag, addon.nextSlot = 1, 1
 
 -- forward-declared for ADDON_LOADED
 local button
 
--- determine the total number of bag containers dynamically so future bag
--- additions are automatically supported
-local function DetermineTotalBags()
-  local highest = NUM_BAG_SLOTS or 4
-  if Enum and Enum.BagIndex then
-    for _, idx in pairs(Enum.BagIndex) do
-      if type(idx) == "number" and idx > highest then
-        highest = idx
-      end
-    end
+-- Build the list of bag IDs that represent the player's inventory bags.
+-- Only these bags are scanned for disenchantable items.
+local function BuildBagList()
+  local bags = {BACKPACK_CONTAINER}
+  for i = 1, (NUM_BAG_SLOTS or 4) do
+    bags[#bags + 1] = i
   end
-  return highest + 1 -- include the backpack (index 0)
+  if Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag then
+    bags[#bags + 1] = Enum.BagIndex.ReagentBag
+  elseif type(REAGENTBAG_CONTAINER) == "number" then
+    bags[#bags + 1] = REAGENTBAG_CONTAINER
+  end
+  return bags
 end
-local TOTAL_BAGS = DetermineTotalBags()
+local BAG_IDS = BuildBagList()
+local TOTAL_BAGS = #BAG_IDS
 
 -- Apply override-binding to our secure button
 local function ApplyBinding(key)
@@ -98,22 +101,23 @@ function EnchantBuddy_PreClick(self)
 
   -- scan player bags sequentially
   for i = 0, TOTAL_BAGS - 1 do
-    local bag = (addon.nextBag + i) % TOTAL_BAGS
+    local bagIndex = ((addon.nextBag - 1 + i) % TOTAL_BAGS) + 1
+    local bag = BAG_IDS[bagIndex]
     local slotCount = _GetNumSlots(bag)
-    local startSlot = (bag == addon.nextBag) and addon.nextSlot or 1
+    local startSlot = (bagIndex == addon.nextBag) and addon.nextSlot or 1
 
     for slot = startSlot, slotCount do
       local info = _GetInfo(bag, slot)
       local itemID = info and info.itemID
       if info and not info.isLocked and itemID and C_Item.IsItemDisenchantableBySpell(itemID, DISENCHANT_SPELL_ID) then
-        addon.nextBag = bag
+        addon.nextBag = bagIndex
         -- keep scanning the same slot on the next pass because the bag
         -- compresses after an item is removed. This avoids skipping items
         -- that shift into the current slot.
         addon.nextSlot = slot
         -- move to the next bag once we reach the final slot
         if addon.nextSlot >= slotCount then
-          addon.nextBag = (addon.nextBag + 1) % TOTAL_BAGS
+          addon.nextBag = (addon.nextBag % TOTAL_BAGS) + 1
           addon.nextSlot = 1
         end
 
@@ -128,7 +132,7 @@ function EnchantBuddy_PreClick(self)
   end
 
   -- nothing left → reset and notify
-  addon.nextBag, addon.nextSlot = 0, 1
+  addon.nextBag, addon.nextSlot = 1, 1
   self:SetAttribute("macrotext1", "/run print('EnchantBuddy: no disenchantable items.')")
 end
 
