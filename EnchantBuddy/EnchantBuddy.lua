@@ -7,19 +7,16 @@ EnchantBuddyDB = EnchantBuddyDB or {}
 local C_Container = C_Container
 local _GetNumSlots = C_Container.GetContainerNumSlots
 local _GetInfo = C_Container.GetContainerItemInfo
-local _Pickup = C_Container.PickupContainerItem
 local _UnitCasting = UnitCastingInfo
 local _UnitChannel = UnitChannelInfo
 local _CursorHasItem = CursorHasItem
 local _IsSpellKnown = IsSpellKnown
-local _ClearCursor = ClearCursor
 local C_Item = C_Item
 local _GetMacroIndex = GetMacroIndexByName
 local _CreateMacro = CreateMacro
 local _EditMacro = EditMacro
 local _GetMacroInfo = GetMacroInfo
 local _GetNumMacros = GetNumMacros
-local _GetSpellTexture = GetSpellTexture
 
 -- ensure the Blizzard options UI is available without external dependencies
 local function EnsureOptionsLoaded()
@@ -35,11 +32,20 @@ addon.nextBag, addon.nextSlot = 0, 1
 -- forward-declared for ADDON_LOADED
 local button
 
--- determine the highest bag index. On retail this includes the reagent bag
--- which has an index of 5. Fallback to NUM_BAG_SLOTS (4) for older versions.
-local LAST_BAG_INDEX = (Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag) or (NUM_BAG_SLOTS or 4)
--- total number of player bag containers including the backpack (0)
-local TOTAL_BAGS = LAST_BAG_INDEX + 1
+-- determine the total number of bag containers dynamically so future bag
+-- additions are automatically supported
+local function DetermineTotalBags()
+  local highest = NUM_BAG_SLOTS or 4
+  if Enum and Enum.BagIndex then
+    for _, idx in pairs(Enum.BagIndex) do
+      if type(idx) == "number" and idx > highest then
+        highest = idx
+      end
+    end
+  end
+  return highest + 1 -- include the backpack (index 0)
+end
+local TOTAL_BAGS = DetermineTotalBags()
 
 -- Apply override-binding to our secure button
 local function ApplyBinding(key)
@@ -228,7 +234,6 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     -- init saved-vars
     if type(EnchantBuddyDB) ~= "table" then EnchantBuddyDB = {} end
     if type(EnchantBuddyDB.key) ~= "string" then EnchantBuddyDB.key = "" end
-    if EnchantBuddyDB.key == "" then EnchantBuddyDB.key = "0" end
 
     ApplyBinding(EnchantBuddyDB.key)
 
