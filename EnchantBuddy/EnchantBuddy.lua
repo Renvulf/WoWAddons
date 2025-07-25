@@ -67,10 +67,6 @@ end
 local optionsPanel, setKeyButton, captureFrame = nil, nil, CreateFrame("Frame")
 
 local function CreateOptions()
-  -- ensure Blizzard’s Interface Options code is loaded
-  if not InterfaceOptions_AddCategory then
-    LoadAddOn("Blizzard_InterfaceOptions")
-  end
 
   optionsPanel = CreateFrame("Frame", "EnchantBuddyOptions", InterfaceOptionsFramePanelContainer)
   optionsPanel.name = "EnchantBuddy"
@@ -147,8 +143,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     -- only once
     self:UnregisterEvent("ADDON_LOADED")
 
-    -- grab our secure button (XML is now parsed)
-    button = EnchantBuddyButton
+    -- create the secure button used for disenchanting
+    button = CreateFrame("Button", "EnchantBuddyButton", UIParent, "SecureActionButtonTemplate")
+    button:SetSize(1, 1)
+    button:SetAttribute("PreClick", EnchantBuddy_PreClick)
+    button:SetAttribute("type1", "macro")
+    button:SetAttribute("macrotext1", "/run -- placeholder")
+    button:Hide()
 
     -- init saved-vars
     if type(EnchantBuddyDB) ~= "table" then EnchantBuddyDB = {} end
