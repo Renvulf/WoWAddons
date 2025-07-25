@@ -1,4 +1,4 @@
-## Interface: 90205
+## Interface: 100207
 ## Title: EnchantBuddy
 ## Notes: Spam a key to sequentially disenchant items in your inventory.
 ## Author: ChatGPT
