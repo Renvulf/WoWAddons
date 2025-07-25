@@ -1,8 +1,6 @@
-## Interface: 100207
+## Interface: 100105
 ## Title: EnchantBuddy
-## Notes: Spam a key to sequentially disenchant items in your inventory. Use /reload after changing your key.
-## Author: ChatGPT
-## Version: 1.0
+## Notes: Disenchant items sequentially with a single key.
 ## SavedVariables: EnchantBuddyDB
 
 EnchantBuddy.xml
