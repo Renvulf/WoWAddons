@@ -22,8 +22,8 @@ local eventFrame = CreateFrame("Frame")
 -- once the XML is loaded during ADDON_LOADED.
 local button
 
--- Total number of bags (0-11 includes bank bags)
-local TOTAL_BAGS = 12
+-- Only scan the player's bags (0-4)
+local TOTAL_BAGS = 5
 
 -- Helper to apply the key binding using override bindings
 local function ApplyBinding(key)
@@ -54,7 +54,7 @@ function EnchantBuddy_PreClick(self)
     return
   end
 
-  -- Scan the player's bags (and bank when open) for the next valid target.
+  -- Scan the player's bags for the next valid target.
   -- We resume from the last bag/slot found so repeatedly pressing the key
   -- moves sequentially through your inventory without restarting from the first
   -- bag every time.
@@ -92,6 +92,8 @@ function EnchantBuddy_PreClick(self)
   end
 
   -- No more items to disenchant
+  addon.nextBag = 0
+  addon.nextSlot = 1
   self:SetAttribute("macrotext", "/run print('EnchantBuddy: no disenchantable items.')")
 end
 
@@ -145,7 +147,17 @@ local function CreateOptions()
     setKeyButton:SetText("Set Disenchant Key")
   end
 
-  InterfaceOptions_AddCategory(optionsPanel)
+  if InterfaceOptions_AddCategory then
+    InterfaceOptions_AddCategory(optionsPanel)
+  else
+    -- Delay until the InterfaceOptions frame is available
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function()
+      InterfaceOptions_AddCategory(optionsPanel)
+      f:UnregisterEvent("PLAYER_LOGIN")
+    end)
+  end
 end
 
 -- Capture frame used to listen for the next key press
@@ -155,12 +167,13 @@ captureFrame:SetScript("OnKeyDown", function(_, key)
   captureFrame:Hide()
   captureFrame:EnableKeyboard(false)
   if type(key) == "string" and key ~= "" then
-    EnchantBuddyDB.key = key
-    ApplyBinding(key)
+    local sanitizedKey = string.lower(tostring(key))
+    EnchantBuddyDB.key = sanitizedKey
+    ApplyBinding(sanitizedKey)
     if optionsPanel and optionsPanel.refresh then
       optionsPanel.refresh()
     end
-    print("EnchantBuddy: bound to key " .. key)
+    print("EnchantBuddy: bound to key " .. sanitizedKey)
   else
     print("EnchantBuddy: invalid key")
   end
@@ -180,7 +193,10 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
     button = EnchantBuddyButton
 
     -- Initialize saved variable and apply default key if none
-    if type(EnchantBuddyDB.key) ~= "string" or EnchantBuddyDB.key == "" then
+    if type(EnchantBuddyDB.key) ~= "string" then
+      EnchantBuddyDB.key = ""
+    end
+    if EnchantBuddyDB.key == "" then
       EnchantBuddyDB.key = "0" -- default key
     end
 
