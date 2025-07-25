@@ -1,5 +1,6 @@
 local addonName, addon = ...
 local DISENCHANT_SPELL_ID = 13262
+local DISENCHANT_SPELL_NAME = GetSpellInfo(DISENCHANT_SPELL_ID) or "Disenchant"
 EnchantBuddyDB = EnchantBuddyDB or {}
 
 -- localize frequently used globals for performance
@@ -34,8 +35,8 @@ addon.nextBag, addon.nextSlot = 0, 1
 -- forward-declared for ADDON_LOADED
 local button
 
--- only player bags 0–4
-local TOTAL_BAGS = 5
+-- player bag containers: backpack (0) plus equipped bags
+local TOTAL_BAGS = (NUM_BAG_SLOTS or 4) + 1
 
 -- Apply override-binding to our secure button
 local function ApplyBinding(key)
@@ -86,7 +87,7 @@ function EnchantBuddy_PreClick(self)
     return
   end
 
-  -- scan bags 0–4 only
+  -- scan player bags sequentially
   for i = 0, TOTAL_BAGS - 1 do
     local bag = (addon.nextBag + i) % TOTAL_BAGS
     local slotCount = _GetNumSlots(bag)
@@ -104,8 +105,8 @@ function EnchantBuddy_PreClick(self)
         end
 
         local macro = string.format(
-          "/run ClearCursor(); C_Container.PickupContainerItem(%d, %d)\n/cast Disenchant",
-          bag, slot
+          "/run ClearCursor(); C_Container.PickupContainerItem(%d, %d)\n/cast %s",
+          bag, slot, DISENCHANT_SPELL_NAME
         )
         self:SetAttribute("macrotext1", macro)
         return
