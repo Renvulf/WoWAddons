@@ -35,8 +35,11 @@ addon.nextBag, addon.nextSlot = 0, 1
 -- forward-declared for ADDON_LOADED
 local button
 
--- player bag containers: backpack (0) plus equipped bags
-local TOTAL_BAGS = (NUM_BAG_SLOTS or 4) + 1
+-- determine the highest bag index. On retail this includes the reagent bag
+-- which has an index of 5. Fallback to NUM_BAG_SLOTS (4) for older versions.
+local LAST_BAG_INDEX = (Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag) or (NUM_BAG_SLOTS or 4)
+-- total number of player bag containers including the backpack (0)
+local TOTAL_BAGS = LAST_BAG_INDEX + 1
 
 -- Apply override-binding to our secure button
 local function ApplyBinding(key)
