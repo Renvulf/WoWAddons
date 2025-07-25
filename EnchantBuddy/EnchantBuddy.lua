@@ -2,6 +2,17 @@ local addonName, addon = ...
 local DISENCHANT_SPELL_ID = 13262
 EnchantBuddyDB = EnchantBuddyDB or {}
 
+-- localize frequently used globals for performance
+local C_Container = C_Container
+local _GetNumSlots = C_Container.GetContainerNumSlots
+local _GetInfo = C_Container.GetContainerItemInfo
+local _Pickup = C_Container.PickupContainerItem
+local _UnitCasting = UnitCastingInfo
+local _UnitChannel = UnitChannelInfo
+local _CursorHasItem = CursorHasItem
+local _IsSpellKnown = IsSpellKnown
+local _ClearCursor = ClearCursor
+
 -- track scan position
 addon.nextBag, addon.nextSlot = 0, 1
 
@@ -22,12 +33,12 @@ end
 
 -- runs inside the secure context, before each click
 function EnchantBuddy_PreClick(self)
-  if UnitCastingInfo("player") or UnitChannelInfo("player") then return end
-  if not IsSpellKnown(DISENCHANT_SPELL_ID, true) then
+  if _UnitCasting("player") or _UnitChannel("player") then return end
+  if not _IsSpellKnown(DISENCHANT_SPELL_ID, true) then
     print("EnchantBuddy: Disenchant spell not known.")
     return
   end
-  if CursorHasItem() then
+  if _CursorHasItem() then
     print("EnchantBuddy: clear your cursor before pressing the key.")
     return
   end
@@ -35,12 +46,13 @@ function EnchantBuddy_PreClick(self)
   -- scan bags 0–4 only
   for i = 0, TOTAL_BAGS - 1 do
     local bag = (addon.nextBag + i) % TOTAL_BAGS
-    local slotCount = C_Container.GetContainerNumSlots(bag)
+    local slotCount = _GetNumSlots(bag)
     local startSlot = (bag == addon.nextBag) and addon.nextSlot or 1
 
     for slot = startSlot, slotCount do
-      local info = C_Container.GetContainerItemInfo(bag, slot)
-      if info and not info.isLocked and info.quality >= 2 then
+      local info = _GetInfo(bag, slot)
+      local itemID = info and info.itemID
+      if info and not info.isLocked and itemID and C_Item.IsItemDisenchantableBySpell(itemID, DISENCHANT_SPELL_ID) then
         addon.nextBag = bag
         addon.nextSlot = slot + 1
         if addon.nextSlot > slotCount then
@@ -106,8 +118,12 @@ local function CreateOptions()
   end
   optionsPanel.refresh()
 
-  -- now safe to add to Blizzard’s Interface Options
-  InterfaceOptions_AddCategory(optionsPanel)
+  -- now safe to add to Blizzard’s Interface Options (if available)
+  if InterfaceOptions_AddCategory then
+    InterfaceOptions_AddCategory(optionsPanel)
+  else
+    print("EnchantBuddy: Blizzard Interface Options API not found; make sure you have ## OptionalDeps: Blizzard_Options in your .toc")
+  end
 end
 
 -- listen for keypress after clicking “Set Disenchant Key”
@@ -130,8 +146,12 @@ end)
 -- slash to open options
 SLASH_ENCHANTBUDDY1 = "/enchantbuddy"
 SlashCmdList.ENCHANTBUDDY = function()
-  InterfaceOptionsFrame_OpenToCategory(optionsPanel)
-  InterfaceOptionsFrame_OpenToCategory(optionsPanel)  -- Blizzard bug workaround
+  if InterfaceOptionsFrame_OpenToCategory then
+    InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+    InterfaceOptionsFrame_OpenToCategory(optionsPanel)  -- Blizzard bug workaround
+  else
+    print("EnchantBuddy: cannot open options—InterfaceOptionsFrame API missing.")
+  end
 end
 
 -- event handling
@@ -161,7 +181,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
   elseif event == "PLAYER_LOGIN" then
     self:UnregisterEvent("PLAYER_LOGIN")
     CreateOptions()
-    if not IsSpellKnown(DISENCHANT_SPELL_ID, true) then
+    if not _IsSpellKnown(DISENCHANT_SPELL_ID, true) then
       print("EnchantBuddy: Disenchant not known; button inactive until learned.")
     end
   end
