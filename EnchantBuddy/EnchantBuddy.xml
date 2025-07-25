@@ -1,12 +1,14 @@
-<Ui xmlns="http://www.blizzard.com/wow/ui/">
-
-  <Frame name="EnchantBuddyButton" hidden="true" inherits="SecureActionButtonTemplate">
+<Ui xmlns="http://www.blizzard.com/wow/ui">
+  <Frame name="EnchantBuddyButton"
+         inherits="SecureActionButtonTemplate"
+         hidden="true">
     <Size x="1" y="1"/>
-    <Scripts>
-      <PreClick>
-        EnchantBuddy_PreClick(self)
-      </PreClick>
-    </Scripts>
-  </Frame>
 
+    <!-- run our handler just before the click fires -->
+    <Attribute name="PreClick">EnchantBuddy_PreClick(self)</Attribute>
+
+    <!-- we’ll bind this frame’s “LeftButton” click to our key -->
+    <Attribute name="type1">macro</Attribute>
+    <Attribute name="macrotext1">/run -- placeholder</Attribute>
+  </Frame>
 </Ui>

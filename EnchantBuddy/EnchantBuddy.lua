@@ -1,33 +1,18 @@
--- EnchantBuddy: Disenchant items sequentially with a single key.
--- This addon creates a hidden secure button bound to a user configurable key.
--- Pressing the key will disenchant the next suitable item in your bags.
-
 local addonName, addon = ...
-
--- Track the next bag and slot to start searching from. This helps avoid
--- scanning the entire inventory every click.
-addon.nextBag = 0
-addon.nextSlot = 1
-
--- Spell ID for Disenchant to easily check if the player knows the ability
 local DISENCHANT_SPELL_ID = 13262
-
--- Saved variables table
 EnchantBuddyDB = EnchantBuddyDB or {}
 
--- Frame used for events
-local eventFrame = CreateFrame("Frame")
+-- track scan position
+addon.nextBag, addon.nextSlot = 0, 1
 
--- Reference to our secure button created in XML.  This will be assigned
--- once the XML is loaded during ADDON_LOADED.
+-- forward-declared for ADDON_LOADED
 local button
 
--- Only scan the player's bags (0-4)
+-- only player bags 0–4
 local TOTAL_BAGS = 5
 
--- Helper to apply the key binding using override bindings
+-- Apply override-binding to our secure button
 local function ApplyBinding(key)
-  -- button may not exist until ADDON_LOADED fires
   if not button then return end
   ClearOverrideBindings(button)
   if type(key) == "string" and key ~= "" then
@@ -35,41 +20,27 @@ local function ApplyBinding(key)
   end
 end
 
--- PreClick handler called from the secure button before each click
+-- runs inside the secure context, before each click
 function EnchantBuddy_PreClick(self)
-  -- Do nothing if we are still casting Disenchant
-  if UnitCastingInfo("player") or UnitChannelInfo("player") then
-    return
-  end
-
-  -- Ensure the player can actually disenchant items
+  if UnitCastingInfo("player") or UnitChannelInfo("player") then return end
   if not IsSpellKnown(DISENCHANT_SPELL_ID, true) then
     print("EnchantBuddy: Disenchant spell not known.")
     return
   end
-
-  -- Don't accidentally overwrite an item already held on the cursor
   if CursorHasItem() then
     print("EnchantBuddy: clear your cursor before pressing the key.")
     return
   end
 
-  -- Scan the player's bags for the next valid target.
-  -- We resume from the last bag/slot found so repeatedly pressing the key
-  -- moves sequentially through your inventory without restarting from the first
-  -- bag every time.
+  -- scan bags 0–4 only
   for i = 0, TOTAL_BAGS - 1 do
     local bag = (addon.nextBag + i) % TOTAL_BAGS
     local slotCount = C_Container.GetContainerNumSlots(bag)
-    local startSlot = 1
-    if bag == addon.nextBag then
-      startSlot = addon.nextSlot
-    end
+    local startSlot = (bag == addon.nextBag) and addon.nextSlot or 1
 
     for slot = startSlot, slotCount do
       local info = C_Container.GetContainerItemInfo(bag, slot)
-      if info and not info.isLocked and info.quality and info.quality >= 2 then
-        -- Advance the stored position for the next search
+      if info and not info.isLocked and info.quality >= 2 then
         addon.nextBag = bag
         addon.nextSlot = slot + 1
         if addon.nextSlot > slotCount then
@@ -77,34 +48,31 @@ function EnchantBuddy_PreClick(self)
           addon.nextSlot = 1
         end
 
-        -- Pick up the item and cast Disenchant
         local macro = string.format(
           "/run ClearCursor(); C_Container.PickupContainerItem(%d, %d)\n/cast Disenchant",
           bag, slot
         )
-        self:SetAttribute("macrotext", macro)
+        self:SetAttribute("macrotext1", macro)
         return
       end
     end
-
-    addon.nextBag = (addon.nextBag + 1) % TOTAL_BAGS
-    addon.nextSlot = 1
   end
 
-  -- No more items to disenchant
-  addon.nextBag = 0
-  addon.nextSlot = 1
-  self:SetAttribute("macrotext", "/run print('EnchantBuddy: no disenchantable items.')")
+  -- nothing left → reset and notify
+  addon.nextBag, addon.nextSlot = 0, 1
+  self:SetAttribute("macrotext1", "/run print('EnchantBuddy: no disenchantable items.')")
 end
 
--- Options panel elements
-local optionsPanel
-local setKeyButton
-local captureFrame = CreateFrame("Frame")
+-- options UI
+local optionsPanel, setKeyButton, captureFrame = nil, nil, CreateFrame("Frame")
 
--- Function to create the options panel
 local function CreateOptions()
-  optionsPanel = CreateFrame("Frame", nil, InterfaceOptionsFramePanelContainer)
+  -- ensure Blizzard’s Interface Options code is loaded
+  if not InterfaceOptions_AddCategory then
+    LoadAddOn("Blizzard_InterfaceOptions")
+  end
+
+  optionsPanel = CreateFrame("Frame", "EnchantBuddyOptions", InterfaceOptionsFramePanelContainer)
   optionsPanel.name = "EnchantBuddy"
 
   local title = optionsPanel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
@@ -118,17 +86,13 @@ local function CreateOptions()
   setKeyButton:SetSize(180, 22)
   setKeyButton:SetPoint("TOPLEFT", keyLabel, "BOTTOMLEFT", 0, -10)
   setKeyButton:SetText("Set Disenchant Key")
-
   setKeyButton:SetScript("OnClick", function(self)
-    self:SetText("Press a key...")
+    self:SetText("Press a key…")
     captureFrame:Show()
-    captureFrame:SetPropagateKeyboardInput(false)
     captureFrame:EnableKeyboard(true)
-    captureFrame:SetFrameStrata("DIALOG")
     print("EnchantBuddy: press any key to bind.")
   end)
 
-  -- Button to clear the current binding
   local clearKeyButton = CreateFrame("Button", nil, optionsPanel, "UIPanelButtonTemplate")
   clearKeyButton:SetSize(180, 22)
   clearKeyButton:SetPoint("TOPLEFT", setKeyButton, "BOTTOMLEFT", 0, -5)
@@ -136,78 +100,68 @@ local function CreateOptions()
   clearKeyButton:SetScript("OnClick", function()
     EnchantBuddyDB.key = ""
     ApplyBinding("")
-    if optionsPanel and optionsPanel.refresh then
-      optionsPanel.refresh()
-    end
+    optionsPanel.refresh()
     print("EnchantBuddy: binding cleared")
   end)
 
   optionsPanel.refresh = function()
-    keyLabel:SetText("Current key: " .. (EnchantBuddyDB.key or ""))
+    keyLabel:SetText("Current key: " .. (EnchantBuddyDB.key or "none"))
     setKeyButton:SetText("Set Disenchant Key")
   end
+  optionsPanel.refresh()
 
-  if InterfaceOptions_AddCategory then
-    InterfaceOptions_AddCategory(optionsPanel)
-  else
-    -- Delay until the InterfaceOptions frame is available
-    local f = CreateFrame("Frame")
-    f:RegisterEvent("PLAYER_LOGIN")
-    f:SetScript("OnEvent", function()
-      InterfaceOptions_AddCategory(optionsPanel)
-      f:UnregisterEvent("PLAYER_LOGIN")
-    end)
-  end
+  -- now safe to add to Blizzard’s Interface Options
+  InterfaceOptions_AddCategory(optionsPanel)
 end
 
--- Capture frame used to listen for the next key press
+-- listen for keypress after clicking “Set Disenchant Key”
 captureFrame:Hide()
-
+captureFrame:SetPropagateKeyboardInput(false)
 captureFrame:SetScript("OnKeyDown", function(_, key)
   captureFrame:Hide()
   captureFrame:EnableKeyboard(false)
-  if type(key) == "string" and key ~= "" then
-    local sanitizedKey = string.lower(tostring(key))
-    EnchantBuddyDB.key = sanitizedKey
-    ApplyBinding(sanitizedKey)
-    if optionsPanel and optionsPanel.refresh then
-      optionsPanel.refresh()
-    end
-    print("EnchantBuddy: bound to key " .. sanitizedKey)
+  key = (type(key)=="string" and key ~= "") and key:lower() or ""
+  if key ~= "" then
+    EnchantBuddyDB.key = key
+    ApplyBinding(key)
+    optionsPanel.refresh()
+    print("EnchantBuddy: bound to key " .. key)
   else
     print("EnchantBuddy: invalid key")
   end
 end)
 
--- Slash command to open the options panel
+-- slash to open options
 SLASH_ENCHANTBUDDY1 = "/enchantbuddy"
 SlashCmdList.ENCHANTBUDDY = function()
   InterfaceOptionsFrame_OpenToCategory(optionsPanel)
-  InterfaceOptionsFrame_OpenToCategory(optionsPanel) -- called twice per Blizzard bug
+  InterfaceOptionsFrame_OpenToCategory(optionsPanel)  -- Blizzard bug workaround
 end
 
--- Event handler
-eventFrame:SetScript("OnEvent", function(_, event, arg1)
+-- event handling
+local eventFrame = CreateFrame("Frame")
+eventFrame:RegisterEvent("ADDON_LOADED")
+eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:SetScript("OnEvent", function(self, event, arg1)
   if event == "ADDON_LOADED" and arg1 == addonName then
-    -- XML is loaded at this point so grab the secure button reference
+    -- only once
+    self:UnregisterEvent("ADDON_LOADED")
+
+    -- grab our secure button (XML is now parsed)
     button = EnchantBuddyButton
 
-    -- Initialize saved variable and apply default key if none
-    if type(EnchantBuddyDB.key) ~= "string" then
-      EnchantBuddyDB.key = ""
-    end
-    if EnchantBuddyDB.key == "" then
-      EnchantBuddyDB.key = "0" -- default key
-    end
+    -- init saved-vars
+    if type(EnchantBuddyDB) ~= "table" then EnchantBuddyDB = {} end
+    if type(EnchantBuddyDB.key) ~= "string" then EnchantBuddyDB.key = "" end
+    if EnchantBuddyDB.key == "" then EnchantBuddyDB.key = "0" end
 
     ApplyBinding(EnchantBuddyDB.key)
-    CreateOptions()
 
+  elseif event == "PLAYER_LOGIN" then
+    self:UnregisterEvent("PLAYER_LOGIN")
+    CreateOptions()
     if not IsSpellKnown(DISENCHANT_SPELL_ID, true) then
-      print("EnchantBuddy: Disenchant spell not known. The button will be inactive until you learn it.")
+      print("EnchantBuddy: Disenchant not known; button inactive until learned.")
     end
-    eventFrame:UnregisterEvent("ADDON_LOADED")
   end
 end)
-
-eventFrame:RegisterEvent("ADDON_LOADED")
