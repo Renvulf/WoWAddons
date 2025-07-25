@@ -192,10 +192,19 @@ end
 -- listen for keypress after clicking “Set Disenchant Key”
 captureFrame:Hide()
 captureFrame:SetPropagateKeyboardInput(false)
+-- Capture a key press for binding. ESC cancels without changing the current key.
 captureFrame:SetScript("OnKeyDown", function(_, key)
   captureFrame:Hide()
   captureFrame:EnableKeyboard(false)
-  key = (type(key)=="string" and key ~= "") and key or ""
+  key = (type(key) == "string" and key ~= "") and key or ""
+
+  if key == "ESCAPE" then
+    -- treat escape as a cancel action
+    optionsPanel.refresh()
+    print("EnchantBuddy: key binding canceled")
+    return
+  end
+
   if key ~= "" then
     EnchantBuddyDB.key = key
     ApplyBinding(key)
