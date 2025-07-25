@@ -1,0 +1,9 @@
+## Interface: 90205
+## Title: EnchantBuddy
+## Notes: Spam a key to sequentially disenchant items in your inventory.
+## Author: ChatGPT
+## Version: 1.0
+## SavedVariables: EnchantBuddyDB
+
+EnchantBuddy.xml
+EnchantBuddy.lua

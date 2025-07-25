@@ -1,0 +1,18 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+  <Script file="EnchantBuddy.lua"/>
+
+  <Frame name="EnchantBuddyButton" hidden="true" inherits="SecureActionButtonTemplate">
+    <Size x="1" y="1"/>
+    <Scripts>
+      <PreClick>
+        EnchantBuddy_PreClick(self)
+      </PreClick>
+    </Scripts>
+  </Frame>
+
+  <Bindings>
+    <Binding name="CLICK EnchantBuddyButton:LeftButton" header="EnchantBuddy">
+      Disenchant Next Item
+    </Binding>
+  </Bindings>
+</Ui>
