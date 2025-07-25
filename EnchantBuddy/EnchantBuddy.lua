@@ -20,6 +20,14 @@ local _GetMacroInfo = GetMacroInfo
 local _GetNumMacros = GetNumMacros
 local _GetSpellTexture = GetSpellTexture
 
+-- ensure the Blizzard options UI is available without external dependencies
+local function EnsureOptionsLoaded()
+  if not InterfaceOptionsFrame or not InterfaceOptions_AddCategory or not InterfaceOptionsFrame_OpenToCategory then
+    -- load the built-in options addon if it isn't already
+    pcall(UIParentLoadAddOn, "Blizzard_Options")
+  end
+end
+
 -- track scan position
 addon.nextBag, addon.nextSlot = 0, 1
 
@@ -114,6 +122,8 @@ end
 local optionsPanel, setKeyButton, captureFrame = nil, nil, CreateFrame("Frame")
 
 local function CreateOptions()
+  -- ensure the Blizzard options UI addon is loaded so the panel APIs exist
+  EnsureOptionsLoaded()
 
   optionsPanel = CreateFrame("Frame", "EnchantBuddyOptions", InterfaceOptionsFramePanelContainer)
   optionsPanel.name = "EnchantBuddy"
@@ -157,7 +167,7 @@ local function CreateOptions()
   if InterfaceOptions_AddCategory then
     InterfaceOptions_AddCategory(optionsPanel)
   else
-    print("EnchantBuddy: Blizzard Interface Options API not found; make sure you have ## OptionalDeps: Blizzard_Options in your .toc")
+    print("EnchantBuddy: Blizzard interface options API not available.")
   end
 end
 
@@ -167,7 +177,7 @@ captureFrame:SetPropagateKeyboardInput(false)
 captureFrame:SetScript("OnKeyDown", function(_, key)
   captureFrame:Hide()
   captureFrame:EnableKeyboard(false)
-  key = (type(key)=="string" and key ~= "") and key:lower() or ""
+  key = (type(key)=="string" and key ~= "") and key or ""
   if key ~= "" then
     EnchantBuddyDB.key = key
     ApplyBinding(key)
@@ -181,6 +191,7 @@ end)
 -- slash to open options
 SLASH_ENCHANTBUDDY1 = "/enchantbuddy"
 SlashCmdList.ENCHANTBUDDY = function()
+  EnsureOptionsLoaded()
   if InterfaceOptionsFrame_OpenToCategory then
     InterfaceOptionsFrame_OpenToCategory(optionsPanel)
     InterfaceOptionsFrame_OpenToCategory(optionsPanel)  -- Blizzard bug workaround
