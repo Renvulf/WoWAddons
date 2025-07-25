@@ -9,9 +9,4 @@
     </Scripts>
   </Frame>
 
-  <Bindings>
-    <Binding name="CLICK EnchantBuddyButton:LeftButton" header="EnchantBuddy">
-      Disenchant Next Item
-    </Binding>
-  </Bindings>
 </Ui>
