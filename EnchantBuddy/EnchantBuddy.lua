@@ -18,13 +18,19 @@ EnchantBuddyDB = EnchantBuddyDB or {}
 -- Frame used for events
 local eventFrame = CreateFrame("Frame")
 
--- Reference to our secure button created in XML
-local button = EnchantBuddyButton
+-- Reference to our secure button created in XML.  This will be assigned
+-- once the XML is loaded during ADDON_LOADED.
+local button
+
+-- Total number of bags (0-11 includes bank bags)
+local TOTAL_BAGS = 12
 
 -- Helper to apply the key binding using override bindings
 local function ApplyBinding(key)
+  -- button may not exist until ADDON_LOADED fires
+  if not button then return end
   ClearOverrideBindings(button)
-  if key and key ~= "" then
+  if type(key) == "string" and key ~= "" then
     SetOverrideBindingClick(button, true, key, button:GetName(), "LeftButton")
   end
 end
@@ -48,11 +54,12 @@ function EnchantBuddy_PreClick(self)
     return
   end
 
-  -- Scan the player's bags for the next valid target. We resume from the last
-  -- bag/slot found so repeatedly pressing the key moves sequentially through
-  -- your inventory without starting from the first bag every time.
-  for i = 0, 4 do
-    local bag = (addon.nextBag + i) % 5
+  -- Scan the player's bags (and bank when open) for the next valid target.
+  -- We resume from the last bag/slot found so repeatedly pressing the key
+  -- moves sequentially through your inventory without restarting from the first
+  -- bag every time.
+  for i = 0, TOTAL_BAGS - 1 do
+    local bag = (addon.nextBag + i) % TOTAL_BAGS
     local slotCount = C_Container.GetContainerNumSlots(bag)
     local startSlot = 1
     if bag == addon.nextBag then
@@ -66,7 +73,7 @@ function EnchantBuddy_PreClick(self)
         addon.nextBag = bag
         addon.nextSlot = slot + 1
         if addon.nextSlot > slotCount then
-          addon.nextBag = (addon.nextBag + 1) % 5
+          addon.nextBag = (addon.nextBag + 1) % TOTAL_BAGS
           addon.nextSlot = 1
         end
 
@@ -80,7 +87,7 @@ function EnchantBuddy_PreClick(self)
       end
     end
 
-    addon.nextBag = (addon.nextBag + 1) % 5
+    addon.nextBag = (addon.nextBag + 1) % TOTAL_BAGS
     addon.nextSlot = 1
   end
 
@@ -147,12 +154,16 @@ captureFrame:Hide()
 captureFrame:SetScript("OnKeyDown", function(_, key)
   captureFrame:Hide()
   captureFrame:EnableKeyboard(false)
-  EnchantBuddyDB.key = key
-  ApplyBinding(key)
-  if optionsPanel and optionsPanel.refresh then
-    optionsPanel.refresh()
+  if type(key) == "string" and key ~= "" then
+    EnchantBuddyDB.key = key
+    ApplyBinding(key)
+    if optionsPanel and optionsPanel.refresh then
+      optionsPanel.refresh()
+    end
+    print("EnchantBuddy: bound to key " .. key)
+  else
+    print("EnchantBuddy: invalid key")
   end
-  print("EnchantBuddy: bound to key " .. key)
 end)
 
 -- Slash command to open the options panel
@@ -165,12 +176,17 @@ end
 -- Event handler
 eventFrame:SetScript("OnEvent", function(_, event, arg1)
   if event == "ADDON_LOADED" and arg1 == addonName then
+    -- XML is loaded at this point so grab the secure button reference
+    button = EnchantBuddyButton
+
     -- Initialize saved variable and apply default key if none
-    if not EnchantBuddyDB.key then
+    if type(EnchantBuddyDB.key) ~= "string" or EnchantBuddyDB.key == "" then
       EnchantBuddyDB.key = "0" -- default key
     end
+
     ApplyBinding(EnchantBuddyDB.key)
     CreateOptions()
+
     if not IsSpellKnown(DISENCHANT_SPELL_ID, true) then
       print("EnchantBuddy: Disenchant spell not known. The button will be inactive until you learn it.")
     end
