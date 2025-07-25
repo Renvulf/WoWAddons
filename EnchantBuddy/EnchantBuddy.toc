@@ -1,7 +1,5 @@
 ## Interface: 90205
 ## Title: EnchantBuddy
-## X-LoadOn: PLAYER_LOGIN
-## Dependencies: Blizzard_InterfaceOptions
 ## Notes: Disenchant items sequentially with a single key.
 ## SavedVariables: EnchantBuddyDB
 
