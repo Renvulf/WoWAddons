@@ -12,6 +12,13 @@ local _UnitChannel = UnitChannelInfo
 local _CursorHasItem = CursorHasItem
 local _IsSpellKnown = IsSpellKnown
 local _ClearCursor = ClearCursor
+local C_Item = C_Item
+local _GetMacroIndex = GetMacroIndexByName
+local _CreateMacro = CreateMacro
+local _EditMacro = EditMacro
+local _GetMacroInfo = GetMacroInfo
+local _GetNumMacros = GetNumMacros
+local _GetSpellTexture = GetSpellTexture
 
 -- track scan position
 addon.nextBag, addon.nextSlot = 0, 1
@@ -28,6 +35,34 @@ local function ApplyBinding(key)
   ClearOverrideBindings(button)
   if type(key) == "string" and key ~= "" then
     SetOverrideBindingClick(button, true, key, button:GetName(), "LeftButton")
+  end
+end
+
+-- Create or update the macro that triggers our secure button
+local MACRO_NAME = "EnchantBuddy"
+local MACRO_BODY = "/click EnchantBuddyButton"
+local function EnsureMacro()
+  local index = _GetMacroIndex(MACRO_NAME)
+  local texture = GetSpellTexture(DISENCHANT_SPELL_ID) or "INV_MISC_QUESTIONMARK"
+  if index == 0 then
+    -- determine which macro tab has space
+    local generalCount, charCount = _GetNumMacros()
+    if generalCount < MAX_ACCOUNT_MACROS then
+      index = _CreateMacro(MACRO_NAME, texture, MACRO_BODY, false)
+    elseif charCount < MAX_CHARACTER_MACROS then
+      index = _CreateMacro(MACRO_NAME, texture, MACRO_BODY, true)
+    else
+      print("EnchantBuddy: cannot create macro—macro slots full.")
+      return
+    end
+    if index then
+      print("EnchantBuddy: macro created. Drag it to your action bar.")
+    end
+  else
+    local _, _, body = _GetMacroInfo(index)
+    if body ~= MACRO_BODY then
+      _EditMacro(index, MACRO_NAME, texture, MACRO_BODY)
+    end
   end
 end
 
@@ -181,6 +216,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
   elseif event == "PLAYER_LOGIN" then
     self:UnregisterEvent("PLAYER_LOGIN")
     CreateOptions()
+    EnsureMacro()
     if not _IsSpellKnown(DISENCHANT_SPELL_ID, true) then
       print("EnchantBuddy: Disenchant not known; button inactive until learned.")
     end
