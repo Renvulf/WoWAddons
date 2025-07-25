@@ -1,6 +1,7 @@
-## Interface: 90205
+## Interface: 100075
 ## Title: EnchantBuddy
 ## Notes: Disenchant items sequentially with a single key.
 ## SavedVariables: EnchantBuddyDB
+## OptionalDeps: Blizzard_Options
 
 EnchantBuddy.lua
