@@ -4,6 +4,14 @@
 
 local addonName, addon = ...
 
+-- Track the next bag and slot to start searching from. This helps avoid
+-- scanning the entire inventory every click.
+addon.nextBag = 0
+addon.nextSlot = 1
+
+-- Spell ID for Disenchant to easily check if the player knows the ability
+local DISENCHANT_SPELL_ID = 13262
+
 -- Saved variables table
 EnchantBuddyDB = EnchantBuddyDB or {}
 
@@ -28,21 +36,52 @@ function EnchantBuddy_PreClick(self)
     return
   end
 
-  -- Scan bags 0-4 for the next green quality or better item
-  for bag = 0, 4 do
+  -- Ensure the player can actually disenchant items
+  if not IsSpellKnown(DISENCHANT_SPELL_ID, true) then
+    print("EnchantBuddy: Disenchant spell not known.")
+    return
+  end
+
+  -- Don't accidentally overwrite an item already held on the cursor
+  if CursorHasItem() then
+    print("EnchantBuddy: clear your cursor before pressing the key.")
+    return
+  end
+
+  -- Scan the player's bags for the next valid target. We resume from the last
+  -- bag/slot found so repeatedly pressing the key moves sequentially through
+  -- your inventory without starting from the first bag every time.
+  for i = 0, 4 do
+    local bag = (addon.nextBag + i) % 5
     local slotCount = C_Container.GetContainerNumSlots(bag)
-    for slot = 1, slotCount do
+    local startSlot = 1
+    if bag == addon.nextBag then
+      startSlot = addon.nextSlot
+    end
+
+    for slot = startSlot, slotCount do
       local info = C_Container.GetContainerItemInfo(bag, slot)
-      if info and info.quality and info.quality >= 2 then
-        -- Set macrotext to pick up this slot and cast Disenchant
+      if info and not info.isLocked and info.quality and info.quality >= 2 then
+        -- Advance the stored position for the next search
+        addon.nextBag = bag
+        addon.nextSlot = slot + 1
+        if addon.nextSlot > slotCount then
+          addon.nextBag = (addon.nextBag + 1) % 5
+          addon.nextSlot = 1
+        end
+
+        -- Pick up the item and cast Disenchant
         local macro = string.format(
-          "/run C_Container.PickupContainerItem(%d, %d)\n/cast Disenchant",
+          "/run ClearCursor(); C_Container.PickupContainerItem(%d, %d)\n/cast Disenchant",
           bag, slot
         )
         self:SetAttribute("macrotext", macro)
         return
       end
     end
+
+    addon.nextBag = (addon.nextBag + 1) % 5
+    addon.nextSlot = 1
   end
 
   -- No more items to disenchant
@@ -78,6 +117,20 @@ local function CreateOptions()
     captureFrame:EnableKeyboard(true)
     captureFrame:SetFrameStrata("DIALOG")
     print("EnchantBuddy: press any key to bind.")
+  end)
+
+  -- Button to clear the current binding
+  local clearKeyButton = CreateFrame("Button", nil, optionsPanel, "UIPanelButtonTemplate")
+  clearKeyButton:SetSize(180, 22)
+  clearKeyButton:SetPoint("TOPLEFT", setKeyButton, "BOTTOMLEFT", 0, -5)
+  clearKeyButton:SetText("Clear Binding")
+  clearKeyButton:SetScript("OnClick", function()
+    EnchantBuddyDB.key = ""
+    ApplyBinding("")
+    if optionsPanel and optionsPanel.refresh then
+      optionsPanel.refresh()
+    end
+    print("EnchantBuddy: binding cleared")
   end)
 
   optionsPanel.refresh = function()
@@ -118,6 +171,9 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1)
     end
     ApplyBinding(EnchantBuddyDB.key)
     CreateOptions()
+    if not IsSpellKnown(DISENCHANT_SPELL_ID, true) then
+      print("EnchantBuddy: Disenchant spell not known. The button will be inactive until you learn it.")
+    end
     eventFrame:UnregisterEvent("ADDON_LOADED")
   end
 end)
