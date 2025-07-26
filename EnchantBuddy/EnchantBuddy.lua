@@ -1,6 +1,7 @@
 local addonName, addon = ...
 local DISENCHANT_SPELL_ID = 13262
-local DISENCHANT_SPELL_NAME = GetSpellInfo(DISENCHANT_SPELL_ID) or "Disenchant"
+-- populated in PLAYER_LOGIN when the client is fully loaded
+local DISENCHANT_SPELL_NAME
 EnchantBuddyDB = EnchantBuddyDB or {}
 
 -- localize frequently used globals for performance
@@ -255,6 +256,8 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
   elseif event == "PLAYER_LOGIN" then
     self:UnregisterEvent("PLAYER_LOGIN")
+    -- now safe to query spell information
+    DISENCHANT_SPELL_NAME = GetSpellInfo(DISENCHANT_SPELL_ID) or "Disenchant"
     CreateOptions()
     EnsureMacro()
     if not _IsSpellKnown(DISENCHANT_SPELL_ID, true) then
