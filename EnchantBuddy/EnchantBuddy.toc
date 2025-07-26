@@ -1,6 +1,7 @@
 ## Interface: 100075
 ## Title: EnchantBuddy
-## Notes: Disenchant items sequentially with a single key.
+## Notes: Disenchant items sequentially with a single key. Offers a resizable
+## Notes: options panel and draggable minimap toggle.
 ## SavedVariables: EnchantBuddyDB
 
 EnchantBuddy.lua
