@@ -19,6 +19,11 @@ local _EditMacro = EditMacro
 local _GetMacroInfo = GetMacroInfo
 local _GetNumMacros = GetNumMacros
 
+-- localize spell API
+local C_Spell = C_Spell
+local _GetSpellInfo = C_Spell.GetSpellInfo
+local _GetSpellTexture = C_Spell.GetSpellTexture
+
 -- ensure the Blizzard options UI is available without external dependencies
 local function EnsureOptionsLoaded()
   if not InterfaceOptionsFrame or not InterfaceOptions_AddCategory or not InterfaceOptionsFrame_OpenToCategory then
@@ -65,7 +70,7 @@ local MACRO_NAME = "EnchantBuddy"
 local MACRO_BODY = "/click EnchantBuddyButton"
 local function EnsureMacro()
   local index = _GetMacroIndex(MACRO_NAME)
-  local texture = GetSpellTexture(DISENCHANT_SPELL_ID) or "INV_MISC_QUESTIONMARK"
+  local texture = _GetSpellTexture(DISENCHANT_SPELL_ID) or "INV_MISC_QUESTIONMARK"
   if index == 0 then
     -- determine which macro tab has space
     local generalCount, charCount = _GetNumMacros()
@@ -257,7 +262,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
   elseif event == "PLAYER_LOGIN" then
     self:UnregisterEvent("PLAYER_LOGIN")
     -- now safe to query spell information
-    DISENCHANT_SPELL_NAME = GetSpellInfo(DISENCHANT_SPELL_ID) or "Disenchant"
+    DISENCHANT_SPELL_NAME = _GetSpellInfo(DISENCHANT_SPELL_ID) or "Disenchant"
     CreateOptions()
     EnsureMacro()
     if not _IsSpellKnown(DISENCHANT_SPELL_ID, true) then
