@@ -2,5 +2,6 @@
 ## Title: EnchantBuddy
 ## Notes: Disenchant items sequentially with a single key.
 ## SavedVariables: EnchantBuddyDB
+## OptionalDeps: Blizzard_InterfaceOptions
 
 EnchantBuddy.lua
