@@ -145,7 +145,17 @@ local captureFrame = CreateFrame("Frame")
 
 local function CreateCustomOptions()
   if customOptions then return end
-  local f = CreateFrame("Frame", "EnchantBuddyCustomOptions", UIParent, "DialogBorderedFrameTemplate")
+  -- Use the BackdropTemplate mixin instead of DialogBorderedFrameTemplate
+  -- which does not exist in Retail. We manually apply a backdrop and
+  -- border so the options panel remains visually similar.
+  local f = CreateFrame("Frame", "EnchantBuddyCustomOptions", UIParent, "BackdropTemplate")
+  f:SetBackdrop({
+    bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile     = true, tileSize = 32, edgeSize = 16,
+    insets   = { left = 8, right = 8, top = 8, bottom = 8 },
+  })
+  f:SetBackdropBorderColor(0.4, 0.4, 0.4)
   f:SetSize(240, 120)
   f:SetPoint("CENTER")
   f:SetMovable(true); f:EnableMouse(true)
