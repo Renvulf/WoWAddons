@@ -25,10 +25,13 @@ local _GetSpellInfo = C_Spell.GetSpellInfo
 local _GetSpellTexture = C_Spell.GetSpellTexture
 
 -- ensure the Blizzard options UI is available without external dependencies
+-- ensure the Blizzard Interface Options UI code is loaded so the panel APIs are available
 local function EnsureOptionsLoaded()
   if not InterfaceOptionsFrame or not InterfaceOptions_AddCategory or not InterfaceOptionsFrame_OpenToCategory then
-    -- load the built-in options addon if it isn't already
-    pcall(UIParentLoadAddOn, "Blizzard_Options")
+    -- load the real Blizzard Interface Options addon
+    pcall(UIParentLoadAddOn, "Blizzard_InterfaceOptions")
+    -- also load the settings UI (if panels are ever moved there)
+    pcall(UIParentLoadAddOn, "Blizzard_Settings")
   end
 end
 
