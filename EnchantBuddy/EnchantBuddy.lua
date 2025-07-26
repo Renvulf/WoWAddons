@@ -89,13 +89,16 @@ end
 
 -- runs inside the secure context, before each click
 function EnchantBuddy_PreClick(self)
-  if _UnitCasting("player") or _UnitChannel("player") then return end
+  if _UnitCasting("player") or _UnitChannel("player") then
+    self:SetAttribute("macrotext1", "/run print('EnchantBuddy: casting in progress.')")
+    return
+  end
   if not _IsSpellKnown(DISENCHANT_SPELL_ID, true) then
-    print("EnchantBuddy: Disenchant spell not known.")
+    self:SetAttribute("macrotext1", "/run print('EnchantBuddy: Disenchant spell not known.')")
     return
   end
   if _CursorHasItem() then
-    print("EnchantBuddy: clear your cursor before pressing the key.")
+    self:SetAttribute("macrotext1", "/run print('EnchantBuddy: clear your cursor before pressing the key.')")
     return
   end
 
