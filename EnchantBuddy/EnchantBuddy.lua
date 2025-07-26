@@ -158,8 +158,17 @@ local function CreateCustomOptions()
   f:SetBackdropBorderColor(0.4, 0.4, 0.4)
   -- allow the user to resize if content grows
   f:SetResizable(true)
-  f:SetMinResize(300, 160) -- minimum: 300x160
-  f:SetMaxResize(600, 400) -- maximum: 600x400
+  -- Use whichever API is available. Retail removed SetMinResize/SetMaxResize
+  -- in favor of SetResizeBounds. Guard the calls to avoid errors on older
+  -- versions or forks.
+  if f.SetResizeBounds then
+    -- SetResizeBounds(minWidth, minHeight, maxWidth, maxHeight)
+    f:SetResizeBounds(300, 160, 600, 400)
+  else
+    if f.SetMinResize then f:SetMinResize(300, 160) end
+    if f.SetMaxResize then f:SetMaxResize(600, 400) end
+  end
+  -- default size is slightly wider/taller to fit everything
   f:SetSize(320, 180) -- wider/taller to fit everything
   f:SetPoint("CENTER")
   f:SetMovable(true); f:EnableMouse(true)
