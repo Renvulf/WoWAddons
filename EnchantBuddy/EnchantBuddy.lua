@@ -24,16 +24,7 @@ local C_Spell = C_Spell
 local _GetSpellInfo = C_Spell.GetSpellInfo
 local _GetSpellTexture = C_Spell.GetSpellTexture
 
--- ensure the Blizzard options UI is available without external dependencies
--- ensure the Blizzard Interface Options UI code is loaded so the panel APIs are available
-local function EnsureOptionsLoaded()
-  if not InterfaceOptionsFrame or not InterfaceOptions_AddCategory or not InterfaceOptionsFrame_OpenToCategory then
-    -- load the real Blizzard Interface Options addon
-    pcall(UIParentLoadAddOn, "Blizzard_InterfaceOptions")
-    -- also load the settings UI (if panels are ever moved there)
-    pcall(UIParentLoadAddOn, "Blizzard_Settings")
-  end
-end
+
 
 -- track scan position
 -- indices correspond to entries in BAG_IDS
@@ -148,57 +139,55 @@ function EnchantBuddy_PreClick(self)
   self:SetAttribute("macrotext1", "/run print('EnchantBuddy: no disenchantable items.')")
 end
 
--- options UI
-local optionsPanel, setKeyButton, captureFrame = nil, nil, CreateFrame("Frame")
+-- a simple, standalone options window
+local customOptions
+local captureFrame = CreateFrame("Frame")
 
-local function CreateOptions()
-  -- ensure the Blizzard options UI addon is loaded so the panel APIs exist
-  EnsureOptionsLoaded()
+local function CreateCustomOptions()
+  if customOptions then return end
+  local f = CreateFrame("Frame", "EnchantBuddyCustomOptions", UIParent, "DialogBorderedFrameTemplate")
+  f:SetSize(240, 120)
+  f:SetPoint("CENTER")
+  f:SetMovable(true); f:EnableMouse(true)
+  f:RegisterForDrag("LeftButton")
+  f:SetScript("OnDragStart", f.StartMoving)
+  f:SetScript("OnDragStop", f.StopMovingOrSizing)
 
-  optionsPanel = CreateFrame("Frame", "EnchantBuddyOptions", InterfaceOptionsFramePanelContainer)
-  optionsPanel.name = "EnchantBuddy"
+  local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+  title:SetPoint("TOP", 0, -10)
+  title:SetText("EnchantBuddy Settings")
 
-  local title = optionsPanel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-  title:SetPoint("TOPLEFT", 16, -16)
-  title:SetText("EnchantBuddy")
-
-  local keyLabel = optionsPanel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+  local keyLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
   keyLabel:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)
+  keyLabel:SetText("Current key: " .. (EnchantBuddyDB.key or "none"))
 
-  setKeyButton = CreateFrame("Button", nil, optionsPanel, "UIPanelButtonTemplate")
-  setKeyButton:SetSize(180, 22)
-  setKeyButton:SetPoint("TOPLEFT", keyLabel, "BOTTOMLEFT", 0, -10)
-  setKeyButton:SetText("Set Disenchant Key")
-  setKeyButton:SetScript("OnClick", function(self)
-    self:SetText("Press a key…")
-    captureFrame:Show()
-    captureFrame:EnableKeyboard(true)
+  local setKey = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  setKey:SetSize(160, 22)
+  setKey:SetPoint("TOPLEFT", keyLabel, "BOTTOMLEFT", 0, -8)
+  setKey:SetText("Set Disenchant Key")
+  setKey:SetScript("OnClick", function(self)
+    self:SetText("Press any key…")
+    captureFrame:Show(); captureFrame:EnableKeyboard(true)
     print("EnchantBuddy: press any key to bind.")
   end)
 
-  local clearKeyButton = CreateFrame("Button", nil, optionsPanel, "UIPanelButtonTemplate")
-  clearKeyButton:SetSize(180, 22)
-  clearKeyButton:SetPoint("TOPLEFT", setKeyButton, "BOTTOMLEFT", 0, -5)
-  clearKeyButton:SetText("Clear Binding")
-  clearKeyButton:SetScript("OnClick", function()
+  local clearKey = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  clearKey:SetSize(160, 22)
+  clearKey:SetPoint("LEFT", setKey, "RIGHT", 8, 0)
+  clearKey:SetText("Clear Binding")
+  clearKey:SetScript("OnClick", function()
     EnchantBuddyDB.key = ""
     ApplyBinding("")
-    optionsPanel.refresh()
+    keyLabel:SetText("Current key: none")
     print("EnchantBuddy: binding cleared")
   end)
 
-  optionsPanel.refresh = function()
+  f.refresh = function()
     keyLabel:SetText("Current key: " .. (EnchantBuddyDB.key or "none"))
-    setKeyButton:SetText("Set Disenchant Key")
+    setKey:SetText("Set Disenchant Key")
   end
-  optionsPanel.refresh()
 
-  -- now safe to add to Blizzard’s Interface Options (if available)
-  if InterfaceOptions_AddCategory then
-    InterfaceOptions_AddCategory(optionsPanel)
-  else
-    print("EnchantBuddy: Blizzard interface options API not available.")
-  end
+  customOptions = f
 end
 
 -- listen for keypress after clicking “Set Disenchant Key”
@@ -212,7 +201,7 @@ captureFrame:SetScript("OnKeyDown", function(_, key)
 
   if key == "ESCAPE" then
     -- treat escape as a cancel action
-    optionsPanel.refresh()
+    if customOptions and customOptions.refresh then customOptions:refresh() end
     print("EnchantBuddy: key binding canceled")
     return
   end
@@ -220,7 +209,7 @@ captureFrame:SetScript("OnKeyDown", function(_, key)
   if key ~= "" then
     EnchantBuddyDB.key = key
     ApplyBinding(key)
-    optionsPanel.refresh()
+    if customOptions and customOptions.refresh then customOptions:refresh() end
     print("EnchantBuddy: bound to key " .. key)
   else
     print("EnchantBuddy: invalid key")
@@ -230,13 +219,9 @@ end)
 -- slash to open options
 SLASH_ENCHANTBUDDY1 = "/enchantbuddy"
 SlashCmdList.ENCHANTBUDDY = function()
-  EnsureOptionsLoaded()
-  if InterfaceOptionsFrame_OpenToCategory then
-    InterfaceOptionsFrame_OpenToCategory(optionsPanel)
-    InterfaceOptionsFrame_OpenToCategory(optionsPanel)  -- Blizzard bug workaround
-  else
-    print("EnchantBuddy: cannot open options—InterfaceOptionsFrame API missing.")
-  end
+  CreateCustomOptions()
+  customOptions:Show()
+  customOptions:refresh()
 end
 
 -- event handling
@@ -266,7 +251,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     self:UnregisterEvent("PLAYER_LOGIN")
     -- now safe to query spell information
     DISENCHANT_SPELL_NAME = _GetSpellInfo(DISENCHANT_SPELL_ID) or "Disenchant"
-    CreateOptions()
+    CreateCustomOptions()
     EnsureMacro()
     if not _IsSpellKnown(DISENCHANT_SPELL_ID, true) then
       print("EnchantBuddy: Disenchant not known; button inactive until learned.")
