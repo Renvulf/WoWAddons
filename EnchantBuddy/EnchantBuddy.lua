@@ -73,7 +73,7 @@ local function EnsureMacro()
     elseif charCount < MAX_CHARACTER_MACROS then
       index = _CreateMacro(MACRO_NAME, texture, MACRO_BODY, true)
     else
-      print("EnchantBuddy: cannot create macro—macro slots full.")
+      UIErrorsFrame:AddMessage("EnchantBuddy: cannot create macro \226\128\148 slots full.", 1, 0.2, 0.2)
       return
     end
     if index then
@@ -156,22 +156,34 @@ local function CreateCustomOptions()
     insets   = { left = 8, right = 8, top = 8, bottom = 8 },
   })
   f:SetBackdropBorderColor(0.4, 0.4, 0.4)
-  f:SetSize(240, 120)
+  -- allow the user to resize if content grows
+  f:SetResizable(true)
+  f:SetMinResize(300, 160) -- minimum: 300x160
+  f:SetMaxResize(600, 400) -- maximum: 600x400
+  f:SetSize(320, 180) -- wider/taller to fit everything
   f:SetPoint("CENTER")
   f:SetMovable(true); f:EnableMouse(true)
   f:RegisterForDrag("LeftButton")
   f:SetScript("OnDragStart", f.StartMoving)
   f:SetScript("OnDragStop", f.StopMovingOrSizing)
 
-  local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+  -- add a scroll area so extra controls won't get cut off
+  local scroll = CreateFrame("ScrollFrame", "EnchantBuddyOptionsScroll", f, "UIPanelScrollFrameTemplate")
+  scroll:SetPoint("TOPLEFT", 10, -30)
+  scroll:SetPoint("BOTTOMRIGHT", -28, 10)
+  local content = CreateFrame("Frame", "EnchantBuddyOptionsContent", scroll)
+  content:SetSize(1, 1) -- will auto-expand
+  scroll:SetScrollChild(content)
+
+  local title = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
   title:SetPoint("TOP", 0, -10)
   title:SetText("EnchantBuddy Settings")
 
-  local keyLabel = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  local keyLabel = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
   keyLabel:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)
   keyLabel:SetText("Current key: " .. (EnchantBuddyDB.key or "none"))
 
-  local setKey = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  local setKey = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
   setKey:SetSize(160, 22)
   setKey:SetPoint("TOPLEFT", keyLabel, "BOTTOMLEFT", 0, -8)
   setKey:SetText("Set Disenchant Key")
@@ -181,7 +193,7 @@ local function CreateCustomOptions()
     print("EnchantBuddy: press any key to bind.")
   end)
 
-  local clearKey = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  local clearKey = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
   clearKey:SetSize(160, 22)
   clearKey:SetPoint("LEFT", setKey, "RIGHT", 8, 0)
   clearKey:SetText("Clear Binding")
@@ -238,6 +250,7 @@ end
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("SPELLS_CHANGED")
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
   if event == "ADDON_LOADED" and arg1 == addonName then
     -- only once
@@ -265,6 +278,55 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     EnsureMacro()
     if not _IsSpellKnown(DISENCHANT_SPELL_ID, true) then
       print("EnchantBuddy: Disenchant not known; button inactive until learned.")
+    end
+    -- ── Minimap Button ────────────────────────────────────────────────
+    if not _G.EnchantBuddyMinimapButton then
+      local mb = CreateFrame("Button", "EnchantBuddyMinimapButton", Minimap, "BackdropTemplate")
+      mb:SetSize(26, 26)
+      mb:SetFrameLevel(Minimap:GetFrameLevel() + 2)
+      mb:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 8,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 }
+      })
+      mb.icon = mb:CreateTexture(nil, "ARTWORK")
+      mb.icon:SetAllPoints()
+      mb.icon:SetTexture("Interface\\Icons\\INV_Scroll_02")
+      EnchantBuddyDB.minimapPos = EnchantBuddyDB.minimapPos or 45
+      local angle = math.rad(EnchantBuddyDB.minimapPos)
+      local radius = 80
+      mb:SetPoint("CENTER", Minimap, "CENTER", radius * math.cos(angle), radius * math.sin(angle))
+      mb:SetMovable(true)
+      mb:RegisterForDrag("LeftButton")
+      mb:SetScript("OnDragStart", function(self) self:StartMoving() end)
+      mb:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local x, y = self:GetCenter()
+        local mX, mY = Minimap:GetCenter()
+        local dx, dy = x - mX, y - mY
+        EnchantBuddyDB.minimapPos = math.deg(math.atan2(dy, dx))
+      end)
+      mb:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText("EnchantBuddy")
+        GameTooltip:Show()
+      end)
+      mb:SetScript("OnLeave", GameTooltip_Hide)
+      mb:SetScript("OnClick", function()
+        if customOptions and customOptions:IsShown() then
+          customOptions:Hide()
+        else
+          customOptions:Show()
+          customOptions:refresh()
+        end
+      end)
+    end
+
+  elseif event == "SPELLS_CHANGED" then
+    if _IsSpellKnown(DISENCHANT_SPELL_ID, true) then
+      DISENCHANT_SPELL_NAME = _GetSpellInfo(DISENCHANT_SPELL_ID)
+      EnsureMacro() -- recreate/update with correct spell name
     end
   end
 end)
