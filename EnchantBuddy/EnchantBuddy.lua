@@ -244,6 +244,7 @@ SlashCmdList.ENCHANTBUDDY = function()
   CreateCustomOptions()
   customOptions:Show()
   customOptions:refresh()
+  EnsureMacro()
 end
 
 -- event handling
