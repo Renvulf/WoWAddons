@@ -258,7 +258,10 @@ local function ScanBags()
             if info and info.hyperlink then
                 local itemID = info.itemID
                 local quality = info.quality
-                local classID = select(6, GetItemInfoInstant(itemID))
+                -- GetItemInfoInstant returns many values; classID is the 12th return
+                -- value while the 10th is the item icon. We specifically need
+                -- the classID here to determine if the item is armor or weapon.
+                local classID = select(12, GetItemInfoInstant(itemID))
                 local skip = false
                 if not DisenchantBuddyDB.global.options.includeSoulbound and info.isBound then
                     skip = true
@@ -331,7 +334,8 @@ local function CreateRow(parent, index)
 
     function row:SetData(data)
         self.data = data
-        local texture = select(5, GetItemInfoInstant(data.itemID))
+        -- Retrieve the item icon (10th return value from GetItemInfoInstant)
+        local texture = select(10, GetItemInfoInstant(data.itemID))
         self.icon:SetTexture(texture)
         self.text:SetText(data.link)
     end
