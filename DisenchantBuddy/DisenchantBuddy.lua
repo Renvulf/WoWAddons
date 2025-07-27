@@ -341,6 +341,11 @@ local function FinishDestroy()
     destroyMonitor:UnregisterAllEvents()
     destroying = false
     castInProgress, lootClosed = false, false
+    if frame and frame.disenchantBtn then
+        frame.disenchantBtn:SetAttribute("*macrotext1", nil)
+        frame.disenchantBtn:SetAttribute("bag", nil)
+        frame.disenchantBtn:SetAttribute("slot", nil)
+    end
     if frame and frame.scroll and RefreshList then
         -- Delay slightly to allow the bag update events to propagate before we
         -- rescan and redraw the list. We defensively check RefreshList in case
@@ -384,11 +389,14 @@ end)
     action which ensures the macro executes properly from a secure environment.
 
     @param button The SecureActionButton being clicked
-    @param bag The bag index of the item to disenchant
-    @param slot The slot index of the item to disenchant
 ]]
-local function StartDestroy(button, bag, slot)
+local function StartDestroy(button)
     if destroying then return end
+
+    local bag = button:GetAttribute("bag")
+    local slot = button:GetAttribute("slot")
+    if not bag or not slot then return end
+
     destroying = true
     castInProgress, lootClosed = false, false
 
@@ -501,6 +509,16 @@ local function RefreshList(scroll)
         scroll.selected = itemList[1]
     end
 
+    if frame and frame.disenchantBtn then
+        if scroll.selected then
+            frame.disenchantBtn:SetAttribute("bag", scroll.selected.bag)
+            frame.disenchantBtn:SetAttribute("slot", scroll.selected.slot)
+        else
+            frame.disenchantBtn:SetAttribute("bag", nil)
+            frame.disenchantBtn:SetAttribute("slot", nil)
+        end
+    end
+
     for i, data in ipairs(itemList) do
         local row = rows[i]
         if not row then
@@ -591,13 +609,15 @@ local function CreateUI()
     disenchantBtn:SetScript("PreClick", function(btn)
         local data = scroll.selected
         if data and _G.DisenchantBuddy_StartDestroy then
-            -- Delegate to StartDestroy which will set the macro text and begin
-            -- monitoring the disenchant process.
-            _G.DisenchantBuddy_StartDestroy(btn, data.bag, data.slot)
+            btn:SetAttribute("bag", data.bag)
+            btn:SetAttribute("slot", data.slot)
+            _G.DisenchantBuddy_StartDestroy(btn)
         else
             btn:SetAttribute("*macrotext1", nil)
         end
     end)
+
+    frame.disenchantBtn = disenchantBtn
 
     -- options frame
     local optionsFrame = CreateFrame("Frame", nil, frame)
