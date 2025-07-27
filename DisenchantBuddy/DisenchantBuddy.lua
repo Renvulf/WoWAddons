@@ -3,7 +3,6 @@ local DB_DEFAULTS = {
     global = {
         options = {
             autoShow = true,
-            autoStack = true,
             includeSoulbound = true,
             includeBOE = true,
             deMaxQuality = 4,
@@ -18,18 +17,7 @@ DisenchantBuddyDB = DisenchantBuddyDB or DB_DEFAULTS
 local sessionIgnore = {}
 local frame
 local itemList = {}
-local combineList = {}
 local nonDE = {}
-
--- Returns whether the item in the specified bag slot is soulbound. This mirrors
--- the check used when scanning the bags for soulbound items.
-local function IsItemSoulbound(bag, slot)
-    if DisenchantBuddyDB.global.options.includeSoulbound then
-        return false
-    end
-    local itemLocation = ItemLocation:CreateFromBagAndSlot(bag, slot)
-    return C_Item.IsBound(itemLocation)
-end
 
 -- Non-disenchantable items list
 nonDE = {
@@ -251,8 +239,6 @@ end
 
 local function ScanBags()
     wipe(itemList)
-    wipe(combineList)
-    local combineTemp = {}
     for bag=0,4 do
         for slot=1,C_Container.GetContainerNumSlots(bag) do
             local info = C_Container.GetContainerItemInfo(bag,slot)
@@ -271,35 +257,12 @@ local function ScanBags()
                 end
                 if not skip and IsDisenchantable(itemID, quality, classID) and not IsIgnored(itemID) then
                     tinsert(itemList, {bag=bag, slot=slot, itemID=itemID, link=info.hyperlink, count=info.stackCount})
-                    local maxStack = select(8, GetItemInfo(itemID)) or 1
-                    if info.stackCount < maxStack then
-                        combineTemp[itemID] = combineTemp[itemID] or {}
-                        tinsert(combineTemp[itemID], {bag=bag, slot=slot, count=info.stackCount})
-                    end
-                end
-            end
-        end
-    end
-    -- Build combine list (pairs of slots)
-    for _, stacks in pairs(combineTemp) do
-        if #stacks > 1 then
-            table.sort(stacks, function(a,b) return a.count < b.count end)
-            for i=1,#stacks-1,2 do
-                local s1, s2 = stacks[i], stacks[i+1]
-                if s1 and s2 then
-                    tinsert(combineList, {fromBag=s1.bag, fromSlot=s1.slot, toBag=s2.bag, toSlot=s2.slot})
                 end
             end
         end
     end
 end
 
-local function CombineStacks()
-    for _,data in ipairs(combineList) do
-        C_Container.PickupContainerItem(data.fromBag, data.fromSlot)
-        C_Container.PickupContainerItem(data.toBag, data.toSlot)
-    end
-end
 
 --[[-------------------------------------------------------------------------
 TSM style destroying support
@@ -356,7 +319,7 @@ local function StartDestroy()
 end
 
 local function CreateRow(parent, index)
-    local row = CreateFrame("Button", nil, parent)
+    local row = CreateFrame("Button", nil, parent.content)
     row:SetHeight(20)
     row:SetPoint("TOPLEFT",0,-(index-1)*20)
     row:SetPoint("RIGHT",0,0)
@@ -419,7 +382,7 @@ local function RefreshList(scroll)
     if not scroll.selected and itemList[1] then
         scroll.selected = itemList[1]
     end
-    scroll.contentHeight = #itemList * 20
+    scroll.content:SetHeight(#itemList * 20)
 end
 
 local function CreateUI()
@@ -471,18 +434,12 @@ local function CreateUI()
     frame.scroll = scroll
 
     local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(1,1)
+    content:SetSize(scroll:GetWidth(), 1)
+    scroll:SetScript("OnSizeChanged", function(self)
+        self.content:SetWidth(self:GetWidth())
+    end)
     scroll:SetScrollChild(content)
     scroll.content = content
-
-    local combineBtn = CreateFrame("Button", nil, listFrame, "UIPanelButtonTemplate")
-    combineBtn:SetPoint("BOTTOMLEFT", 0, -40)
-    combineBtn:SetSize(120,25)
-    combineBtn:SetText("Combine Stacks")
-    combineBtn:SetScript("OnClick", function()
-        CombineStacks()
-        C_Timer.After(0.1, function() RefreshList(scroll) end)
-    end)
 
     local disenchantBtn = CreateFrame("Button", "DisenchantBuddyDestroyBtn", listFrame, "SecureActionButtonTemplate, UIPanelButtonTemplate")
     disenchantBtn:SetPoint("BOTTOMRIGHT", 0, -40)
@@ -557,10 +514,6 @@ local function Toggle()
     else
         frame:Show()
         RefreshList(frame.scroll)
-        if DisenchantBuddyDB.global.options.autoStack and #combineList > 0 then
-            CombineStacks()
-            C_Timer.After(0.1, function() RefreshList(frame.scroll) end)
-        end
     end
 end
 
@@ -577,9 +530,6 @@ f:RegisterEvent("BAG_UPDATE_DELAYED")
 f:SetScript("OnEvent", function()
     if DisenchantBuddyDB.global.options.autoShow and not (frame and frame:IsShown()) then
         ScanBags()
-        if #combineList > 0 and DisenchantBuddyDB.global.options.autoStack then
-            CombineStacks()
-        end
         if #itemList > 0 then
             Toggle()
         end
