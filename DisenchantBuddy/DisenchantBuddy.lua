@@ -334,7 +334,7 @@ TSM style destroying support
 -- Frame used to listen for spellcast and loot events while destroying
 local destroyMonitor = CreateFrame("Frame")
 local destroying = false
-local castInProgress, lootClosed = false, false
+local castInProgress, lootClosed, bagUpdated = false, false, false
 
 -- Refresh the list once the disenchant attempt finishes
 local function FinishDestroy()
@@ -365,15 +365,21 @@ destroyMonitor:SetScript("OnEvent", function(self, event, unit, _, spellID)
     if unit ~= "player" then return end
 
     if event == "UNIT_SPELLCAST_START" and spellID == 13262 then
-        castInProgress = true
+        castInProgress, lootClosed, bagUpdated = true, false, false
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" and spellID == 13262 then
-        -- wait for LOOT_CLOSED -> BAG_UPDATE_DELAYED sequence
+        -- wait for LOOT_CLOSED + BAG_UPDATE_DELAYED sequence
     elseif (event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_FAILED_QUIET" or event == "UNIT_SPELLCAST_INTERRUPTED") and spellID == 13262 then
         FinishDestroy()
     elseif event == "LOOT_CLOSED" and castInProgress then
         lootClosed = true
-    elseif event == "BAG_UPDATE_DELAYED" and castInProgress and lootClosed then
-        FinishDestroy()
+        if bagUpdated then
+            FinishDestroy()
+        end
+    elseif event == "BAG_UPDATE_DELAYED" and castInProgress then
+        bagUpdated = true
+        if lootClosed then
+            FinishDestroy()
+        end
     end
 end)
 
@@ -398,7 +404,7 @@ local function StartDestroy(button)
     if not bag or not slot then return end
 
     destroying = true
-    castInProgress, lootClosed = false, false
+    castInProgress, lootClosed, bagUpdated = false, false, false
 
     -- Set the macro which casts Disenchant on the selected bag slot.  The
     -- localized spell name is used so that the macro works on all clients.
