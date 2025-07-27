@@ -18,6 +18,7 @@ local sessionIgnore = {}
 local frame
 local itemList = {}
 local nonDE = {}
+local pendingLoad = {}
 
 -- Non-disenchantable items list
 nonDE = {
@@ -227,7 +228,9 @@ end
 local function IsDisenchantable(itemID, quality, classID)
     if not itemID or not quality or not classID then return false end
     if nonDE["i:"..itemID] then return false end
-    if classID ~= LE_ITEM_CLASS_ARMOR and classID ~= LE_ITEM_CLASS_WEAPON then return false end
+    local armorClass = Enum and Enum.ItemClass and Enum.ItemClass.Armor or LE_ITEM_CLASS_ARMOR
+    local weaponClass = Enum and Enum.ItemClass and Enum.ItemClass.Weapon or LE_ITEM_CLASS_WEAPON
+    if classID ~= armorClass and classID ~= weaponClass then return false end
     if quality < 2 or quality > DisenchantBuddyDB.global.options.deMaxQuality then return false end
     return true
 end
@@ -240,23 +243,28 @@ end
 local function ScanBags()
     wipe(itemList)
     for bag=0,4 do
-        for slot=1,C_Container.GetContainerNumSlots(bag) do
-            local info = C_Container.GetContainerItemInfo(bag,slot)
-            if info and info.hyperlink then
+        for slot=1, C_Container.GetContainerNumSlots(bag) do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID then
                 local itemID = info.itemID
                 local quality = info.quality
-                -- GetItemInfoInstant returns many values; classID is the 12th return
-                -- value while the 10th is the item icon. We specifically need
-                -- the classID here to determine if the item is armor or weapon.
                 local classID = select(12, GetItemInfoInstant(itemID))
-                local skip = false
-                if not DisenchantBuddyDB.global.options.includeSoulbound and info.isBound then
-                    skip = true
-                elseif not DisenchantBuddyDB.global.options.includeBOE and not info.isBound and IsItemBindOnEquip(itemID) then
-                    skip = true
-                end
-                if not skip and IsDisenchantable(itemID, quality, classID) and not IsIgnored(itemID) then
-                    tinsert(itemList, {bag=bag, slot=slot, itemID=itemID, link=info.hyperlink, count=info.stackCount})
+                if not classID then
+                    -- Item data not ready yet; request it and refresh once loaded
+                    if not pendingLoad[itemID] then
+                        pendingLoad[itemID] = true
+                        C_Item.RequestLoadItemDataByID(itemID)
+                    end
+                else
+                    local skip = false
+                    if not DisenchantBuddyDB.global.options.includeSoulbound and info.isBound then
+                        skip = true
+                    elseif not DisenchantBuddyDB.global.options.includeBOE and not info.isBound and IsItemBindOnEquip(itemID) then
+                        skip = true
+                    end
+                    if not skip and IsDisenchantable(itemID, quality, classID) and not IsIgnored(itemID) then
+                        tinsert(itemList, {bag=bag, slot=slot, itemID=itemID, link=info.hyperlink, count=info.stackCount})
+                    end
                 end
             end
         end
@@ -527,7 +535,19 @@ SlashCmdList["DISENCHANTBUDDY"] = Toggle
 -- Auto show on bag update if enabled
 local f = CreateFrame("Frame")
 f:RegisterEvent("BAG_UPDATE_DELAYED")
-f:SetScript("OnEvent", function()
+f:RegisterEvent("ITEM_DATA_LOAD_RESULT")
+f:SetScript("OnEvent", function(_, event, ...)
+    if event == "ITEM_DATA_LOAD_RESULT" then
+        local itemID, success = ...
+        if success and pendingLoad[itemID] then
+            pendingLoad[itemID] = nil
+            if frame and frame:IsShown() then
+                RefreshList(frame.scroll)
+            end
+        end
+        return
+    end
+
     if DisenchantBuddyDB.global.options.autoShow and not (frame and frame:IsShown()) then
         ScanBags()
         if #itemList > 0 then
