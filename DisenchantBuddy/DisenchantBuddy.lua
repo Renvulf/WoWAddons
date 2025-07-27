@@ -21,7 +21,7 @@ local combineList = {}
 local nonDE = {}
 
 -- Returns whether the item in the specified bag slot is soulbound. This mirrors
--- TSM's check for filtering soulbound items when scanning the bags.
+-- the check used when scanning the bags for soulbound items.
 local function IsItemSoulbound(bag, slot)
     if DisenchantBuddyDB.global.options.includeSoulbound then
         return false
@@ -30,7 +30,7 @@ local function IsItemSoulbound(bag, slot)
     return C_Item.IsBound(itemLocation)
 end
 
--- Non-disenchantable items copied from TSM
+-- Non-disenchantable items list
 nonDE = {
 	["i:38"] = true,
 	["i:45"] = true,

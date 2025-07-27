@@ -2,6 +2,6 @@
 ## Title: DisenchantBuddy
 ## Author: Example
 ## Version: 1.0
-## Notes: Simplified disenchanting helper extracted from TSM
+## Notes: Simplified disenchanting helper
 ## SavedVariables: DisenchantBuddyDB
 DisenchantBuddy.lua
