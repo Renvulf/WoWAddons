@@ -266,29 +266,32 @@ local function ScanBags()
                 -- C_Item API which handles asynchronous item information.
                 local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
 
-                -- If the item data hasn't been cached yet request it and wait for
-                -- ITEM_DATA_LOAD_RESULT before processing this slot.
-                if not C_Item.IsItemDataCachedByID(itemID) then
+                -- Attempt to pull item class information from the instant cache.
+                local _, _, _, _, _, classID = GetItemInfoInstant(itemID)
+                if not classID then
+                    -- Data not available yet, request it and skip processing this slot
                     if not pendingLoad[itemID] then
                         pendingLoad[itemID] = true
                         C_Item.RequestLoadItemDataByID(itemID)
                     end
                 else
-                    -- With cached data available we can safely obtain the class ID.
-                    local classID = C_Item.GetItemClassID(loc)
+                    -- We have the class ID so run the usual filtering logic
+                    local skip = false
+                    if not DisenchantBuddyDB.global.options.includeSoulbound and info.isBound then
+                        skip = true
+                    elseif not DisenchantBuddyDB.global.options.includeBOE and not info.isBound and IsItemBindOnEquip(itemID) then
+                        skip = true
+                    end
 
-                    if classID then
-                        local skip = false
-                        if not DisenchantBuddyDB.global.options.includeSoulbound and info.isBound then
-                            skip = true
-                        elseif not DisenchantBuddyDB.global.options.includeBOE and not info.isBound and IsItemBindOnEquip(itemID) then
-                            skip = true
-                        end
-
-                        if not skip and IsDisenchantable(itemID, quality, classID) and not IsIgnored(itemID) then
-                            local link = C_Item.GetItemLink(loc) or info.hyperlink
-                            tinsert(itemList, {bag = bag, slot = slot, itemID = itemID, link = link, count = info.stackCount})
-                        end
+                    if not skip and IsDisenchantable(itemID, quality, classID) and not IsIgnored(itemID) then
+                        local link = (C_Item.GetItemLink and C_Item.GetItemLink(loc)) or info.hyperlink
+                        tinsert(itemList, {
+                            bag    = bag,
+                            slot   = slot,
+                            itemID = itemID,
+                            link   = link,
+                            count  = info.stackCount,
+                        })
                     end
                 end
             end
@@ -392,8 +395,8 @@ local function CreateRow(parent, index)
 
     function row:SetData(data)
         self.data = data
-        -- Retrieve the item icon (10th return value from GetItemInfoInstant)
-        local texture = select(10, GetItemInfoInstant(data.itemID))
+        -- Retrieve the item icon from GetItemInfoInstant (5th return value)
+        local texture = select(5, GetItemInfoInstant(data.itemID))
         -- Fallback to a question mark icon if the texture isn't known yet
         self.icon:SetTexture(texture or 134400)
         self.text:SetText(data.link or "Unknown Item")
