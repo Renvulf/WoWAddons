@@ -436,36 +436,28 @@ local function CreateUI()
     frame.title:SetText("DisenchantBuddy")
 
     -- tabs setup
-    -- Tab frames must exist before calling PanelTemplates_SetNumTabs so that
-    -- Blizzard's tab handling code can find them by name. Use the $parent
-    -- prefix so the names are of the form "DisenchantBuddyFrameTabX" as
-    -- expected by PanelTemplates.
+    -- The Blizzard tab templates changed in Dragonflight and no longer work
+    -- reliably when created dynamically via Lua (the `OnShow` handler runs
+    -- before the template's child regions such as `Text` are available which
+    -- results in errors inside `PanelTemplates_TabResize`).  To avoid these
+    -- issues we create simple buttons styled like tabs and handle the
+    -- highlighting ourselves.
+
     frame:SetClampedToScreen(true)
 
-    -- Use explicit names for the tabs so the sub regions (like the Text font
-    -- string) are created correctly. Using "$parent" in the name works in XML
-    -- templates but not when creating frames via Lua which resulted in the
-    -- ``Text`` field being nil and triggering an error inside
-    -- `PanelTemplates_TabResize`.
-    local listTab = CreateFrame("Button", "DisenchantBuddyFrameTab1", frame, "OptionsFrameTabButtonTemplate")
-    -- Manually assign the Text region created by the template so that
-    -- PanelTemplates functions can access it when resizing.
-    listTab.Text = listTab.Text or _G[listTab:GetName() .. "Text"]
-    listTab:SetText("Items")
-    listTab:SetID(1)
+    local function CreateTabButton(name, label, id)
+        local btn = CreateFrame("Button", name, frame, "UIPanelButtonTemplate")
+        btn:SetText(label)
+        btn:SetSize(btn:GetFontString():GetStringWidth() + 20, 22)
+        btn.id = id
+        return btn
+    end
+
+    local listTab = CreateTabButton("DisenchantBuddyFrameTab1", "Items", 1)
     listTab:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 5, 7)
-    PanelTemplates_TabResize(listTab, 0)
 
-    local optionsTab = CreateFrame("Button", "DisenchantBuddyFrameTab2", frame, "OptionsFrameTabButtonTemplate")
-    optionsTab.Text = optionsTab.Text or _G[optionsTab:GetName() .. "Text"]
-    optionsTab:SetText("Options")
-    optionsTab:SetID(2)
-    optionsTab:SetPoint("LEFT", listTab, "RIGHT", -15, 0)
-    PanelTemplates_TabResize(optionsTab, 0)
-
-    -- Now that the tab frames exist, let the panel template library know how
-    -- many tabs there are so it can anchor them properly.
-    PanelTemplates_SetNumTabs(frame, 2)
+    local optionsTab = CreateTabButton("DisenchantBuddyFrameTab2", "Options", 2)
+    optionsTab:SetPoint("LEFT", listTab, "RIGHT", 4, 0)
 
     -- list frame
     local listFrame = CreateFrame("Frame", nil, frame)
@@ -534,21 +526,22 @@ local function CreateUI()
         DisenchantBuddyDB.global.options.includeBOE = self:GetChecked()
     end)
 
-    local function ShowTab(id)
-        if id == 1 then
+    local function UpdateTabs(selected)
+        listTab:SetEnabled(selected ~= 1)
+        optionsTab:SetEnabled(selected ~= 2)
+        if selected == 1 then
             listFrame:Show()
             optionsFrame:Hide()
         else
             optionsFrame:Show()
             listFrame:Hide()
         end
-        PanelTemplates_SetTab(frame, id)
     end
 
-    listTab:SetScript("OnClick", function() ShowTab(1) end)
-    optionsTab:SetScript("OnClick", function() ShowTab(2) end)
+    listTab:SetScript("OnClick", function() UpdateTabs(1) end)
+    optionsTab:SetScript("OnClick", function() UpdateTabs(2) end)
 
-    ShowTab(1)
+    UpdateTabs(1)
 
     frame.listFrame = listFrame
     frame.optionsFrame = optionsFrame
