@@ -382,20 +382,27 @@ local function CreateUI()
     frame.title:SetText("DisenchantBuddy")
 
     -- tabs setup
-    PanelTemplates_SetNumTabs(frame, 2)
+    -- Tab frames must exist before calling PanelTemplates_SetNumTabs so that
+    -- Blizzard's tab handling code can find them by name. Use the $parent
+    -- prefix so the names are of the form "DisenchantBuddyFrameTabX" as
+    -- expected by PanelTemplates.
     frame:SetClampedToScreen(true)
 
-    local listTab = CreateFrame("Button", nil, frame, "OptionsFrameTabButtonTemplate")
+    local listTab = CreateFrame("Button", "$parentTab1", frame, "OptionsFrameTabButtonTemplate")
     listTab:SetText("Items")
     listTab:SetID(1)
     listTab:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 5, 7)
     PanelTemplates_TabResize(listTab, 0)
 
-    local optionsTab = CreateFrame("Button", nil, frame, "OptionsFrameTabButtonTemplate")
+    local optionsTab = CreateFrame("Button", "$parentTab2", frame, "OptionsFrameTabButtonTemplate")
     optionsTab:SetText("Options")
     optionsTab:SetID(2)
     optionsTab:SetPoint("LEFT", listTab, "RIGHT", -15, 0)
     PanelTemplates_TabResize(optionsTab, 0)
+
+    -- Now that the tab frames exist, let the panel template library know how
+    -- many tabs there are so it can anchor them properly.
+    PanelTemplates_SetNumTabs(frame, 2)
 
     -- list frame
     local listFrame = CreateFrame("Frame", nil, frame)
