@@ -255,35 +255,40 @@ end
 
 local function ScanBags()
     wipe(itemList)
-    for bag=0,4 do
-        for slot=1, C_Container.GetContainerNumSlots(bag) do
+    for bag = 0, 4 do
+        for slot = 1, C_Container.GetContainerNumSlots(bag) do
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.itemID then
                 local itemID = info.itemID
                 local quality = info.quality
-                local ok, classID = pcall(function()
-                    return select(12, GetItemInfoInstant(itemID))
-                end)
-                if not ok then
-                    classID = nil
-                end
-                if not classID then
-                    -- Item data not ready yet; request it and refresh once loaded.
-                    -- Guard against synchronous ITEM_DATA_LOAD_RESULT events
-                    -- triggering a recursive scan which can overflow the stack.
-                    if not pendingLoad[itemID] and not C_Item.IsItemDataCachedByID(itemID) then
+
+                -- Build an ItemLocation for the slot so we can query data via the
+                -- C_Item API which handles asynchronous item information.
+                local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
+
+                -- If the item data hasn't been cached yet request it and wait for
+                -- ITEM_DATA_LOAD_RESULT before processing this slot.
+                if not C_Item.IsItemDataCachedByID(itemID) then
+                    if not pendingLoad[itemID] then
                         pendingLoad[itemID] = true
                         C_Item.RequestLoadItemDataByID(itemID)
                     end
                 else
-                    local skip = false
-                    if not DisenchantBuddyDB.global.options.includeSoulbound and info.isBound then
-                        skip = true
-                    elseif not DisenchantBuddyDB.global.options.includeBOE and not info.isBound and IsItemBindOnEquip(itemID) then
-                        skip = true
-                    end
-                    if not skip and IsDisenchantable(itemID, quality, classID) and not IsIgnored(itemID) then
-                        tinsert(itemList, {bag=bag, slot=slot, itemID=itemID, link=info.hyperlink, count=info.stackCount})
+                    -- With cached data available we can safely obtain the class ID.
+                    local classID = C_Item.GetItemClassID(loc)
+
+                    if classID then
+                        local skip = false
+                        if not DisenchantBuddyDB.global.options.includeSoulbound and info.isBound then
+                            skip = true
+                        elseif not DisenchantBuddyDB.global.options.includeBOE and not info.isBound and IsItemBindOnEquip(itemID) then
+                            skip = true
+                        end
+
+                        if not skip and IsDisenchantable(itemID, quality, classID) and not IsIgnored(itemID) then
+                            local link = C_Item.GetItemLink(loc) or info.hyperlink
+                            tinsert(itemList, {bag = bag, slot = slot, itemID = itemID, link = link, count = info.stackCount})
+                        end
                     end
                 end
             end
