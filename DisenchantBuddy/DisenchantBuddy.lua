@@ -9,6 +9,7 @@ local DB_DEFAULTS = {
             deMaxQuality = 4,
         },
         ignorePermanent = {},
+        minimap = { hide = false, minimapPos = 220, radius = 80 },
     }
 }
 
@@ -432,7 +433,11 @@ local function Toggle()
     end
 end
 
+-- Expose toggle for other files (e.g., minimap button)
+DisenchantBuddy_Toggle = Toggle
+
 SLASH_DISENCHANTBUDDY1 = "/disbuddy"
+SLASH_DISENCHANTBUDDY2 = "/db"
 SlashCmdList["DISENCHANTBUDDY"] = Toggle
 
 -- Auto show on bag update if enabled
