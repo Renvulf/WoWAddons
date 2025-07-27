@@ -378,10 +378,24 @@ end)
 -- Starts monitoring the disenchant spellcast similar to how TSM does.
 -- Exposed globally so the secure button PreClick handler can access it.
 --
-local function StartDestroy()
+--[[
+    Starts monitoring the disenchant process and sets the macro text on the
+    button.  This mirrors how TSM's Destroying module initiates the disenchant
+    action which ensures the macro executes properly from a secure environment.
+
+    @param button The SecureActionButton being clicked
+    @param bag The bag index of the item to disenchant
+    @param slot The slot index of the item to disenchant
+]]
+local function StartDestroy(button, bag, slot)
     if destroying then return end
     destroying = true
     castInProgress, lootClosed = false, false
+
+    -- Set the macro which casts Disenchant on the selected bag slot.  The
+    -- localized spell name is used so that the macro works on all clients.
+    button:SetAttribute("*macrotext1", string.format("/cast %s;\n/use %d %d", DISENCHANT_NAME, bag, slot))
+
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_START")
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_FAILED")
@@ -390,7 +404,9 @@ local function StartDestroy()
     destroyMonitor:RegisterEvent("LOOT_CLOSED")
     destroyMonitor:RegisterEvent("LOOT_READY")
     destroyMonitor:RegisterEvent("BAG_UPDATE_DELAYED")
-    -- Safety timeout in case something goes wrong
+
+    -- Safety timeout in case something goes wrong and we never see the expected
+    -- events.  This prevents the button from getting stuck in a disabled state.
     C_Timer.After(5, function()
         if destroying then
             FinishDestroy()
@@ -574,14 +590,10 @@ local function CreateUI()
     disenchantBtn:SetAttribute("*type1", "macro")
     disenchantBtn:SetScript("PreClick", function(btn)
         local data = scroll.selected
-        if data then
-            -- Use the cached localized spell name so the macro works on all clients
-            btn:SetAttribute("*macrotext1", string.format("/cast %s;\n/use %d %d", DISENCHANT_NAME, data.bag, data.slot))
-            -- Start monitoring the disenchant process before the cast so we
-            -- can refresh the UI once it completes or fails.
-            if _G.DisenchantBuddy_StartDestroy then
-                _G.DisenchantBuddy_StartDestroy()
-            end
+        if data and _G.DisenchantBuddy_StartDestroy then
+            -- Delegate to StartDestroy which will set the macro text and begin
+            -- monitoring the disenchant process.
+            _G.DisenchantBuddy_StartDestroy(btn, data.bag, data.slot)
         else
             btn:SetAttribute("*macrotext1", nil)
         end
