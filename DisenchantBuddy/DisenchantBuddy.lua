@@ -403,6 +403,10 @@ local function CreateRow(parent, index)
     row.hide:SetPoint("RIGHT")
     row.hide:SetNormalTexture(134400) -- X icon
 
+    -- Highlight texture to indicate the selected row similar to TSM
+    row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+    row:GetHighlightTexture():SetBlendMode("ADD")
+
     row:SetScript("OnClick", function(self)
         parent.selected = self.data
         parent:Refresh()
@@ -457,6 +461,11 @@ local function RefreshList(scroll)
         end
         row:SetData(data)
         row:SetWidth(scroll:GetWidth())
+        if scroll.selected == data then
+            row:LockHighlight()
+        else
+            row:UnlockHighlight()
+        end
         row:Show()
     end
     if not scroll.selected and itemList[1] then
@@ -528,17 +537,21 @@ local function CreateUI()
     disenchantBtn:SetPoint("BOTTOMRIGHT", 0, -40)
     disenchantBtn:SetSize(120,25)
     disenchantBtn:SetText("Disenchant Next")
-    disenchantBtn:SetAttribute("type", "macro")
+    -- Explicitly register for left button clicks like TSM's SecureMacroActionButton
+    disenchantBtn:RegisterForClicks("LeftButtonUp")
+    -- Use the per-button attribute names (*type1 and *macrotext1) to mirror
+    -- TSM's implementation and avoid issues on some clients
+    disenchantBtn:SetAttribute("*type1", "macro")
     disenchantBtn:SetScript("PreClick", function(btn)
         local data = scroll.selected
         if data then
             -- Use the cached localized spell name so the macro works on all clients
-            btn:SetAttribute("macrotext", string.format("/cast %s;\n/use %d %d", DISENCHANT_NAME, data.bag, data.slot))
+            btn:SetAttribute("*macrotext1", string.format("/cast %s;\n/use %d %d", DISENCHANT_NAME, data.bag, data.slot))
             -- Start monitoring the disenchant process before the cast so we
             -- can refresh the UI once it completes or fails.
             StartDestroy()
         else
-            btn:SetAttribute("macrotext", nil)
+            btn:SetAttribute("*macrotext1", nil)
         end
     end)
 
