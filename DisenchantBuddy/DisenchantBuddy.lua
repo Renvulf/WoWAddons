@@ -34,6 +34,22 @@ local refreshQueued = false
 -- Forward declaration so functions defined earlier can reference it
 local RefreshList
 
+-- Cache the localized Disenchant spell name outside of any secure handlers.
+-- In retail this information is accessed via `C_Spell.GetSpellInfo` while
+-- older clients expose `GetSpellInfo`.  The cached value is then used inside
+-- the secure button's `PreClick` handler where calling these APIs is not
+-- permitted.
+local DISENCHANT_NAME
+do
+    local info = (C_Spell and C_Spell.GetSpellInfo) and C_Spell.GetSpellInfo(13262)
+    if info and info.name then
+        DISENCHANT_NAME = info.name
+    elseif GetSpellInfo then
+        DISENCHANT_NAME = GetSpellInfo(13262)
+    end
+    DISENCHANT_NAME = DISENCHANT_NAME or "Disenchant"
+end
+
 -- Non-disenchantable items list
 nonDE = {
 	["i:38"] = true,
@@ -516,9 +532,8 @@ local function CreateUI()
     disenchantBtn:SetScript("PreClick", function(btn)
         local data = scroll.selected
         if data then
-            -- Use the localized spell name like TSM so the macro works on all clients
-            local deName = GetSpellInfo(13262) or "Disenchant"
-            btn:SetAttribute("macrotext", string.format("/cast %s;\n/use %d %d", deName, data.bag, data.slot))
+            -- Use the cached localized spell name so the macro works on all clients
+            btn:SetAttribute("macrotext", string.format("/cast %s;\n/use %d %d", DISENCHANT_NAME, data.bag, data.slot))
             -- Start monitoring the disenchant process before the cast so we
             -- can refresh the UI once it completes or fails.
             StartDestroy()
