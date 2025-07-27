@@ -31,6 +31,8 @@ local itemList = {}
 local nonDE = {}
 local pendingLoad = {}
 local refreshQueued = false
+-- Forward declaration so functions defined earlier can reference it
+local RefreshList
 
 -- Non-disenchantable items list
 nonDE = {
@@ -391,6 +393,18 @@ local function CreateRow(parent, index)
         end
         ScanBags()
         parent:Refresh()
+    end)
+
+    -- Show item tooltip on hover similar to TSM's destroying list
+    row:SetScript("OnEnter", function(self)
+        if self.data and self.data.link then
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetHyperlink(self.data.link)
+            GameTooltip:Show()
+        end
+    end)
+    row:SetScript("OnLeave", function()
+        GameTooltip:Hide()
     end)
 
     function row:SetData(data)
