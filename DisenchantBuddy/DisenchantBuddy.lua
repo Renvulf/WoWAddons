@@ -275,6 +275,18 @@ end
 
 local function IsItemBindOnEquip(itemID)
     local bindType = select(14, GetItemInfo(itemID))
+    if not bindType then
+        -- Item information not yet available. Request it similar to how we
+        -- handle missing data elsewhere so the scan will pick it up once the
+        -- client loads the data.
+        if not pendingLoad[itemID] then
+            pendingLoad[itemID] = true
+            if C_Item and C_Item.RequestLoadItemDataByID then
+                C_Item.RequestLoadItemDataByID(itemID)
+            end
+        end
+        return false
+    end
     local boe = (Enum and Enum.ItemBindType and Enum.ItemBindType.OnEquip) or _G.LE_ITEM_BIND_ON_EQUIP or 2
     return bindType == boe
 end
@@ -643,6 +655,9 @@ local function CreateUI()
     sbCheck:SetChecked(DisenchantBuddyDB.global.options.includeSoulbound)
     sbCheck:SetScript("OnClick", function(self)
         DisenchantBuddyDB.global.options.includeSoulbound = self:GetChecked()
+        if frame and frame.scroll then
+            RefreshList(frame.scroll)
+        end
     end)
 
     local boeCheck = CreateFrame("CheckButton", nil, optionsFrame, "UICheckButtonTemplate")
@@ -653,6 +668,9 @@ local function CreateUI()
     boeCheck:SetChecked(DisenchantBuddyDB.global.options.includeBOE)
     boeCheck:SetScript("OnClick", function(self)
         DisenchantBuddyDB.global.options.includeBOE = self:GetChecked()
+        if frame and frame.scroll then
+            RefreshList(frame.scroll)
+        end
     end)
 
     local function UpdateTabs(selected)
@@ -753,6 +771,9 @@ local function CreateOptions()
     sbCheck:SetChecked(DisenchantBuddyDB.global.options.includeSoulbound)
     sbCheck:SetScript("OnClick", function(self)
         DisenchantBuddyDB.global.options.includeSoulbound = self:GetChecked()
+        if frame and frame.scroll and frame:IsShown() then
+            RefreshList(frame.scroll)
+        end
     end)
 
     local boeCheck = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
@@ -761,6 +782,9 @@ local function CreateOptions()
     boeCheck:SetChecked(DisenchantBuddyDB.global.options.includeBOE)
     boeCheck:SetScript("OnClick", function(self)
         DisenchantBuddyDB.global.options.includeBOE = self:GetChecked()
+        if frame and frame.scroll and frame:IsShown() then
+            RefreshList(frame.scroll)
+        end
     end)
 
     InterfaceOptions_AddCategory(panel)
