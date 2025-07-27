@@ -357,12 +357,33 @@ TSM style destroying support
 local destroyMonitor = CreateFrame("Frame")
 local destroying = false
 local castInProgress, lootClosed, bagUpdated = false, false, false
+local startBag, startSlot, startQuantity
+
+-- Check whether the original item stack has been removed from the bags and
+-- finish the destroy process once it is. This mirrors the extra validation
+-- performed in TSM's destroying thread to ensure the cast fully completed
+-- before re-enabling the button.
+local function TryFinish()
+    if not destroying or not lootClosed or not bagUpdated then
+        return
+    end
+
+    local info = C_Container.GetContainerItemInfo(startBag, startSlot)
+    local count = info and info.stackCount or 0
+    if count ~= startQuantity then
+        FinishDestroy()
+    else
+        -- Item count hasn't updated yet so try again shortly
+        C_Timer.After(0.05, TryFinish)
+    end
+end
 
 -- Refresh the list once the disenchant attempt finishes
 local function FinishDestroy()
     destroyMonitor:UnregisterAllEvents()
     destroying = false
-    castInProgress, lootClosed = false, false
+    castInProgress, lootClosed, bagUpdated = false, false, false
+    startBag, startSlot, startQuantity = nil, nil, nil
     if frame and frame.disenchantBtn then
         frame.disenchantBtn:SetAttribute("*macrotext1", nil)
         frame.disenchantBtn:SetAttribute("bag", nil)
@@ -393,20 +414,14 @@ destroyMonitor:SetScript("OnEvent", function(self, event, unit, _, spellID)
 
     if event == "UNIT_SPELLCAST_START" and spellID == 13262 then
         castInProgress, lootClosed, bagUpdated = true, false, false
-    elseif event == "UNIT_SPELLCAST_SUCCEEDED" and spellID == 13262 then
-        -- wait for LOOT_CLOSED + BAG_UPDATE_DELAYED sequence
     elseif (event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_FAILED_QUIET" or event == "UNIT_SPELLCAST_INTERRUPTED") and spellID == 13262 then
         FinishDestroy()
     elseif event == "LOOT_CLOSED" and castInProgress then
         lootClosed = true
-        if bagUpdated then
-            FinishDestroy()
-        end
+        TryFinish()
     elseif event == "BAG_UPDATE_DELAYED" and castInProgress then
         bagUpdated = true
-        if lootClosed then
-            FinishDestroy()
-        end
+        TryFinish()
     end
 end)
 
@@ -437,6 +452,12 @@ local function StartDestroy(button)
     local slot = button:GetAttribute("slot")
     if not bag or not slot then return end
 
+    -- Record the starting stack information so we can detect when the item is
+    -- removed from the bags after disenchanting.
+    local info = C_Container.GetContainerItemInfo(bag, slot)
+    startBag, startSlot = bag, slot
+    startQuantity = info and info.stackCount or 0
+
     destroying = true
     castInProgress, lootClosed, bagUpdated = false, false, false
 
@@ -448,17 +469,15 @@ local function StartDestroy(button)
     button:SetAttribute("*macrotext1", string.format("/cast %s;\n/use %d %d", DISENCHANT_NAME, bag, slot))
 
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_START")
-    destroyMonitor:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_FAILED")
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_FAILED_QUIET")
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
     destroyMonitor:RegisterEvent("LOOT_CLOSED")
-    destroyMonitor:RegisterEvent("LOOT_READY")
     destroyMonitor:RegisterEvent("BAG_UPDATE_DELAYED")
 
     -- Safety timeout in case something goes wrong and we never see the expected
     -- events.  This prevents the button from getting stuck in a disabled state.
-    C_Timer.After(5, function()
+    C_Timer.After(3, function()
         if destroying then
             FinishDestroy()
         end
