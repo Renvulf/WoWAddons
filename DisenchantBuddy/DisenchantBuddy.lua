@@ -601,17 +601,22 @@ local function CreateUI()
     disenchantBtn:SetPoint("BOTTOMRIGHT", 0, -40)
     disenchantBtn:SetSize(120,25)
     disenchantBtn:SetText("Disenchant Next")
-    -- Explicitly register for left button clicks like TSM's SecureMacroActionButton
-    disenchantBtn:RegisterForClicks("LeftButtonUp")
+    -- Register for click events respecting the ActionButtonUseKeyDown CVar like
+    -- TSM's SecureMacroActionButton so the macro fires at the expected time on
+    -- all clients.
+    disenchantBtn:RegisterForClicks(GetCVarBool("ActionButtonUseKeyDown") and "LeftButtonDown" or "LeftButtonUp")
     -- Use the per-button attribute names (*type1 and *macrotext1) to mirror
     -- TSM's implementation and avoid issues on some clients
     disenchantBtn:SetAttribute("*type1", "macro")
+    disenchantBtn:SetAttribute("*macrotext1", "")
     disenchantBtn:SetScript("PreClick", function(btn)
         local data = scroll.selected
         if data and _G.DisenchantBuddy_StartDestroy then
             btn:SetAttribute("bag", data.bag)
             btn:SetAttribute("slot", data.slot)
-            _G.DisenchantBuddy_StartDestroy(btn)
+            -- Use securecall to invoke the starter function so it works from a
+            -- secure handler regardless of combat lockdown state.
+            securecall(_G.DisenchantBuddy_StartDestroy, btn)
         else
             btn:SetAttribute("*macrotext1", nil)
         end
