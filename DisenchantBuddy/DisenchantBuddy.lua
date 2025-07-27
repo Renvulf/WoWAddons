@@ -41,13 +41,13 @@ local RefreshList
 -- permitted.
 local DISENCHANT_NAME
 do
-    local info = (C_Spell and C_Spell.GetSpellInfo) and C_Spell.GetSpellInfo(13262)
-    if info and info.name then
-        DISENCHANT_NAME = info.name
+    local name
+    if C_Spell and C_Spell.GetSpellInfo then
+        name = C_Spell.GetSpellInfo(13262)
     elseif GetSpellInfo then
-        DISENCHANT_NAME = GetSpellInfo(13262)
+        name = GetSpellInfo(13262)
     end
-    DISENCHANT_NAME = DISENCHANT_NAME or "Disenchant"
+    DISENCHANT_NAME = name or "Disenchant"
 end
 
 -- Non-disenchantable items list
@@ -273,7 +273,8 @@ end
 
 local function ScanBags()
     wipe(itemList)
-    for bag = 0, 4 do
+    -- Include the reagent bag (index 5) on modern clients just like TSM does
+    for bag = 0, 5 do
         for slot = 1, C_Container.GetContainerNumSlots(bag) do
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info and info.itemID then
@@ -365,6 +366,10 @@ end)
 
 -- Starts monitoring for disenchant events. Called right before executing the
 -- macro which casts Disenchant on the selected item.
+--
+-- Starts monitoring the disenchant spellcast similar to how TSM does.
+-- Exposed globally so the secure button PreClick handler can access it.
+--
 local function StartDestroy()
     if destroying then return end
     destroying = true
@@ -384,6 +389,9 @@ local function StartDestroy()
         end
     end)
 end
+
+-- Export for the secure environment
+_G.DisenchantBuddy_StartDestroy = StartDestroy
 
 local function CreateRow(parent, index)
     local row = CreateFrame("Button", nil, parent.content)
@@ -563,7 +571,9 @@ local function CreateUI()
             btn:SetAttribute("*macrotext1", string.format("/cast %s;\n/use %d %d", DISENCHANT_NAME, data.bag, data.slot))
             -- Start monitoring the disenchant process before the cast so we
             -- can refresh the UI once it completes or fails.
-            StartDestroy()
+            if _G.DisenchantBuddy_StartDestroy then
+                _G.DisenchantBuddy_StartDestroy()
+            end
         else
             btn:SetAttribute("*macrotext1", nil)
         end
