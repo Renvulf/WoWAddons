@@ -388,11 +388,9 @@ local function FinishDestroy()
         frame.disenchantBtn:SetAttribute("*macrotext1", nil)
         frame.disenchantBtn:SetAttribute("bag", nil)
         frame.disenchantBtn:SetAttribute("slot", nil)
-        -- Re-enable the button now that we're done. This mirrors how TSM's
-        -- destroying UI behaves and prevents the user from starting another
-        -- disenchant mid-cast which could leave the cursor with the spell
-        -- active but no target item selected.
-        frame.disenchantBtn:Enable()
+        -- Clear the macro attributes so the next click will set up a new
+        -- disenchant. The button itself stays enabled the entire time so the
+        -- user can keep clicking even while waiting for the cast to finish.
     end
     if frame and frame.scroll and RefreshList then
         -- Delay slightly to allow the bag update events to propagate before we
@@ -466,8 +464,9 @@ local function StartDestroy(button)
     destroying = true
     castInProgress, spellSucceeded, lootClosed, bagUpdated = false, false, false, false
 
-    -- Prevent additional clicks until this disenchant completes
-    button:Disable()
+    -- The button remains enabled so the user can spam click like in TSM's
+    -- Destroying UI.  StartDestroy will simply clear the macro if a destroy is
+    -- already underway which prevents any additional casts.
 
     -- Set the macro which casts Disenchant on the selected bag slot.  The
     -- localized spell name is used so that the macro works on all clients.
