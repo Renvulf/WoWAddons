@@ -308,11 +308,13 @@ TSM style destroying support
 -- Frame used to listen for spellcast and loot events while destroying
 local destroyMonitor = CreateFrame("Frame")
 local destroying = false
+local castInProgress, lootClosed = false, false
 
 -- Refresh the list once the disenchant attempt finishes
 local function FinishDestroy()
     destroyMonitor:UnregisterAllEvents()
     destroying = false
+    castInProgress, lootClosed = false, false
     if frame and frame.scroll then
         C_Timer.After(0.1, function() RefreshList(frame.scroll) end)
     end
@@ -325,12 +327,14 @@ destroyMonitor:SetScript("OnEvent", function(self, event, unit, _, spellID)
     if unit ~= "player" then return end
 
     if event == "UNIT_SPELLCAST_START" and spellID == 13262 then
-        -- spell successfully started; nothing else to do here
+        castInProgress = true
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" and spellID == 13262 then
-        -- wait for LOOT_CLOSED
+        -- wait for LOOT_CLOSED -> BAG_UPDATE_DELAYED sequence
     elseif (event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_FAILED_QUIET" or event == "UNIT_SPELLCAST_INTERRUPTED") and spellID == 13262 then
         FinishDestroy()
-    elseif event == "LOOT_CLOSED" then
+    elseif event == "LOOT_CLOSED" and castInProgress then
+        lootClosed = true
+    elseif event == "BAG_UPDATE_DELAYED" and castInProgress and lootClosed then
         FinishDestroy()
     end
 end)
@@ -340,12 +344,15 @@ end)
 local function StartDestroy()
     if destroying then return end
     destroying = true
+    castInProgress, lootClosed = false, false
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_START")
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_FAILED")
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_FAILED_QUIET")
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
     destroyMonitor:RegisterEvent("LOOT_CLOSED")
+    destroyMonitor:RegisterEvent("LOOT_READY")
+    destroyMonitor:RegisterEvent("BAG_UPDATE_DELAYED")
 end
 
 local function CreateRow(parent, index)
@@ -441,12 +448,16 @@ local function CreateUI()
     -- ``Text`` field being nil and triggering an error inside
     -- `PanelTemplates_TabResize`.
     local listTab = CreateFrame("Button", "DisenchantBuddyFrameTab1", frame, "OptionsFrameTabButtonTemplate")
+    -- Manually assign the Text region created by the template so that
+    -- PanelTemplates functions can access it when resizing.
+    listTab.Text = listTab.Text or _G[listTab:GetName() .. "Text"]
     listTab:SetText("Items")
     listTab:SetID(1)
     listTab:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 5, 7)
     PanelTemplates_TabResize(listTab, 0)
 
     local optionsTab = CreateFrame("Button", "DisenchantBuddyFrameTab2", frame, "OptionsFrameTabButtonTemplate")
+    optionsTab.Text = optionsTab.Text or _G[optionsTab:GetName() .. "Text"]
     optionsTab:SetText("Options")
     optionsTab:SetID(2)
     optionsTab:SetPoint("LEFT", listTab, "RIGHT", -15, 0)
