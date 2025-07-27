@@ -10,7 +10,12 @@ local dataObject = LDB:NewDataObject("DisenchantBuddy", {
     icon = "Interface\\Icons\\INV_Enchant_Disenchant",
     OnClick = function(_, button)
         if button == "LeftButton" and DisenchantBuddy_Toggle then
-            DisenchantBuddy_Toggle()
+            -- Use pcall so an initialization error doesn't break the UI
+            local ok, err = pcall(DisenchantBuddy_Toggle)
+            if not ok and err then
+                -- print to chat for easier debugging
+                print("DisenchantBuddy error:", err)
+            end
         end
     end,
     OnTooltipShow = function(tooltip)
@@ -20,6 +25,7 @@ local dataObject = LDB:NewDataObject("DisenchantBuddy", {
 })
 
 local function Init()
+    DisenchantBuddyDB.global = DisenchantBuddyDB.global or {}
     DisenchantBuddyDB.global.minimap = DisenchantBuddyDB.global.minimap or { hide = false, minimapPos = 220, radius = 80 }
     LDBIcon:Register("DisenchantBuddy", dataObject, DisenchantBuddyDB.global.minimap)
 end
