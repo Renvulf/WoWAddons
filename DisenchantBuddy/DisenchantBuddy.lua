@@ -470,13 +470,13 @@ local function StartDestroy(button)
     destroying = true
     castInProgress, spellSucceeded, lootClosed, bagUpdated = false, false, false, false
 
-    -- Disable the button and show it pressed while the cast is in progress so
-    -- holding the key or mouse button will queue the next disenchant just like
-    -- TSM's Destroying UI.
+    -- Update the button text while the cast is in progress.  Unlike TSM's
+    -- implementation we intentionally keep the button enabled so the user can
+    -- keep clicking it for feedback even though additional clicks are ignored by
+    -- the "destroying" flag.
     button.prevText = button.prevText or button:GetText()
     button:SetText("Disenchanting")
-    button:SetButtonState("PUSHED", true)
-    button:Disable()
+    button:SetButtonState("NORMAL", false)
 
     -- Subsequent clicks while the cast is underway are ignored via the
     -- `destroying` flag above which mimics the protection in TSM's destroying
@@ -523,9 +523,11 @@ local function CreateRow(parent, index)
     row.hide = CreateFrame("Button", nil, row)
     row.hide:SetSize(16,16)
     row.hide:SetPoint("RIGHT")
-    -- Use a standard close button texture so it's clear this removes the item
+    -- Use the standard close button textures so it's obvious this removes the
+    -- item from the list.
     row.hide:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
     row.hide:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
+    row.hide:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
 
     -- Highlight texture to indicate the selected row similar to TSM
     row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
