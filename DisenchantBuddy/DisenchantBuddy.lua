@@ -367,6 +367,11 @@ local function FinishDestroy()
         frame.disenchantBtn:SetAttribute("*macrotext1", nil)
         frame.disenchantBtn:SetAttribute("bag", nil)
         frame.disenchantBtn:SetAttribute("slot", nil)
+        -- Re-enable the button now that we're done. This mirrors how TSM's
+        -- destroying UI behaves and prevents the user from starting another
+        -- disenchant mid-cast which could leave the cursor with the spell
+        -- active but no target item selected.
+        frame.disenchantBtn:Enable()
     end
     if frame and frame.scroll and RefreshList then
         -- Delay slightly to allow the bag update events to propagate before we
@@ -419,7 +424,14 @@ end)
     @param button The SecureActionButton being clicked
 ]]
 local function StartDestroy(button)
-    if destroying then return end
+    if destroying then
+        -- If a disenchant is already in progress just clear the macro so we
+        -- don't attempt to cast on an empty slot. This mirrors the protection
+        -- in TSM's Destroying module where the button is disabled while
+        -- destroying.
+        button:SetAttribute("*macrotext1", nil)
+        return
+    end
 
     local bag = button:GetAttribute("bag")
     local slot = button:GetAttribute("slot")
@@ -427,6 +439,9 @@ local function StartDestroy(button)
 
     destroying = true
     castInProgress, lootClosed, bagUpdated = false, false, false
+
+    -- Prevent additional clicks until this disenchant completes
+    button:Disable()
 
     -- Set the macro which casts Disenchant on the selected bag slot.  The
     -- localized spell name is used so that the macro works on all clients.
