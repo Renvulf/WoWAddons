@@ -381,9 +381,29 @@ local function CreateUI()
     frame.title:SetPoint("CENTER", frame.TitleBg, "CENTER",0,0)
     frame.title:SetText("DisenchantBuddy")
 
-    local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 10, -30)
-    scroll:SetPoint("BOTTOMRIGHT", -30, 50)
+    -- tabs setup
+    PanelTemplates_SetNumTabs(frame, 2)
+    frame:SetClampedToScreen(true)
+
+    local listTab = CreateFrame("Button", nil, frame, "OptionsFrameTabButtonTemplate")
+    listTab:SetText("Items")
+    listTab:SetID(1)
+    listTab:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 5, 7)
+    PanelTemplates_TabResize(listTab, 0)
+
+    local optionsTab = CreateFrame("Button", nil, frame, "OptionsFrameTabButtonTemplate")
+    optionsTab:SetText("Options")
+    optionsTab:SetID(2)
+    optionsTab:SetPoint("LEFT", listTab, "RIGHT", -15, 0)
+    PanelTemplates_TabResize(optionsTab, 0)
+
+    -- list frame
+    local listFrame = CreateFrame("Frame", nil, frame)
+    listFrame:SetPoint("TOPLEFT", 10, -30)
+    listFrame:SetPoint("BOTTOMRIGHT", -30, 50)
+
+    local scroll = CreateFrame("ScrollFrame", nil, listFrame, "UIPanelScrollFrameTemplate")
+    scroll:SetAllPoints()
     scroll.rows = {}
     scroll.Refresh = RefreshList
     frame.scroll = scroll
@@ -393,8 +413,8 @@ local function CreateUI()
     scroll:SetScrollChild(content)
     scroll.content = content
 
-    local combineBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    combineBtn:SetPoint("BOTTOMLEFT", 10, 10)
+    local combineBtn = CreateFrame("Button", nil, listFrame, "UIPanelButtonTemplate")
+    combineBtn:SetPoint("BOTTOMLEFT", 0, -40)
     combineBtn:SetSize(120,25)
     combineBtn:SetText("Combine Stacks")
     combineBtn:SetScript("OnClick", function()
@@ -402,12 +422,12 @@ local function CreateUI()
         C_Timer.After(0.1, function() RefreshList(scroll) end)
     end)
 
-    local destroyBtn = CreateFrame("Button", "DisenchantBuddyDestroyBtn", frame, "SecureActionButtonTemplate, UIPanelButtonTemplate")
-    destroyBtn:SetPoint("BOTTOMRIGHT", -10, 10)
-    destroyBtn:SetSize(120,25)
-    destroyBtn:SetText("Destroy Next")
-    destroyBtn:SetAttribute("type","macro")
-    destroyBtn:SetScript("PreClick", function(btn)
+    local disenchantBtn = CreateFrame("Button", "DisenchantBuddyDestroyBtn", listFrame, "SecureActionButtonTemplate, UIPanelButtonTemplate")
+    disenchantBtn:SetPoint("BOTTOMRIGHT", 0, -40)
+    disenchantBtn:SetSize(120,25)
+    disenchantBtn:SetText("Disenchant Next")
+    disenchantBtn:SetAttribute("type","macro")
+    disenchantBtn:SetScript("PreClick", function(btn)
         local data = scroll.selected
         if data then
             btn:SetAttribute("macrotext", string.format("/cast Disenchant\n/use %d %d", data.bag, data.slot))
@@ -415,6 +435,50 @@ local function CreateUI()
             btn:SetAttribute("macrotext", nil)
         end
     end)
+
+    -- options frame
+    local optionsFrame = CreateFrame("Frame", nil, frame)
+    optionsFrame:SetPoint("TOPLEFT", 10, -30)
+    optionsFrame:SetPoint("BOTTOMRIGHT", -30, 50)
+
+    local sbCheck = CreateFrame("CheckButton", nil, optionsFrame, "UICheckButtonTemplate")
+    sbCheck:SetPoint("TOPLEFT", 0, -4)
+    sbCheck.text = sbCheck:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    sbCheck.text:SetPoint("LEFT", sbCheck, "RIGHT", 4, 0)
+    sbCheck.text:SetText("Disenchant Soulbound Items")
+    sbCheck:SetChecked(DisenchantBuddyDB.global.options.includeSoulbound)
+    sbCheck:SetScript("OnClick", function(self)
+        DisenchantBuddyDB.global.options.includeSoulbound = self:GetChecked()
+    end)
+
+    local boeCheck = CreateFrame("CheckButton", nil, optionsFrame, "UICheckButtonTemplate")
+    boeCheck:SetPoint("TOPLEFT", sbCheck, "BOTTOMLEFT", 0, -8)
+    boeCheck.text = boeCheck:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    boeCheck.text:SetPoint("LEFT", boeCheck, "RIGHT", 4, 0)
+    boeCheck.text:SetText("Disenchant Bind on Equip Items")
+    boeCheck:SetChecked(DisenchantBuddyDB.global.options.includeBOE)
+    boeCheck:SetScript("OnClick", function(self)
+        DisenchantBuddyDB.global.options.includeBOE = self:GetChecked()
+    end)
+
+    local function ShowTab(id)
+        if id == 1 then
+            listFrame:Show()
+            optionsFrame:Hide()
+        else
+            optionsFrame:Show()
+            listFrame:Hide()
+        end
+        PanelTemplates_SetTab(frame, id)
+    end
+
+    listTab:SetScript("OnClick", function() ShowTab(1) end)
+    optionsTab:SetScript("OnClick", function() ShowTab(2) end)
+
+    ShowTab(1)
+
+    frame.listFrame = listFrame
+    frame.optionsFrame = optionsFrame
 
     scroll.Refresh(scroll)
     frame:Hide()
