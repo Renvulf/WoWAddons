@@ -19,6 +19,16 @@ local itemList = {}
 local combineList = {}
 local nonDE = {}
 
+-- Returns whether the item in the specified bag slot is soulbound. This mirrors
+-- TSM's check for filtering soulbound items when scanning the bags.
+local function IsItemSoulbound(bag, slot)
+    if DisenchantBuddyDB.global.options.includeSoulbound then
+        return false
+    end
+    local itemLocation = ItemLocation:CreateFromBagAndSlot(bag, slot)
+    return C_Item.IsBound(itemLocation)
+end
+
 -- Non-disenchantable items copied from TSM
 nonDE = {
 	["i:38"] = true,
@@ -243,7 +253,7 @@ local function ScanBags()
                 local itemID = info.itemID
                 local quality = info.quality
                 local classID = select(6, GetItemInfoInstant(itemID))
-                if IsDisenchantable(itemID, quality, classID) and not IsIgnored(itemID) then
+                if IsDisenchantable(itemID, quality, classID) and not IsIgnored(itemID) and not IsItemSoulbound(bag, slot) then
                     tinsert(itemList, {bag=bag, slot=slot, itemID=itemID, link=info.hyperlink, count=info.stackCount})
                     if info.stackCount < info.stackCountMax then
                         combineTemp[itemID] = combineTemp[itemID] or {}
@@ -334,6 +344,9 @@ local function RefreshList(scroll)
         row:SetWidth(scroll:GetWidth())
         row:Show()
     end
+    if not scroll.selected and itemList[1] then
+        scroll.selected = itemList[1]
+    end
     scroll.contentHeight = #itemList * 20
 end
 
@@ -355,6 +368,7 @@ local function CreateUI()
     scroll:SetPoint("BOTTOMRIGHT", -30, 50)
     scroll.rows = {}
     scroll.Refresh = RefreshList
+    frame.scroll = scroll
 
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(1,1)
@@ -394,7 +408,11 @@ local function Toggle()
         frame:Hide()
     else
         frame:Show()
-        RefreshList(frame.scroll or frame:GetChildren())
+        RefreshList(frame.scroll)
+        if DisenchantBuddyDB.global.options.autoStack and #combineList > 0 then
+            CombineStacks()
+            C_Timer.After(0.1, function() RefreshList(frame.scroll) end)
+        end
     end
 end
 
@@ -407,10 +425,13 @@ f:RegisterEvent("BAG_UPDATE_DELAYED")
 f:SetScript("OnEvent", function()
     if DisenchantBuddyDB.global.options.autoShow and not (frame and frame:IsShown()) then
         ScanBags()
+        if #combineList > 0 and DisenchantBuddyDB.global.options.autoStack then
+            CombineStacks()
+        end
         if #itemList > 0 then
             Toggle()
         end
     elseif frame and frame:IsShown() then
-        RefreshList(frame.scroll or frame:GetChildren())
+        RefreshList(frame.scroll)
     end
 end)
