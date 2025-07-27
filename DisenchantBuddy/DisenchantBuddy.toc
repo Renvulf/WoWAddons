@@ -4,4 +4,9 @@
 ## Version: 1.0
 ## Notes: Simplified disenchanting helper
 ## SavedVariables: DisenchantBuddyDB
+libs/LibStub.lua
+libs/CallbackHandler-1.0.lua
+libs/LibDataBroker-1.1.lua
+libs/LibDBIcon-1.0.lua
+Minimap.lua
 DisenchantBuddy.lua
