@@ -5,6 +5,7 @@ local DB_DEFAULTS = {
             autoShow = true,
             autoStack = true,
             includeSoulbound = true,
+            includeBOE = true,
             deMaxQuality = 4,
         },
         ignorePermanent = {},
@@ -242,6 +243,11 @@ local function IsDisenchantable(itemID, quality, classID)
     return true
 end
 
+local function IsItemBindOnEquip(itemID)
+    local bindType = select(14, GetItemInfo(itemID))
+    return bindType == LE_ITEM_BIND_ON_EQUIP
+end
+
 local function ScanBags()
     wipe(itemList)
     wipe(combineList)
@@ -253,7 +259,13 @@ local function ScanBags()
                 local itemID = info.itemID
                 local quality = info.quality
                 local classID = select(6, GetItemInfoInstant(itemID))
-                if IsDisenchantable(itemID, quality, classID) and not IsIgnored(itemID) and not IsItemSoulbound(bag, slot) then
+                local skip = false
+                if not DisenchantBuddyDB.global.options.includeSoulbound and info.isBound then
+                    skip = true
+                elseif not DisenchantBuddyDB.global.options.includeBOE and not info.isBound and IsItemBindOnEquip(itemID) then
+                    skip = true
+                end
+                if not skip and IsDisenchantable(itemID, quality, classID) and not IsIgnored(itemID) then
                     tinsert(itemList, {bag=bag, slot=slot, itemID=itemID, link=info.hyperlink, count=info.stackCount})
                     if info.stackCount < info.stackCountMax then
                         combineTemp[itemID] = combineTemp[itemID] or {}
@@ -433,5 +445,38 @@ f:SetScript("OnEvent", function()
         end
     elseif frame and frame:IsShown() then
         RefreshList(frame.scroll)
+    end
+end)
+
+-- Options panel
+local function CreateOptions()
+    local panel = CreateFrame("Frame", "DisenchantBuddyOptions")
+    panel.name = "DisenchantBuddy"
+
+    local sbCheck = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
+    sbCheck:SetPoint("TOPLEFT", 16, -16)
+    sbCheck.Text:SetText("Disenchant Soulbound Items")
+    sbCheck:SetChecked(DisenchantBuddyDB.global.options.includeSoulbound)
+    sbCheck:SetScript("OnClick", function(self)
+        DisenchantBuddyDB.global.options.includeSoulbound = self:GetChecked()
+    end)
+
+    local boeCheck = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
+    boeCheck:SetPoint("TOPLEFT", sbCheck, "BOTTOMLEFT", 0, -8)
+    boeCheck.Text:SetText("Disenchant Bind on Equip Items")
+    boeCheck:SetChecked(DisenchantBuddyDB.global.options.includeBOE)
+    boeCheck:SetScript("OnClick", function(self)
+        DisenchantBuddyDB.global.options.includeBOE = self:GetChecked()
+    end)
+
+    InterfaceOptions_AddCategory(panel)
+end
+
+local optionsLoader = CreateFrame("Frame")
+optionsLoader:RegisterEvent("ADDON_LOADED")
+optionsLoader:SetScript("OnEvent", function(self, addon)
+    if addon == ADDON_NAME then
+        CreateOptions()
+        self:UnregisterEvent("ADDON_LOADED")
     end
 end)
