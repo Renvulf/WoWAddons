@@ -1,0 +1,7 @@
+## Interface: 100107
+## Title: DisenchantBuddy
+## Author: Example
+## Version: 1.0
+## Notes: Simplified disenchanting helper extracted from TSM
+## SavedVariables: DisenchantBuddyDB
+DisenchantBuddy.lua
