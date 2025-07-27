@@ -271,7 +271,8 @@ local function ScanBags()
                 end
                 if not skip and IsDisenchantable(itemID, quality, classID) and not IsIgnored(itemID) then
                     tinsert(itemList, {bag=bag, slot=slot, itemID=itemID, link=info.hyperlink, count=info.stackCount})
-                    if info.stackCount < info.stackCountMax then
+                    local maxStack = select(8, GetItemInfo(itemID)) or 1
+                    if info.stackCount < maxStack then
                         combineTemp[itemID] = combineTemp[itemID] or {}
                         tinsert(combineTemp[itemID], {bag=bag, slot=slot, count=info.stackCount})
                     end
