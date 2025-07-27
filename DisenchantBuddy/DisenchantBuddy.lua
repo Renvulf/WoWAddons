@@ -363,8 +363,9 @@ local function CreateRow(parent, index)
         self.data = data
         -- Retrieve the item icon (10th return value from GetItemInfoInstant)
         local texture = select(10, GetItemInfoInstant(data.itemID))
-        self.icon:SetTexture(texture)
-        self.text:SetText(data.link)
+        -- Fallback to a question mark icon if the texture isn't known yet
+        self.icon:SetTexture(texture or 134400)
+        self.text:SetText(data.link or "Unknown Item")
     end
 
     return row
@@ -442,12 +443,15 @@ local function CreateUI()
     frame.scroll = scroll
 
     local content = CreateFrame("Frame", nil, scroll)
+    scroll.content = content -- assign before scripts to avoid nil access
     content:SetSize(scroll:GetWidth(), 1)
-    scroll:SetScript("OnSizeChanged", function(self)
-        self.content:SetWidth(self:GetWidth())
-    end)
     scroll:SetScrollChild(content)
-    scroll.content = content
+    -- Guard against OnSizeChanged firing before 'content' is assigned
+    scroll:SetScript("OnSizeChanged", function(self)
+        if self.content then
+            self.content:SetWidth(self:GetWidth())
+        end
+    end)
 
     local disenchantBtn = CreateFrame("Button", "DisenchantBuddyDestroyBtn", listFrame, "SecureActionButtonTemplate, UIPanelButtonTemplate")
     disenchantBtn:SetPoint("BOTTOMRIGHT", 0, -40)
