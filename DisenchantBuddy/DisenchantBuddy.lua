@@ -31,8 +31,14 @@ local itemList = {}
 local nonDE = {}
 local pendingLoad = {}
 local refreshQueued = false
+local knowsEnchanting = false
 -- Forward declaration so functions defined earlier can reference it
 local RefreshList
+
+-- Checks whether the player knows the Disenchant spell
+local function PlayerKnowsEnchanting()
+    return IsSpellKnown and IsSpellKnown(13262)
+end
 
 -- Cache the localized Disenchant spell name outside of any secure handlers.
 -- In retail this information is accessed via `C_Spell.GetSpellInfo` while
@@ -302,6 +308,10 @@ end
 
 local function ScanBags()
     wipe(itemList)
+    knowsEnchanting = PlayerKnowsEnchanting()
+    if not knowsEnchanting then
+        return
+    end
     -- Include the reagent bag (index 5) on modern clients just like TSM does
     for bag = 0, 5 do
         for slot = 1, C_Container.GetContainerNumSlots(bag) do
@@ -580,6 +590,17 @@ local function RefreshList(scroll)
         rows[i]:Hide()
     end
 
+    if frame and frame.noEnchantText then
+        if not knowsEnchanting then
+            frame.noEnchantText:Show()
+            scroll.selected = nil
+            scroll.content:SetHeight(0)
+            return
+        else
+            frame.noEnchantText:Hide()
+        end
+    end
+
     -- Preserve the currently selected item if it's still in the list. We compare
     -- by bag and slot instead of table identity since the itemList is rebuilt on
     -- every refresh with new tables.
@@ -596,10 +617,16 @@ local function RefreshList(scroll)
     end
 
     if frame and frame.disenchantBtn then
-        if scroll.selected then
+        if not knowsEnchanting then
+            frame.disenchantBtn:Disable()
+            frame.disenchantBtn:SetAttribute("bag", nil)
+            frame.disenchantBtn:SetAttribute("slot", nil)
+        elseif scroll.selected then
+            frame.disenchantBtn:Enable()
             frame.disenchantBtn:SetAttribute("bag", scroll.selected.bag)
             frame.disenchantBtn:SetAttribute("slot", scroll.selected.slot)
         else
+            frame.disenchantBtn:Disable()
             frame.disenchantBtn:SetAttribute("bag", nil)
             frame.disenchantBtn:SetAttribute("slot", nil)
         end
@@ -682,6 +709,12 @@ local function CreateUI()
             self.content:SetWidth(self:GetWidth())
         end
     end)
+
+    local noEnchantText = listFrame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+    noEnchantText:SetPoint("CENTER")
+    noEnchantText:SetText("Character does not know Enchanting")
+    noEnchantText:Hide()
+    frame.noEnchantText = noEnchantText
 
     local disenchantBtn = CreateFrame("Button", "DisenchantBuddyDestroyBtn", listFrame, "SecureActionButtonTemplate, UIPanelButtonTemplate")
     disenchantBtn:SetPoint("BOTTOMRIGHT", 0, -40)
