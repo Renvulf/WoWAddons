@@ -12,7 +12,18 @@ local DB_DEFAULTS = {
     }
 }
 
-DisenchantBuddyDB = DisenchantBuddyDB or DB_DEFAULTS
+local function DeepCopy(tbl)
+    if type(tbl) ~= "table" then return tbl end
+    local copy = {}
+    for k, v in pairs(tbl) do
+        copy[k] = DeepCopy(v)
+    end
+    return copy
+end
+
+if not DisenchantBuddyDB then
+    DisenchantBuddyDB = DeepCopy(DB_DEFAULTS)
+end
 
 local sessionIgnore = {}
 local frame
@@ -228,8 +239,8 @@ end
 local function IsDisenchantable(itemID, quality, classID)
     if not itemID or not quality or not classID then return false end
     if nonDE["i:"..itemID] then return false end
-    local armorClass = Enum and Enum.ItemClass and Enum.ItemClass.Armor or LE_ITEM_CLASS_ARMOR
-    local weaponClass = Enum and Enum.ItemClass and Enum.ItemClass.Weapon or LE_ITEM_CLASS_WEAPON
+    local armorClass = (Enum and Enum.ItemClass and Enum.ItemClass.Armor) or _G.LE_ITEM_CLASS_ARMOR or 4
+    local weaponClass = (Enum and Enum.ItemClass and Enum.ItemClass.Weapon) or _G.LE_ITEM_CLASS_WEAPON or 2
     if classID ~= armorClass and classID ~= weaponClass then return false end
     if quality < 2 or quality > DisenchantBuddyDB.global.options.deMaxQuality then return false end
     return true
@@ -237,7 +248,8 @@ end
 
 local function IsItemBindOnEquip(itemID)
     local bindType = select(14, GetItemInfo(itemID))
-    return bindType == LE_ITEM_BIND_ON_EQUIP
+    local boe = (Enum and Enum.ItemBindType and Enum.ItemBindType.OnEquip) or _G.LE_ITEM_BIND_ON_EQUIP or 2
+    return bindType == boe
 end
 
 local function ScanBags()
@@ -248,7 +260,12 @@ local function ScanBags()
             if info and info.itemID then
                 local itemID = info.itemID
                 local quality = info.quality
-                local classID = select(12, GetItemInfoInstant(itemID))
+                local ok, classID = pcall(function()
+                    return select(12, GetItemInfoInstant(itemID))
+                end)
+                if not ok then
+                    classID = nil
+                end
                 if not classID then
                     -- Item data not ready yet; request it and refresh once loaded
                     if not pendingLoad[itemID] then
@@ -324,6 +341,12 @@ local function StartDestroy()
     destroyMonitor:RegisterEvent("LOOT_CLOSED")
     destroyMonitor:RegisterEvent("LOOT_READY")
     destroyMonitor:RegisterEvent("BAG_UPDATE_DELAYED")
+    -- Safety timeout in case something goes wrong
+    C_Timer.After(5, function()
+        if destroying then
+            FinishDestroy()
+        end
+    end)
 end
 
 local function CreateRow(parent, index)
@@ -520,7 +543,13 @@ local function CreateUI()
 end
 
 local function Toggle()
-    if not frame then CreateUI() end
+    if not frame then
+        local ok, err = pcall(CreateUI)
+        if not ok then
+            print("DisenchantBuddy error:", err)
+            return
+        end
+    end
     if frame:IsShown() then
         frame:Hide()
     else
