@@ -316,8 +316,15 @@ local function FinishDestroy()
     destroyMonitor:UnregisterAllEvents()
     destroying = false
     castInProgress, lootClosed = false, false
-    if frame and frame.scroll then
-        C_Timer.After(0.1, function() RefreshList(frame.scroll) end)
+    if frame and frame.scroll and RefreshList then
+        -- Delay slightly to allow the bag update events to propagate before we
+        -- rescan and redraw the list. We defensively check RefreshList in case
+        -- something prevented it from being defined (e.g. a load error).
+        C_Timer.After(0.1, function()
+            if RefreshList then
+                RefreshList(frame.scroll)
+            end
+        end)
     end
 end
 
