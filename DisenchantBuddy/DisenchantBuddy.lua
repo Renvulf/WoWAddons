@@ -30,6 +30,7 @@ local frame
 local itemList = {}
 local nonDE = {}
 local pendingLoad = {}
+local refreshQueued = false
 
 -- Non-disenchantable items list
 nonDE = {
@@ -267,8 +268,10 @@ local function ScanBags()
                     classID = nil
                 end
                 if not classID then
-                    -- Item data not ready yet; request it and refresh once loaded
-                    if not pendingLoad[itemID] then
+                    -- Item data not ready yet; request it and refresh once loaded.
+                    -- Guard against synchronous ITEM_DATA_LOAD_RESULT events
+                    -- triggering a recursive scan which can overflow the stack.
+                    if not pendingLoad[itemID] and not C_Item.IsItemDataCachedByID(itemID) then
                         pendingLoad[itemID] = true
                         C_Item.RequestLoadItemDataByID(itemID)
                     end
@@ -574,8 +577,14 @@ f:SetScript("OnEvent", function(_, event, ...)
         local itemID, success = ...
         if success and pendingLoad[itemID] then
             pendingLoad[itemID] = nil
-            if frame and frame:IsShown() then
-                RefreshList(frame.scroll)
+            if frame and frame:IsShown() and not refreshQueued then
+                refreshQueued = true
+                C_Timer.After(0, function()
+                    refreshQueued = false
+                    if frame and frame:IsShown() then
+                        RefreshList(frame.scroll)
+                    end
+                end)
             end
         end
         return
@@ -587,7 +596,15 @@ f:SetScript("OnEvent", function(_, event, ...)
             Toggle()
         end
     elseif frame and frame:IsShown() then
-        RefreshList(frame.scroll)
+        if not refreshQueued then
+            refreshQueued = true
+            C_Timer.After(0, function()
+                refreshQueued = false
+                if frame and frame:IsShown() then
+                    RefreshList(frame.scroll)
+                end
+            end)
+        end
     end
 end)
 
