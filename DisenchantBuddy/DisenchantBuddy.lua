@@ -301,6 +301,53 @@ local function CombineStacks()
     end
 end
 
+--[[-------------------------------------------------------------------------
+TSM style destroying support
+-------------------------------------------------------------------------]]
+
+-- Frame used to listen for spellcast and loot events while destroying
+local destroyMonitor = CreateFrame("Frame")
+local destroying = false
+
+-- Refresh the list once the disenchant attempt finishes
+local function FinishDestroy()
+    destroyMonitor:UnregisterAllEvents()
+    destroying = false
+    if frame and frame.scroll then
+        C_Timer.After(0.1, function() RefreshList(frame.scroll) end)
+    end
+end
+
+-- Event handler modeled after TSM's DestroyThread logic. It waits for the
+-- player to finish disenchanting and refreshes the UI when done or if the cast
+-- fails/interupts.
+destroyMonitor:SetScript("OnEvent", function(self, event, unit, _, spellID)
+    if unit ~= "player" then return end
+
+    if event == "UNIT_SPELLCAST_START" and spellID == 13262 then
+        -- spell successfully started; nothing else to do here
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" and spellID == 13262 then
+        -- wait for LOOT_CLOSED
+    elseif (event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_FAILED_QUIET" or event == "UNIT_SPELLCAST_INTERRUPTED") and spellID == 13262 then
+        FinishDestroy()
+    elseif event == "LOOT_CLOSED" then
+        FinishDestroy()
+    end
+end)
+
+-- Starts monitoring for disenchant events. Called right before executing the
+-- macro which casts Disenchant on the selected item.
+local function StartDestroy()
+    if destroying then return end
+    destroying = true
+    destroyMonitor:RegisterEvent("UNIT_SPELLCAST_START")
+    destroyMonitor:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+    destroyMonitor:RegisterEvent("UNIT_SPELLCAST_FAILED")
+    destroyMonitor:RegisterEvent("UNIT_SPELLCAST_FAILED_QUIET")
+    destroyMonitor:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
+    destroyMonitor:RegisterEvent("LOOT_CLOSED")
+end
+
 local function CreateRow(parent, index)
     local row = CreateFrame("Button", nil, parent)
     row:SetHeight(20)
@@ -388,13 +435,18 @@ local function CreateUI()
     -- expected by PanelTemplates.
     frame:SetClampedToScreen(true)
 
-    local listTab = CreateFrame("Button", "$parentTab1", frame, "OptionsFrameTabButtonTemplate")
+    -- Use explicit names for the tabs so the sub regions (like the Text font
+    -- string) are created correctly. Using "$parent" in the name works in XML
+    -- templates but not when creating frames via Lua which resulted in the
+    -- ``Text`` field being nil and triggering an error inside
+    -- `PanelTemplates_TabResize`.
+    local listTab = CreateFrame("Button", "DisenchantBuddyFrameTab1", frame, "OptionsFrameTabButtonTemplate")
     listTab:SetText("Items")
     listTab:SetID(1)
     listTab:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 5, 7)
     PanelTemplates_TabResize(listTab, 0)
 
-    local optionsTab = CreateFrame("Button", "$parentTab2", frame, "OptionsFrameTabButtonTemplate")
+    local optionsTab = CreateFrame("Button", "DisenchantBuddyFrameTab2", frame, "OptionsFrameTabButtonTemplate")
     optionsTab:SetText("Options")
     optionsTab:SetID(2)
     optionsTab:SetPoint("LEFT", listTab, "RIGHT", -15, 0)
@@ -433,11 +485,14 @@ local function CreateUI()
     disenchantBtn:SetPoint("BOTTOMRIGHT", 0, -40)
     disenchantBtn:SetSize(120,25)
     disenchantBtn:SetText("Disenchant Next")
-    disenchantBtn:SetAttribute("type","macro")
+    disenchantBtn:SetAttribute("type", "macro")
     disenchantBtn:SetScript("PreClick", function(btn)
         local data = scroll.selected
         if data then
             btn:SetAttribute("macrotext", string.format("/cast Disenchant\n/use %d %d", data.bag, data.slot))
+            -- Start monitoring the disenchant process before the cast so we
+            -- can refresh the UI once it completes or fails.
+            StartDestroy()
         else
             btn:SetAttribute("macrotext", nil)
         end
