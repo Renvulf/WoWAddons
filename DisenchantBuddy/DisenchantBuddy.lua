@@ -390,6 +390,7 @@ local function FinishDestroy()
         -- like TSM's implementation.
         frame.disenchantBtn:Enable()
         frame.disenchantBtn:SetButtonState("NORMAL", false)
+        frame.disenchantBtn:SetText(frame.disenchantBtn.prevText or "Disenchant Next")
         frame.disenchantBtn:SetAttribute("*macrotext1", nil)
         frame.disenchantBtn:SetAttribute("bag", nil)
         frame.disenchantBtn:SetAttribute("slot", nil)
@@ -472,6 +473,8 @@ local function StartDestroy(button)
     -- Disable the button and show it pressed while the cast is in progress so
     -- holding the key or mouse button will queue the next disenchant just like
     -- TSM's Destroying UI.
+    button.prevText = button.prevText or button:GetText()
+    button:SetText("Disenchanting")
     button:SetButtonState("PUSHED", true)
     button:Disable()
 
@@ -520,7 +523,9 @@ local function CreateRow(parent, index)
     row.hide = CreateFrame("Button", nil, row)
     row.hide:SetSize(16,16)
     row.hide:SetPoint("RIGHT")
-    row.hide:SetNormalTexture(134400) -- X icon
+    -- Use a standard close button texture so it's clear this removes the item
+    row.hide:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
+    row.hide:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
 
     -- Highlight texture to indicate the selected row similar to TSM
     row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
