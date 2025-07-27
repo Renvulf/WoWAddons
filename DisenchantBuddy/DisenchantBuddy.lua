@@ -43,8 +43,16 @@ local DISENCHANT_NAME
 do
     local name
     if C_Spell and C_Spell.GetSpellInfo then
-        name = C_Spell.GetSpellInfo(13262)
+        local info = C_Spell.GetSpellInfo(13262)
+        if type(info) == "table" then
+            -- Retail clients return a table with the spell information
+            name = info.name
+        else
+            -- Older clients return multiple values, with the name first
+            name = info
+        end
     elseif GetSpellInfo then
+        -- Pre-9.0 API which returns multiple values
         name = GetSpellInfo(13262)
     end
     DISENCHANT_NAME = name or "Disenchant"
