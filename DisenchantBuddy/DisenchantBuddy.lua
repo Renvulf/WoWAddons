@@ -453,7 +453,23 @@ local function RefreshList(scroll)
     for i=1,numRows do
         rows[i]:Hide()
     end
-    for i,data in ipairs(itemList) do
+
+    -- Preserve the currently selected item if it's still in the list. We compare
+    -- by bag and slot instead of table identity since the itemList is rebuilt on
+    -- every refresh with new tables.
+    local prevSelected = scroll.selected
+    scroll.selected = nil
+    for _, data in ipairs(itemList) do
+        if prevSelected and data.bag == prevSelected.bag and data.slot == prevSelected.slot then
+            scroll.selected = data
+            break
+        end
+    end
+    if not scroll.selected then
+        scroll.selected = itemList[1]
+    end
+
+    for i, data in ipairs(itemList) do
         local row = rows[i]
         if not row then
             row = CreateRow(scroll, i)
@@ -468,9 +484,7 @@ local function RefreshList(scroll)
         end
         row:Show()
     end
-    if not scroll.selected and itemList[1] then
-        scroll.selected = itemList[1]
-    end
+
     scroll.content:SetHeight(#itemList * 20)
 end
 
