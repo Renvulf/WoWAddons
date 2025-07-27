@@ -273,13 +273,21 @@ local function IsDisenchantable(itemID, quality, classID)
     return true
 end
 
-local function IsItemBindOnEquip(itemID)
-    local bindType = select(14, GetItemInfo(itemID))
+local function IsItemBindOnEquip(loc, itemID)
+    -- Prefer the C_Item API which works reliably across game versions. Fall
+    -- back to GetItemInfo when unavailable.
+    local bindType
+    if C_Item and C_Item.GetItemBindType and loc then
+        bindType = C_Item.GetItemBindType(loc)
+    else
+        bindType = select(14, GetItemInfo(itemID))
+    end
+
     if not bindType then
         -- Item information not yet available. Request it similar to how we
         -- handle missing data elsewhere so the scan will pick it up once the
         -- client loads the data.
-        if not pendingLoad[itemID] then
+        if itemID and not pendingLoad[itemID] then
             pendingLoad[itemID] = true
             if C_Item and C_Item.RequestLoadItemDataByID then
                 C_Item.RequestLoadItemDataByID(itemID)
@@ -287,6 +295,7 @@ local function IsItemBindOnEquip(itemID)
         end
         return false
     end
+
     local boe = (Enum and Enum.ItemBindType and Enum.ItemBindType.OnEquip) or _G.LE_ITEM_BIND_ON_EQUIP or 2
     return bindType == boe
 end
@@ -315,10 +324,11 @@ local function ScanBags()
                     end
                 else
                     -- We have the class ID so run the usual filtering logic
+                    local isBound = (C_Item and C_Item.IsBound and C_Item.IsBound(loc)) or info.isBound
                     local skip = false
-                    if not DisenchantBuddyDB.global.options.includeSoulbound and info.isBound then
+                    if not DisenchantBuddyDB.global.options.includeSoulbound and isBound then
                         skip = true
-                    elseif not DisenchantBuddyDB.global.options.includeBOE and not info.isBound and IsItemBindOnEquip(itemID) then
+                    elseif not DisenchantBuddyDB.global.options.includeBOE and not isBound and IsItemBindOnEquip(loc, itemID) then
                         skip = true
                     end
 
