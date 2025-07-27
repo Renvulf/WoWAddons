@@ -516,7 +516,9 @@ local function CreateUI()
     disenchantBtn:SetScript("PreClick", function(btn)
         local data = scroll.selected
         if data then
-            btn:SetAttribute("macrotext", string.format("/cast Disenchant\n/use %d %d", data.bag, data.slot))
+            -- Use the localized spell name like TSM so the macro works on all clients
+            local deName = GetSpellInfo(13262) or "Disenchant"
+            btn:SetAttribute("macrotext", string.format("/cast %s;\n/use %d %d", deName, data.bag, data.slot))
             -- Start monitoring the disenchant process before the cast so we
             -- can refresh the UI once it completes or fails.
             StartDestroy()
