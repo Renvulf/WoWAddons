@@ -356,7 +356,7 @@ TSM style destroying support
 -- Frame used to listen for spellcast and loot events while destroying
 local destroyMonitor = CreateFrame("Frame")
 local destroying = false
-local castInProgress, lootClosed, bagUpdated = false, false, false
+local castInProgress, spellSucceeded, lootClosed, bagUpdated = false, false, false, false
 local startBag, startSlot, startQuantity
 
 -- Check whether the original item stack has been removed from the bags and
@@ -364,7 +364,7 @@ local startBag, startSlot, startQuantity
 -- performed in TSM's destroying thread to ensure the cast fully completed
 -- before re-enabling the button.
 local function TryFinish()
-    if not destroying or not lootClosed or not bagUpdated then
+    if not destroying or not spellSucceeded or not lootClosed or not bagUpdated then
         return
     end
 
@@ -382,7 +382,7 @@ end
 local function FinishDestroy()
     destroyMonitor:UnregisterAllEvents()
     destroying = false
-    castInProgress, lootClosed, bagUpdated = false, false, false
+    castInProgress, spellSucceeded, lootClosed, bagUpdated = false, false, false, false
     startBag, startSlot, startQuantity = nil, nil, nil
     if frame and frame.disenchantBtn then
         frame.disenchantBtn:SetAttribute("*macrotext1", nil)
@@ -413,9 +413,14 @@ destroyMonitor:SetScript("OnEvent", function(self, event, unit, _, spellID)
     if unit ~= "player" then return end
 
     if event == "UNIT_SPELLCAST_START" and spellID == 13262 then
-        castInProgress, lootClosed, bagUpdated = true, false, false
+        castInProgress, spellSucceeded, lootClosed, bagUpdated = true, false, false, false
     elseif (event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_FAILED_QUIET" or event == "UNIT_SPELLCAST_INTERRUPTED") and spellID == 13262 then
         FinishDestroy()
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" and castInProgress and spellID == 13262 then
+        spellSucceeded = true
+        TryFinish()
+    elseif event == "LOOT_READY" and castInProgress then
+        -- ignored but ensures LOOT_CLOSED will indicate a valid disenchant
     elseif event == "LOOT_CLOSED" and castInProgress then
         lootClosed = true
         TryFinish()
@@ -459,7 +464,7 @@ local function StartDestroy(button)
     startQuantity = info and info.stackCount or 0
 
     destroying = true
-    castInProgress, lootClosed, bagUpdated = false, false, false
+    castInProgress, spellSucceeded, lootClosed, bagUpdated = false, false, false, false
 
     -- Prevent additional clicks until this disenchant completes
     button:Disable()
@@ -469,9 +474,11 @@ local function StartDestroy(button)
     button:SetAttribute("*macrotext1", string.format("/cast %s;\n/use %d %d", DISENCHANT_NAME, bag, slot))
 
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_START")
+    destroyMonitor:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_FAILED")
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_FAILED_QUIET")
     destroyMonitor:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
+    destroyMonitor:RegisterEvent("LOOT_READY")
     destroyMonitor:RegisterEvent("LOOT_CLOSED")
     destroyMonitor:RegisterEvent("BAG_UPDATE_DELAYED")
 
