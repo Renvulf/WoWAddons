@@ -945,6 +945,19 @@ f:SetScript("OnEvent", function(_, event, ...)
         local itemID, success = ...
         if success and pendingLoad[itemID] then
             pendingLoad[itemID] = nil
+            -- Rescan and update the macro button so it remains valid even if the
+            -- UI was never opened. This ensures the user macro begins working as
+            -- soon as item information becomes available.
+            ScanBags()
+            if macroBtn then
+                if knowsEnchanting and itemList[1] then
+                    macroBtn:SetAttribute("bag",  itemList[1].bag)
+                    macroBtn:SetAttribute("slot", itemList[1].slot)
+                else
+                    macroBtn:SetAttribute("bag",  nil)
+                    macroBtn:SetAttribute("slot", nil)
+                end
+            end
             if frame and frame.scroll and not refreshQueued then
                 refreshQueued = true
                 C_Timer.After(0, function()
