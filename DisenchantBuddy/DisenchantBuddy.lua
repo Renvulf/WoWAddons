@@ -526,11 +526,17 @@ _G.DisenchantBuddy_StartDestroy = StartDestroy
 -- Hidden button used for macros so the addon can disenchant items without
 -- the main window being open. This mirrors how TSM exposes a secure button
 -- for its destroying macro.
+-- Hidden macro button which is clicked by the user created macro. The button
+-- must remain visible for the "/click" command to work, so we keep it off
+-- screen and fully transparent instead of calling :Hide().
 local macroButton = CreateFrame("Button", "DisenchantBuddyMacroButton", UIParent, "SecureActionButtonTemplate, UIPanelButtonTemplate")
 macroButton:SetAttribute("*type1", "macro")
 macroButton:SetAttribute("*macrotext1", "")
 macroButton:RegisterForClicks(GetCVarBool("ActionButtonUseKeyDown") and "LeftButtonDown" or "LeftButtonUp")
-macroButton:Hide() -- hidden but still clickable via /click
+macroButton:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -100, -100)
+macroButton:SetSize(1, 1)
+macroButton:SetAlpha(0)
+macroButton:Show() -- must be visible for /click to work
 macroButton:SetScript("PreClick", function(btn)
     -- Refresh the bag list and select the first item, mirroring the button in
     -- the main UI.
@@ -553,7 +559,10 @@ local function EnsureMacro()
         return
     end
     local name = "DisenchantBuddy"
-    local text = "/click DisenchantBuddyMacroButton"
+    -- Include the down/up argument so the click event matches the button's
+    -- registered click type just like TSM's macro implementation.
+    local downArg = GetCVarBool("ActionButtonUseKeyDown") and 1 or 0
+    local text = string.format("/click DisenchantBuddyMacroButton LeftButton %d", downArg)
     local icon = "INV_Enchant_Disenchant"
     if GetMacroBody(name) then
         EditMacro(name, name, icon, text)
