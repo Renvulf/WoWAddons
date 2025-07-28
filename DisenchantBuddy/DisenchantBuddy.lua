@@ -28,6 +28,7 @@ end
 
 local sessionIgnore = {}
 local frame
+local macroBtn -- hidden button used for the user macro
 local itemList = {}
 local nonDE = {}
 local pendingLoad = {}
@@ -409,6 +410,11 @@ local function FinishDestroy()
         -- disenchant. The button itself stays enabled the entire time so the
         -- user can keep clicking even while waiting for the cast to finish.
     end
+    if macroBtn then
+        macroBtn:SetAttribute("*macrotext1", nil)
+        macroBtn:SetAttribute("bag", nil)
+        macroBtn:SetAttribute("slot", nil)
+    end
     if frame and frame.scroll and RefreshList then
         -- Delay slightly to allow the bag update events to propagate before we
         -- rescan and redraw the list. We defensively check RefreshList in case
@@ -533,7 +539,7 @@ local function EnsureMacro()
     local downArg = GetCVarBool("ActionButtonUseKeyDown") and 1 or 0
     -- The macro clicks the main button in the UI. The trailing argument matches
     -- whether clicks fire on key down or up.
-    local text = string.format("/click DisenchantBuddyDestroyBtn LeftButton %d", downArg)
+    local text = string.format("/click DisenchantBuddyMacroBtn LeftButton %d", downArg)
     local icon = "INV_Enchant_Disenchant"
     if GetMacroBody(name) then
         EditMacro(name, name, icon, text)
@@ -661,6 +667,16 @@ local function RefreshList(scroll)
         end
     end
 
+    if macroBtn then
+        if not knowsEnchanting or not scroll.selected then
+            macroBtn:SetAttribute("bag", nil)
+            macroBtn:SetAttribute("slot", nil)
+        else
+            macroBtn:SetAttribute("bag", scroll.selected.bag)
+            macroBtn:SetAttribute("slot", scroll.selected.slot)
+        end
+    end
+
     for i, data in ipairs(itemList) do
         local row = rows[i]
         if not row then
@@ -681,6 +697,27 @@ local function RefreshList(scroll)
 end
 
 local function CreateUI()
+    if not macroBtn then
+        macroBtn = CreateFrame("Button", "DisenchantBuddyMacroBtn", UIParent,
+            "SecureActionButtonTemplate, UIPanelButtonTemplate")
+        macroBtn:SetSize(1, 1)
+        macroBtn:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -100, 0)
+        macroBtn:SetAlpha(0)
+        macroBtn:EnableMouse(false)
+        macroBtn:RegisterForClicks(GetCVarBool("ActionButtonUseKeyDown") and "LeftButtonDown" or "LeftButtonUp")
+        macroBtn:SetAttribute("*type1", "macro")
+        macroBtn:SetAttribute("*macrotext1", "")
+        macroBtn:SetScript("PreClick", function(btn)
+            local data = frame and frame.scroll and frame.scroll.selected or itemList[1]
+            if data and _G.DisenchantBuddy_StartDestroy then
+                btn:SetAttribute("bag", data.bag)
+                btn:SetAttribute("slot", data.slot)
+                securecall(_G.DisenchantBuddy_StartDestroy, btn)
+            else
+                btn:SetAttribute("*macrotext1", nil)
+            end
+        end)
+    end
     frame = CreateFrame("Frame","DisenchantBuddyFrame",UIParent,"BasicFrameTemplateWithInset")
     frame:SetSize(300,400)
     frame:SetPoint("CENTER")
