@@ -60,6 +60,7 @@ end
 -- the secure button's `PreClick` handler where calling these APIs is not
 -- permitted.
 local DISENCHANT_NAME
+local DISENCHANT_ICON
 do
     local name
     if C_Spell and C_Spell.GetSpellInfo then
@@ -78,6 +79,21 @@ do
     DISENCHANT_NAME = name or "Disenchant"
 end
 
+do
+    local iconInfo
+    if C_Spell and C_Spell.GetSpellInfo then
+        local tbl = C_Spell.GetSpellInfo(13262)
+        if type(tbl) == "table" then
+            iconInfo = tbl.icon
+        else
+            iconInfo = select(3, C_Spell.GetSpellInfo(13262))
+        end
+    elseif GetSpellInfo then
+        iconInfo = select(3, GetSpellInfo(13262))
+    end
+    DISENCHANT_ICON = iconInfo or "INV_Misc_Dust_01"
+end
+
 --[[---------------------------------------------------------------------
   Macro Helpers
   These functions create and remove the per-character macro that fires our
@@ -93,9 +109,8 @@ local function CreateDisenchantMacro()
         DeleteMacro(idx)
     end
 
-    -- Use the Disenchant spell icon if available.
-    local _, _, icon = GetSpellInfo("Disenchant")
-    icon = icon or "INV_Misc_Dust_01"
+    -- Use the cached Disenchant spell icon, falling back to a generic one.
+    local icon = DISENCHANT_ICON
 
     -- Body simply clicks the secure proxy button; works even if the addon UI is
     -- hidden.
