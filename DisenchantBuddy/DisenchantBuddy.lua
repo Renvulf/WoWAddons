@@ -872,11 +872,11 @@ f:SetScript("OnEvent", function(_, event, ...)
         local itemID, success = ...
         if success and pendingLoad[itemID] then
             pendingLoad[itemID] = nil
-            if frame and frame:IsShown() and not refreshQueued then
+            if frame and frame.scroll and not refreshQueued then
                 refreshQueued = true
                 C_Timer.After(0, function()
                     refreshQueued = false
-                    if frame and frame:IsShown() then
+                    if frame and frame.scroll then
                         RefreshList(frame.scroll)
                     end
                 end)
@@ -885,20 +885,22 @@ f:SetScript("OnEvent", function(_, event, ...)
         return
     end
 
-    if DisenchantBuddyDB.global.options.autoShow and not (frame and frame:IsShown()) then
+    if event == "BAG_UPDATE_DELAYED" then
         ScanBags()
-        if #itemList > 0 then
-            Toggle()
-        end
-    elseif frame and frame:IsShown() then
-        if not refreshQueued then
+        if frame and frame.scroll and not refreshQueued then
             refreshQueued = true
             C_Timer.After(0, function()
                 refreshQueued = false
-                if frame and frame:IsShown() then
+                if frame and frame.scroll then
                     RefreshList(frame.scroll)
                 end
             end)
+        end
+
+        if DisenchantBuddyDB.global.options.autoShow and not (frame and frame:IsShown()) then
+            if #itemList > 0 then
+                Toggle()
+            end
         end
     end
 end)
