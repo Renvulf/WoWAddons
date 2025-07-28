@@ -6,9 +6,6 @@ local DB_DEFAULTS = {
             includeSoulbound = true,
             includeBOE = true,
             deMaxQuality = 4,
-            -- Create the user macro automatically so the addon works
-            -- immediately on login similar to TSM's behaviour.
-            createMacro = true,
         },
         ignorePermanent = {},
         minimap = { hide = false, minimapPos = 220, radius = 80 },
@@ -30,7 +27,6 @@ end
 
 local sessionIgnore = {}
 local frame
-local macroBtn -- hidden button used for the user macro
 local itemList = {}
 local nonDE = {}
 local pendingLoad = {}
@@ -38,40 +34,6 @@ local refreshQueued = false
 local knowsEnchanting = false
 -- Forward declaration so functions defined earlier can reference it
 local RefreshList
-
--- Creates the hidden secure button used by the user macro. This mirrors the
--- setup used by TSM so that the macro works even if the main UI is never
--- opened.
-local function CreateMacroButton()
-    if macroBtn then return end
-    macroBtn = CreateFrame("Button", "DisenchantBuddyMacroBtn", UIParent,
-        "SecureActionButtonTemplate, UIPanelButtonTemplate")
-    macroBtn:SetSize(1, 1)
-    macroBtn:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -100, 0)
-    macroBtn:SetAlpha(0)
-    -- Always register for up clicks so both key down/up activations trigger
-    -- the PreClick handler when the key/button is released. This mirrors
-    -- TSM's behaviour while avoiding CVar edge cases.
-    macroBtn:RegisterForClicks("AnyUp")
-    macroBtn:SetAttribute("*type1", "macro")
-    macroBtn:SetAttribute("*macrotext1", "")
-    macroBtn:SetScript("PreClick", function(btn)
-        local data
-        if frame and frame:IsShown() and frame.scroll then
-            data = frame.scroll.selected
-        end
-        if not data then
-            data = itemList[1]
-        end
-        if data and _G.DisenchantBuddy_StartDestroy then
-            btn:SetAttribute("bag", data.bag)
-            btn:SetAttribute("slot", data.slot)
-            securecall(_G.DisenchantBuddy_StartDestroy, btn)
-        else
-            btn:SetAttribute("*macrotext1", nil)
-        end
-    end)
-end
 
 -- Checks whether the player knows the Disenchant spell
 local function PlayerKnowsEnchanting()
@@ -446,11 +408,6 @@ local function FinishDestroy()
         -- disenchant. The button itself stays enabled the entire time so the
         -- user can keep clicking even while waiting for the cast to finish.
     end
-    if macroBtn then
-        macroBtn:SetAttribute("*macrotext1", nil)
-        macroBtn:SetAttribute("bag", nil)
-        macroBtn:SetAttribute("slot", nil)
-    end
     if frame and frame.scroll and RefreshList then
         -- Delay slightly to allow the bag update events to propagate before we
         -- rescan and redraw the list. We defensively check RefreshList in case
@@ -559,32 +516,6 @@ end
 
 -- Export for the secure environment
 _G.DisenchantBuddy_StartDestroy = StartDestroy
-
--- Creates or updates the user macro which triggers the main destroy button
--- just like TSM's implementation. The macro simply clicks the secure button
--- in the addon UI so all logic runs through the same path as a normal click.
-local function EnsureMacro()
-    if not DisenchantBuddyDB.global.options.createMacro then return end
-    if InCombatLockdown() then
-        print("DisenchantBuddy: Cannot create macro while in combat.")
-        return
-    end
-    local name = "DisenchantBuddy"
-    -- The macro simply clicks the hidden secure button which handles selecting
-    -- the next item to disenchant. Registering the button for any up-click
-    -- means no additional arguments are required here.
-    local text = "/click DisenchantBuddyMacroBtn"
-    local icon = "INV_Enchant_Disenchant"
-    if GetMacroBody(name) then
-        EditMacro(name, name, icon, text)
-    else
-        if GetNumMacros() >= MAX_ACCOUNT_MACROS then
-            print("DisenchantBuddy: Too many macros to create DisenchantBuddy macro.")
-            return
-        end
-        CreateMacro(name, icon, text)
-    end
-end
 
 local function CreateRow(parent, index)
     local row = CreateFrame("Button", nil, parent.content)
@@ -701,16 +632,6 @@ local function RefreshList(scroll)
         end
     end
 
-    if macroBtn then
-        if not knowsEnchanting or not scroll.selected then
-            macroBtn:SetAttribute("bag", nil)
-            macroBtn:SetAttribute("slot", nil)
-        else
-            macroBtn:SetAttribute("bag", scroll.selected.bag)
-            macroBtn:SetAttribute("slot", scroll.selected.slot)
-        end
-    end
-
     for i, data in ipairs(itemList) do
         local row = rows[i]
         if not row then
@@ -731,8 +652,6 @@ local function RefreshList(scroll)
 end
 
 local function CreateUI()
-    -- Ensure the macro button exists so the UI button can share it.
-    CreateMacroButton()
     frame = CreateFrame("Frame","DisenchantBuddyFrame",UIParent,"BasicFrameTemplateWithInset")
     frame:SetSize(300,400)
     frame:SetPoint("CENTER")
@@ -855,19 +774,6 @@ local function CreateUI()
         end
     end)
 
-    local macroCheck = CreateFrame("CheckButton", nil, optionsFrame, "UICheckButtonTemplate")
-    macroCheck:SetPoint("TOPLEFT", boeCheck, "BOTTOMLEFT", 0, -8)
-    macroCheck.text = macroCheck:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    macroCheck.text:SetPoint("LEFT", macroCheck, "RIGHT", 4, 0)
-    macroCheck.text:SetText("Create Macro")
-    macroCheck:SetChecked(DisenchantBuddyDB.global.options.createMacro)
-    macroCheck:SetScript("OnClick", function(self)
-        DisenchantBuddyDB.global.options.createMacro = self:GetChecked()
-        if self:GetChecked() then
-            EnsureMacro()
-        end
-    end)
-
     local function UpdateTabs(selected)
         listTab:SetEnabled(selected ~= 1)
         optionsTab:SetEnabled(selected ~= 2)
@@ -915,25 +821,6 @@ SLASH_DISENCHANTBUDDY1 = "/disbuddy"
 SLASH_DISENCHANTBUDDY2 = "/db"
 SlashCmdList["DISENCHANTBUDDY"] = Toggle
 
--- Create the macro button and user macro on login so they are available even if
--- the main window is never opened, mirroring TSM's approach.
-local init = CreateFrame("Frame")
-init:RegisterEvent("PLAYER_LOGIN")
-init:SetScript("OnEvent", function()
-    CreateMacroButton()
-    if DisenchantBuddyDB.global.options.createMacro then
-        EnsureMacro()
-    end
-    -- Prime the item list so the macro works immediately on login even if the
-    -- UI is never opened. This mirrors TSM's behaviour where the secure button
-    -- always points at a valid bag slot.
-    ScanBags()
-    if macroBtn and knowsEnchanting and itemList[1] then
-        macroBtn:SetAttribute("bag",  itemList[1].bag)
-        macroBtn:SetAttribute("slot", itemList[1].slot)
-    end
-end)
-
 -- Auto show on bag update if enabled
 local f = CreateFrame("Frame")
 f:RegisterEvent("BAG_UPDATE_DELAYED")
@@ -943,24 +830,11 @@ f:SetScript("OnEvent", function(_, event, ...)
         local itemID, success = ...
         if success and pendingLoad[itemID] then
             pendingLoad[itemID] = nil
-            -- Rescan and update the macro button so it remains valid even if the
-            -- UI was never opened. This ensures the user macro begins working as
-            -- soon as item information becomes available.
-            ScanBags()
-            if macroBtn then
-                if knowsEnchanting and itemList[1] then
-                    macroBtn:SetAttribute("bag",  itemList[1].bag)
-                    macroBtn:SetAttribute("slot", itemList[1].slot)
-                else
-                    macroBtn:SetAttribute("bag",  nil)
-                    macroBtn:SetAttribute("slot", nil)
-                end
-            end
-            if frame and frame.scroll and not refreshQueued then
+            if frame and frame:IsShown() and not refreshQueued then
                 refreshQueued = true
                 C_Timer.After(0, function()
                     refreshQueued = false
-                    if frame and frame.scroll then
+                    if frame and frame:IsShown() then
                         RefreshList(frame.scroll)
                     end
                 end)
@@ -969,33 +843,20 @@ f:SetScript("OnEvent", function(_, event, ...)
         return
     end
 
-    if event == "BAG_UPDATE_DELAYED" then
+    if DisenchantBuddyDB.global.options.autoShow and not (frame and frame:IsShown()) then
         ScanBags()
-        -- Always update the secure macro button with the first disenchantable
-        -- item so the user macro continues to work even when the UI is closed.
-        if macroBtn then
-            if knowsEnchanting and itemList[1] then
-                macroBtn:SetAttribute("bag",  itemList[1].bag)
-                macroBtn:SetAttribute("slot", itemList[1].slot)
-            else
-                macroBtn:SetAttribute("bag",  nil)
-                macroBtn:SetAttribute("slot", nil)
-            end
+        if #itemList > 0 then
+            Toggle()
         end
-        if frame and frame.scroll and not refreshQueued then
+    elseif frame and frame:IsShown() then
+        if not refreshQueued then
             refreshQueued = true
             C_Timer.After(0, function()
                 refreshQueued = false
-                if frame and frame.scroll then
+                if frame and frame:IsShown() then
                     RefreshList(frame.scroll)
                 end
             end)
-        end
-
-        if DisenchantBuddyDB.global.options.autoShow and not (frame and frame:IsShown()) then
-            if #itemList > 0 then
-                Toggle()
-            end
         end
     end
 end)
@@ -1027,17 +888,6 @@ local function CreateOptions()
         end
     end)
 
-    local macroCheck = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
-    macroCheck:SetPoint("TOPLEFT", boeCheck, "BOTTOMLEFT", 0, -8)
-    macroCheck.Text:SetText("Create Macro")
-    macroCheck:SetChecked(DisenchantBuddyDB.global.options.createMacro)
-    macroCheck:SetScript("OnClick", function(self)
-        DisenchantBuddyDB.global.options.createMacro = self:GetChecked()
-        if self:GetChecked() then
-            EnsureMacro()
-        end
-    end)
-
     InterfaceOptions_AddCategory(panel)
 end
 
@@ -1046,20 +896,6 @@ optionsLoader:RegisterEvent("ADDON_LOADED")
 optionsLoader:SetScript("OnEvent", function(self, addon)
     if addon == ADDON_NAME then
         CreateOptions()
-        -- Create the UI so the secure destroy button exists even if the
-        -- window is never manually opened. This allows the user macro to work
-        -- immediately on login just like TSM's implementation.
-        local ok, err = pcall(CreateUI)
-        if not ok and err then
-            print("DisenchantBuddy error:", err)
-        end
-        -- Populate the item list so macro usage works right away even if the
-        -- window remains closed after login.
-        ScanBags()
-        if frame and frame.scroll then
-            RefreshList(frame.scroll)
-        end
-        EnsureMacro()
         self:UnregisterEvent("ADDON_LOADED")
     end
 end)
