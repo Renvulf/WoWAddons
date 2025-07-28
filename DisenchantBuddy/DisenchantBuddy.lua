@@ -49,10 +49,10 @@ local function CreateMacroButton()
     macroBtn:SetSize(1, 1)
     macroBtn:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -100, 0)
     macroBtn:SetAlpha(0)
-    -- Register for click events respecting the ActionButtonUseKeyDown CVar just
-    -- like TSM's SecureMacroActionButton so the macro fires at the expected
-    -- time on all clients.
-    macroBtn:RegisterForClicks(GetCVarBool("ActionButtonUseKeyDown") and "LeftButtonDown" or "LeftButtonUp")
+    -- Always register for up clicks so both key down/up activations trigger
+    -- the PreClick handler when the key/button is released. This mirrors
+    -- TSM's behaviour while avoiding CVar edge cases.
+    macroBtn:RegisterForClicks("AnyUp")
     macroBtn:SetAttribute("*type1", "macro")
     macroBtn:SetAttribute("*macrotext1", "")
     macroBtn:SetScript("PreClick", function(btn)
@@ -570,12 +570,10 @@ local function EnsureMacro()
         return
     end
     local name = "DisenchantBuddy"
-    -- Include the down/up argument so the click event matches the button's
-    -- registered click type just like TSM's macro implementation.
-    local downArg = GetCVarBool("ActionButtonUseKeyDown") and 1 or 0
-    -- The macro clicks the main button in the UI. The trailing argument matches
-    -- whether clicks fire on key down or up.
-    local text = string.format("/click DisenchantBuddyMacroBtn LeftButton %d", downArg)
+    -- The macro simply clicks the hidden secure button which handles selecting
+    -- the next item to disenchant. Registering the button for any up-click
+    -- means no additional arguments are required here.
+    local text = "/click DisenchantBuddyMacroBtn"
     local icon = "INV_Enchant_Disenchant"
     if GetMacroBody(name) then
         EditMacro(name, name, icon, text)
