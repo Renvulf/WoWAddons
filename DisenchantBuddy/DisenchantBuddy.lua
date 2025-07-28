@@ -409,11 +409,6 @@ local function FinishDestroy()
         -- disenchant. The button itself stays enabled the entire time so the
         -- user can keep clicking even while waiting for the cast to finish.
     end
-    if macroButton then
-        macroButton:SetAttribute("*macrotext1", nil)
-        macroButton:SetAttribute("bag", nil)
-        macroButton:SetAttribute("slot", nil)
-    end
     if frame and frame.scroll and RefreshList then
         -- Delay slightly to allow the bag update events to propagate before we
         -- rescan and redraw the list. We defensively check RefreshList in case
@@ -523,35 +518,9 @@ end
 -- Export for the secure environment
 _G.DisenchantBuddy_StartDestroy = StartDestroy
 
--- Hidden button used for macros so the addon can disenchant items without
--- the main window being open. This mirrors how TSM exposes a secure button
--- for its destroying macro.
--- Hidden macro button which is clicked by the user created macro. The button
--- must remain visible for the "/click" command to work, so we keep it off
--- screen and fully transparent instead of calling :Hide().
-local macroButton = CreateFrame("Button", "DisenchantBuddyMacroButton", UIParent, "SecureActionButtonTemplate, UIPanelButtonTemplate")
-macroButton:SetAttribute("*type1", "macro")
-macroButton:SetAttribute("*macrotext1", "")
-macroButton:RegisterForClicks(GetCVarBool("ActionButtonUseKeyDown") and "LeftButtonDown" or "LeftButtonUp")
-macroButton:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -100, -100)
-macroButton:SetSize(1, 1)
-macroButton:SetAlpha(0)
-macroButton:Show() -- must be visible for /click to work
-macroButton:SetScript("PreClick", function(btn)
-    -- Refresh the bag list and select the first item, mirroring the button in
-    -- the main UI.
-    ScanBags()
-    local data = itemList[1]
-    if data and _G.DisenchantBuddy_StartDestroy then
-        btn:SetAttribute("bag", data.bag)
-        btn:SetAttribute("slot", data.slot)
-        securecall(_G.DisenchantBuddy_StartDestroy, btn)
-    else
-        btn:SetAttribute("*macrotext1", nil)
-    end
-end)
-
--- Creates or updates the user macro which triggers the above button.
+-- Creates or updates the user macro which triggers the main destroy button
+-- just like TSM's implementation. The macro simply clicks the secure button
+-- in the addon UI so all logic runs through the same path as a normal click.
 local function EnsureMacro()
     if not DisenchantBuddyDB.global.options.createMacro then return end
     if InCombatLockdown() then
@@ -562,7 +531,9 @@ local function EnsureMacro()
     -- Include the down/up argument so the click event matches the button's
     -- registered click type just like TSM's macro implementation.
     local downArg = GetCVarBool("ActionButtonUseKeyDown") and 1 or 0
-    local text = string.format("/click DisenchantBuddyMacroButton LeftButton %d", downArg)
+    -- The macro clicks the main button in the UI. The trailing argument matches
+    -- whether clicks fire on key down or up.
+    local text = string.format("/click DisenchantBuddyDestroyBtn LeftButton %d", downArg)
     local icon = "INV_Enchant_Disenchant"
     if GetMacroBody(name) then
         EditMacro(name, name, icon, text)
