@@ -62,24 +62,22 @@ end
 local DISENCHANT_NAME
 local DISENCHANT_ICON
 do
-    local name, icon
+    local info
     if C_Spell and C_Spell.GetSpellInfo then
-        local v1, _, v3 = C_Spell.GetSpellInfo(13262)
-        if type(v1) == "table" then
-            -- Retail clients return a table with the spell info
-            name = v1.name
-            icon = v1.icon
-        else
+        info = C_Spell.GetSpellInfo(13262)
+        if type(info) ~= "table" then
             -- Older clients return multiple values
-            name = v1
-            icon = v3
+            DISENCHANT_NAME = info
+            DISENCHANT_ICON = select(3, C_Spell.GetSpellInfo(13262))
+        else
+            DISENCHANT_NAME = info.name
+            DISENCHANT_ICON = info.icon
         end
     elseif GetSpellInfo then
-        -- Pre-9.0 API which returns multiple values
-        name, _, icon = GetSpellInfo(13262)
+        DISENCHANT_NAME, _, DISENCHANT_ICON = GetSpellInfo(13262)
     end
-    DISENCHANT_NAME = name or "Disenchant"
-    DISENCHANT_ICON = icon or "INV_Misc_Dust_01"
+    DISENCHANT_NAME = DISENCHANT_NAME or "Disenchant"
+    DISENCHANT_ICON = DISENCHANT_ICON or "INV_Misc_Dust_01"
 end
 
 --[[---------------------------------------------------------------------
@@ -113,13 +111,6 @@ local function DeleteDisenchantMacro()
     if idx > 0 then
         DeleteMacro(idx)
     end
-end
-
--- Apply the macro preference once helper functions are defined.
-if DisenchantBuddyDB.global.enableMacro then
-    CreateDisenchantMacro()
-else
-    DeleteDisenchantMacro()
 end
 
 -- Non-disenchantable items list
@@ -1003,5 +994,12 @@ initLoader:SetScript("OnEvent", function()
         if not ok and err then
             print("DisenchantBuddy error:", err)
         end
+    end
+    -- Create or remove the macro based on the user's saved preference. Doing
+    -- this after PLAYER_LOGIN ensures the macro APIs are fully available.
+    if DisenchantBuddyDB.global.enableMacro then
+        CreateDisenchantMacro()
+    else
+        DeleteDisenchantMacro()
     end
 end)
