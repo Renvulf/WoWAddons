@@ -62,36 +62,24 @@ end
 local DISENCHANT_NAME
 local DISENCHANT_ICON
 do
-    local name
+    local name, icon
     if C_Spell and C_Spell.GetSpellInfo then
-        local info = C_Spell.GetSpellInfo(13262)
-        if type(info) == "table" then
-            -- Retail clients return a table with the spell information
-            name = info.name
+        local v1, _, v3 = C_Spell.GetSpellInfo(13262)
+        if type(v1) == "table" then
+            -- Retail clients return a table with the spell info
+            name = v1.name
+            icon = v1.icon
         else
-            -- Older clients return multiple values, with the name first
-            name = info
+            -- Older clients return multiple values
+            name = v1
+            icon = v3
         end
     elseif GetSpellInfo then
         -- Pre-9.0 API which returns multiple values
-        name = GetSpellInfo(13262)
+        name, _, icon = GetSpellInfo(13262)
     end
     DISENCHANT_NAME = name or "Disenchant"
-end
-
-do
-    local iconInfo
-    if C_Spell and C_Spell.GetSpellInfo then
-        local tbl = C_Spell.GetSpellInfo(13262)
-        if type(tbl) == "table" then
-            iconInfo = tbl.icon
-        else
-            iconInfo = select(3, C_Spell.GetSpellInfo(13262))
-        end
-    elseif GetSpellInfo then
-        iconInfo = select(3, GetSpellInfo(13262))
-    end
-    DISENCHANT_ICON = iconInfo or "INV_Misc_Dust_01"
+    DISENCHANT_ICON = icon or "INV_Misc_Dust_01"
 end
 
 --[[---------------------------------------------------------------------
