@@ -6,6 +6,7 @@ local DB_DEFAULTS = {
             includeSoulbound = true,
             includeBOE = true,
             deMaxQuality = 4,
+            createMacro = false,
         },
         ignorePermanent = {},
         minimap = { hide = false, minimapPos = 220, radius = 80 },
@@ -408,6 +409,11 @@ local function FinishDestroy()
         -- disenchant. The button itself stays enabled the entire time so the
         -- user can keep clicking even while waiting for the cast to finish.
     end
+    if macroButton then
+        macroButton:SetAttribute("*macrotext1", nil)
+        macroButton:SetAttribute("bag", nil)
+        macroButton:SetAttribute("slot", nil)
+    end
     if frame and frame.scroll and RefreshList then
         -- Delay slightly to allow the bag update events to propagate before we
         -- rescan and redraw the list. We defensively check RefreshList in case
@@ -516,6 +522,49 @@ end
 
 -- Export for the secure environment
 _G.DisenchantBuddy_StartDestroy = StartDestroy
+
+-- Hidden button used for macros so the addon can disenchant items without
+-- the main window being open. This mirrors how TSM exposes a secure button
+-- for its destroying macro.
+local macroButton = CreateFrame("Button", "DisenchantBuddyMacroButton", UIParent, "SecureActionButtonTemplate, UIPanelButtonTemplate")
+macroButton:SetAttribute("*type1", "macro")
+macroButton:SetAttribute("*macrotext1", "")
+macroButton:RegisterForClicks(GetCVarBool("ActionButtonUseKeyDown") and "LeftButtonDown" or "LeftButtonUp")
+macroButton:Hide() -- hidden but still clickable via /click
+macroButton:SetScript("PreClick", function(btn)
+    -- Refresh the bag list and select the first item, mirroring the button in
+    -- the main UI.
+    ScanBags()
+    local data = itemList[1]
+    if data and _G.DisenchantBuddy_StartDestroy then
+        btn:SetAttribute("bag", data.bag)
+        btn:SetAttribute("slot", data.slot)
+        securecall(_G.DisenchantBuddy_StartDestroy, btn)
+    else
+        btn:SetAttribute("*macrotext1", nil)
+    end
+end)
+
+-- Creates or updates the user macro which triggers the above button.
+local function EnsureMacro()
+    if not DisenchantBuddyDB.global.options.createMacro then return end
+    if InCombatLockdown() then
+        print("DisenchantBuddy: Cannot create macro while in combat.")
+        return
+    end
+    local name = "DisenchantBuddy"
+    local text = "/click DisenchantBuddyMacroButton"
+    local icon = "INV_Enchant_Disenchant"
+    if GetMacroBody(name) then
+        EditMacro(name, name, icon, text)
+    else
+        if GetNumMacros() >= MAX_ACCOUNT_MACROS then
+            print("DisenchantBuddy: Too many macros to create DisenchantBuddy macro.")
+            return
+        end
+        CreateMacro(name, icon, text)
+    end
+end
 
 local function CreateRow(parent, index)
     local row = CreateFrame("Button", nil, parent.content)
@@ -774,6 +823,19 @@ local function CreateUI()
         end
     end)
 
+    local macroCheck = CreateFrame("CheckButton", nil, optionsFrame, "UICheckButtonTemplate")
+    macroCheck:SetPoint("TOPLEFT", boeCheck, "BOTTOMLEFT", 0, -8)
+    macroCheck.text = macroCheck:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    macroCheck.text:SetPoint("LEFT", macroCheck, "RIGHT", 4, 0)
+    macroCheck.text:SetText("Create Macro")
+    macroCheck:SetChecked(DisenchantBuddyDB.global.options.createMacro)
+    macroCheck:SetScript("OnClick", function(self)
+        DisenchantBuddyDB.global.options.createMacro = self:GetChecked()
+        if self:GetChecked() then
+            EnsureMacro()
+        end
+    end)
+
     local function UpdateTabs(selected)
         listTab:SetEnabled(selected ~= 1)
         optionsTab:SetEnabled(selected ~= 2)
@@ -888,6 +950,17 @@ local function CreateOptions()
         end
     end)
 
+    local macroCheck = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
+    macroCheck:SetPoint("TOPLEFT", boeCheck, "BOTTOMLEFT", 0, -8)
+    macroCheck.Text:SetText("Create Macro")
+    macroCheck:SetChecked(DisenchantBuddyDB.global.options.createMacro)
+    macroCheck:SetScript("OnClick", function(self)
+        DisenchantBuddyDB.global.options.createMacro = self:GetChecked()
+        if self:GetChecked() then
+            EnsureMacro()
+        end
+    end)
+
     InterfaceOptions_AddCategory(panel)
 end
 
@@ -896,6 +969,7 @@ optionsLoader:RegisterEvent("ADDON_LOADED")
 optionsLoader:SetScript("OnEvent", function(self, addon)
     if addon == ADDON_NAME then
         CreateOptions()
+        EnsureMacro()
         self:UnregisterEvent("ADDON_LOADED")
     end
 end)
