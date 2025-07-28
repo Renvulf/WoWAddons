@@ -9,6 +9,10 @@ local DB_DEFAULTS = {
         },
         ignorePermanent = {},
         minimap = { hide = false, minimapPos = 220, radius = 80 },
+        -- Determines whether the addon should maintain a macro for quickly
+        -- triggering the next disenchant.  Stored per-character to avoid
+        -- polluting the account-wide macro list.
+        enableMacro = false,
     }
 }
 
@@ -25,8 +29,18 @@ if not DisenchantBuddyDB then
     DisenchantBuddyDB = DeepCopy(DB_DEFAULTS)
 end
 
+-- Ensure new saved variables are initialized when updating from an older
+-- version of the addon.
+DisenchantBuddyDB.global = DisenchantBuddyDB.global or {}
+if DisenchantBuddyDB.global.enableMacro == nil then
+    DisenchantBuddyDB.global.enableMacro = DB_DEFAULTS.global.enableMacro
+end
+
 local sessionIgnore = {}
 local frame
+-- Hidden secure button used as a proxy target for the user-created macro.
+-- Created after the main UI so it can forward clicks to the real button.
+local proxyButton
 local itemList = {}
 local nonDE = {}
 local pendingLoad = {}
@@ -62,6 +76,47 @@ do
         name = GetSpellInfo(13262)
     end
     DISENCHANT_NAME = name or "Disenchant"
+end
+
+--[[---------------------------------------------------------------------
+  Macro Helpers
+  These functions create and remove the per-character macro that fires our
+  hidden proxy button.  The macro is recreated on each login if the user has
+  enabled the feature so there is no risk of duplicates lingering.
+------------------------------------------------------------------------]]
+
+local function CreateDisenchantMacro()
+    local macroName = "DisenchantNext"
+    -- Delete any existing macro so we don't end up with duplicates.
+    local idx = GetMacroIndexByName(macroName)
+    if idx > 0 then
+        DeleteMacro(idx)
+    end
+
+    -- Use the Disenchant spell icon if available.
+    local _, _, icon = GetSpellInfo("Disenchant")
+    icon = icon or "INV_Misc_Dust_01"
+
+    -- Body simply clicks the secure proxy button; works even if the addon UI is
+    -- hidden.
+    local body = "/click DB_DisEnchantProxyButton"
+
+    -- Create as a per-character macro to keep the global list clean.
+    CreateMacro(macroName, icon, body, true)
+end
+
+local function DeleteDisenchantMacro()
+    local idx = GetMacroIndexByName("DisenchantNext")
+    if idx > 0 then
+        DeleteMacro(idx)
+    end
+end
+
+-- Apply the macro preference once helper functions are defined.
+if DisenchantBuddyDB.global.enableMacro then
+    CreateDisenchantMacro()
+else
+    DeleteDisenchantMacro()
 end
 
 -- Non-disenchantable items list
@@ -743,6 +798,12 @@ local function CreateUI()
 
     frame.disenchantBtn = disenchantBtn
 
+    -- Create the hidden proxy button for the user macro.  It simply forwards
+    -- any clicks to the real "Disenchant Next" button above.
+    proxyButton = CreateFrame("Button", "DB_DisEnchantProxyButton", UIParent, "SecureActionButtonTemplate")
+    proxyButton:SetAttribute("type", "click")
+    proxyButton:SetAttribute("clickbutton", disenchantBtn:GetName())
+
     -- options frame
     local optionsFrame = CreateFrame("Frame", nil, frame)
     optionsFrame:SetPoint("TOPLEFT", 10, -30)
@@ -771,6 +832,21 @@ local function CreateUI()
         DisenchantBuddyDB.global.options.includeBOE = self:GetChecked()
         if frame and frame.scroll then
             RefreshList(frame.scroll)
+        end
+    end)
+
+    local macroCheck = CreateFrame("CheckButton", nil, optionsFrame, "UICheckButtonTemplate")
+    macroCheck:SetPoint("TOPLEFT", boeCheck, "BOTTOMLEFT", 0, -8)
+    macroCheck.text = macroCheck:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    macroCheck.text:SetPoint("LEFT", macroCheck, "RIGHT", 4, 0)
+    macroCheck.text:SetText("Enable Disenchant Macro")
+    macroCheck:SetChecked(DisenchantBuddyDB.global.enableMacro)
+    macroCheck:SetScript("OnClick", function(self)
+        DisenchantBuddyDB.global.enableMacro = self:GetChecked()
+        if self:GetChecked() then
+            CreateDisenchantMacro()
+        else
+            DeleteDisenchantMacro()
         end
     end)
 
@@ -885,6 +961,19 @@ local function CreateOptions()
         DisenchantBuddyDB.global.options.includeBOE = self:GetChecked()
         if frame and frame.scroll and frame:IsShown() then
             RefreshList(frame.scroll)
+        end
+    end)
+
+    local macroCheck = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
+    macroCheck:SetPoint("TOPLEFT", boeCheck, "BOTTOMLEFT", 0, -8)
+    macroCheck.Text:SetText("Enable Disenchant Macro")
+    macroCheck:SetChecked(DisenchantBuddyDB.global.enableMacro)
+    macroCheck:SetScript("OnClick", function(self)
+        DisenchantBuddyDB.global.enableMacro = self:GetChecked()
+        if self:GetChecked() then
+            CreateDisenchantMacro()
+        else
+            DeleteDisenchantMacro()
         end
     end)
 
