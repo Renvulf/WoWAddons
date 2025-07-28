@@ -1003,3 +1003,17 @@ optionsLoader:SetScript("OnEvent", function(self, addon)
         self:UnregisterEvent("ADDON_LOADED")
     end
 end)
+
+-- Build the main UI on login so the secure proxy button exists even if the
+-- window is never manually opened. This ensures the user macro can fire the
+-- "Disenchant Next" logic immediately after logging in.
+local initLoader = CreateFrame("Frame")
+initLoader:RegisterEvent("PLAYER_LOGIN")
+initLoader:SetScript("OnEvent", function()
+    if not frame then
+        local ok, err = pcall(CreateUI)
+        if not ok and err then
+            print("DisenchantBuddy error:", err)
+        end
+    end
+end)
