@@ -949,6 +949,13 @@ optionsLoader:RegisterEvent("ADDON_LOADED")
 optionsLoader:SetScript("OnEvent", function(self, addon)
     if addon == ADDON_NAME then
         CreateOptions()
+        -- Create the UI so the secure destroy button exists even if the
+        -- window is never manually opened. This allows the user macro to work
+        -- immediately on login just like TSM's implementation.
+        local ok, err = pcall(CreateUI)
+        if not ok and err then
+            print("DisenchantBuddy error:", err)
+        end
         EnsureMacro()
         self:UnregisterEvent("ADDON_LOADED")
     end
