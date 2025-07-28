@@ -926,6 +926,14 @@ init:SetScript("OnEvent", function()
     if DisenchantBuddyDB.global.options.createMacro then
         EnsureMacro()
     end
+    -- Prime the item list so the macro works immediately on login even if the
+    -- UI is never opened. This mirrors TSM's behaviour where the secure button
+    -- always points at a valid bag slot.
+    ScanBags()
+    if macroBtn and knowsEnchanting and itemList[1] then
+        macroBtn:SetAttribute("bag",  itemList[1].bag)
+        macroBtn:SetAttribute("slot", itemList[1].slot)
+    end
 end)
 
 -- Auto show on bag update if enabled
@@ -952,6 +960,17 @@ f:SetScript("OnEvent", function(_, event, ...)
 
     if event == "BAG_UPDATE_DELAYED" then
         ScanBags()
+        -- Always update the secure macro button with the first disenchantable
+        -- item so the user macro continues to work even when the UI is closed.
+        if macroBtn then
+            if knowsEnchanting and itemList[1] then
+                macroBtn:SetAttribute("bag",  itemList[1].bag)
+                macroBtn:SetAttribute("slot", itemList[1].slot)
+            else
+                macroBtn:SetAttribute("bag",  nil)
+                macroBtn:SetAttribute("slot", nil)
+            end
+        end
         if frame and frame.scroll and not refreshQueued then
             refreshQueued = true
             C_Timer.After(0, function()
