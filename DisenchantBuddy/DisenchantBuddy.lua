@@ -708,7 +708,13 @@ local function CreateUI()
         macroBtn:SetAttribute("*type1", "macro")
         macroBtn:SetAttribute("*macrotext1", "")
         macroBtn:SetScript("PreClick", function(btn)
-            local data = frame and frame.scroll and frame.scroll.selected or itemList[1]
+            local data
+            if frame and frame:IsShown() and frame.scroll then
+                data = frame.scroll.selected
+            end
+            if not data then
+                data = itemList[1]
+            end
             if data and _G.DisenchantBuddy_StartDestroy then
                 btn:SetAttribute("bag", data.bag)
                 btn:SetAttribute("slot", data.slot)
@@ -994,6 +1000,12 @@ optionsLoader:SetScript("OnEvent", function(self, addon)
         local ok, err = pcall(CreateUI)
         if not ok and err then
             print("DisenchantBuddy error:", err)
+        end
+        -- Populate the item list so macro usage works right away even if the
+        -- window remains closed after login.
+        ScanBags()
+        if frame and frame.scroll then
+            RefreshList(frame.scroll)
         end
         EnsureMacro()
         self:UnregisterEvent("ADDON_LOADED")
