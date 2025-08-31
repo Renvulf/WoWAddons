@@ -139,13 +139,18 @@ end
 -- Determines if the player can equip the provided item link.
 function Smartbot:CanEquip(link)
     if not link then return false end
-    local isEquippable = IsEquippableItem(link)
-    if not isEquippable then return false end
-    local level = UnitLevel("player")
+    if not IsEquippableItem(link) then return false end
+
+    -- Block too-low character levels
     local reqLevel = select(5, GetItemInfo(link)) or 0
-    if level < reqLevel then return false end
-    local isUsable = IsUsableItem(link)
-    return isUsable
+    if UnitLevel("player") < reqLevel then return false end
+
+    -- Must map to a valid equipment slot we handle
+    local equipLoc = select(9, GetItemInfo(link))
+    if not equipLoc or not INVTYPE_SLOTS[equipLoc] then return false end
+
+    -- Do NOT call IsUsableItem here (it returns false for most gear without a "Use:" effect)
+    return true
 end
 
 -- Adds Smartbot upgrade information to item tooltips.  When hovering an item the
@@ -196,6 +201,59 @@ local function AddTooltipInfo(tooltip)
 end
 
 
+function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
+    if not tooltip or not itemLink then return end
+
+    -- Ensure item info is cached; if not, repaint once it arrives
+    local itemObj = Item:CreateFromItemLink(itemLink)
+    if not itemObj:IsItemDataCached() then
+        itemObj:ContinueOnItemLoad(function()
+            -- Tooltip might have changed; bail if it's gone
+            if tooltip and tooltip:IsShown() then
+                Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
+            end
+        end)
+        return
+    end
+
+    local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
+    local slotInfo = equipLoc and INVTYPE_SLOTS[equipLoc] or nil
+    if not slotInfo then return end
+
+    local candidateScore = Smartbot:EvaluateItem(itemLink)
+
+    local function pctChange(invSlot)
+        local currentLink = GetInventoryItemLink("player", invSlot)
+        local currentScore = Smartbot:EvaluateItem(currentLink)
+        if currentScore <= 0 then
+            return candidateScore > 0 and 100 or 0
+        end
+        return (candidateScore - currentScore) / currentScore * 100
+    end
+
+    local bestChange
+    if type(slotInfo) == "table" then
+        for _, invSlot in ipairs(slotInfo) do
+            local change = pctChange(invSlot)
+            if not bestChange or change > bestChange then bestChange = change end
+        end
+    else
+        bestChange = pctChange(slotInfo)
+    end
+    if not bestChange then return end
+
+    tooltip:AddLine(" ")
+    if bestChange > 0 then
+        tooltip:AddLine(string.format("|cff00ff00Smartbot: Upgrade (+%.1f%%)|r", bestChange))
+    elseif bestChange < 0 then
+        tooltip:AddLine(string.format("|cffff0000Smartbot: Downgrade (%.1f%%)|r", bestChange))
+    else
+        tooltip:AddLine("|cffffff00Smartbot: No change|r")
+    end
+    tooltip:Show()
+end
+
+
 -- Initializes tooltip hooks in a version-safe manner. Retail removed the
 -- OnTooltipSetItem script handler in Dragonflight, requiring TooltipDataProcessor
 -- for item tooltips. Classic clients still use the legacy hook.  This function
@@ -206,7 +264,13 @@ function Smartbot:InitTooltipHooks()
     if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then
         -- Retail: hook via TooltipDataProcessor.
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
-            AddTooltipInfo(tooltip)
+            -- Prefer the hyperlink from data, then ID->link, then tooltip:GetItem
+            local link = (data and data.hyperlink)
+                      or (data and data.id and select(2, GetItemInfo(data.id)))
+                      or (tooltip and tooltip.GetItem and select(2, tooltip:GetItem()))
+            if link then
+                Smartbot:AddOrUpdateTooltip(tooltip, link)
+            end
         end)
         self.tooltipHooked = true
     else
@@ -222,24 +286,27 @@ function Smartbot:InitTooltipHooks()
 end
 
 function Smartbot:EquipItem(bag, slot, targetSlot)
-    -- Clear any existing cursor item to avoid accidental swaps.
-    if CursorHasItem() then ClearCursor() end
-
     local itemLink = C_Container.GetContainerItemLink(bag, slot)
     if not itemLink then return false end
 
-    -- Pick up the item from the bag and place it into the desired slot.
-    C_Container.PickupContainerItem(bag, slot)
-    EquipCursorItem(targetSlot)
+    -- Use API that doesn’t depend on the cursor, then verify by item ID.
+    EquipItemByName(itemLink, targetSlot)
 
-    -- If equipping failed the item might remain on the cursor.  Clearing the
-    -- cursor prevents dropping the item on the world when the player clicks.
-    if CursorHasItem() then ClearCursor() end
+    -- Verify on the next frame to allow the equip to complete
+    local wantID = (select(1, GetItemInfoInstant(itemLink)))
+    local equippedOK = false
+    C_Timer.After(0, function()
+        local haveID = GetInventoryItemID("player", targetSlot)
+        equippedOK = (haveID == wantID)
+        if not equippedOK then
+            -- Mark as failed so ScanBags won’t thrash on it
+            self.failedUpgrades = self.failedUpgrades or {}
+            self.failedUpgrades[itemLink] = true
+        end
+    end)
 
-    -- Verify that the item actually equipped into the requested slot.  Some
-    -- items (for example unique-equipped rings) may silently fail to equip.
-    local equippedLink = GetInventoryItemLink("player", targetSlot)
-    return equippedLink == itemLink
+    -- Return a best-effort guess immediately; the blacklist above prevents loops
+    return true
 end
 
 -- Scans the player's bags for potential upgrades based on stat weights.
@@ -266,6 +333,12 @@ function Smartbot:ScanBags(force)
                 -- flag instead of using goto.  This preserves the intent while
                 -- remaining compatible with the game's Lua version.
                 local skipItem = false
+
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                if info and info.isLocked then
+                    -- Item is in flux (being moved/sold/etc); skip for now
+                    skipItem = true
+                end
                 self.pendingItemLoad = self.pendingItemLoad or {}
                 if itemLink then
                     local name = GetItemInfo(itemLink)
