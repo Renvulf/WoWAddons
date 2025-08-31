@@ -23,11 +23,11 @@ local STAT_LIST = {
     { label = "Strength",        key = "ITEM_MOD_STRENGTH_SHORT",       primary = LE_UNIT_STAT_STRENGTH },
     { label = "Agility",         key = "ITEM_MOD_AGILITY_SHORT",        primary = LE_UNIT_STAT_AGILITY },
     { label = "Intellect",       key = "ITEM_MOD_INTELLECT_SHORT",      primary = LE_UNIT_STAT_INTELLECT },
-    { label = "Crit",            key = "ITEM_MOD_CRIT_RATING_SHORT" },
-    { label = "Haste",           key = "ITEM_MOD_HASTE_RATING_SHORT" },
-    { label = "Mastery",         key = "ITEM_MOD_MASTERY_RATING_SHORT" },
-    { label = "Versatility",     key = "ITEM_MOD_VERSATILITY" },
-    { label = "Stamina",         key = "ITEM_MOD_STAMINA_SHORT" },
+    { label = "Crit",            key = "ITEM_MOD_CRIT_RATING_SHORT",    always = true },
+    { label = "Haste",           key = "ITEM_MOD_HASTE_RATING_SHORT",   always = true },
+    { label = "Mastery",         key = "ITEM_MOD_MASTERY_RATING_SHORT", always = true },
+    { label = "Versatility",     key = "ITEM_MOD_VERSATILITY",          always = true },
+    { label = "Stamina",         key = "ITEM_MOD_STAMINA_SHORT",        always = true },
     { label = "Armor",           key = "ITEM_MOD_ARMOR_SHORT" },
     { label = "Attack Power",    key = "ITEM_MOD_ATTACK_POWER_SHORT",  primary = {LE_UNIT_STAT_STRENGTH, LE_UNIT_STAT_AGILITY} },
     { label = "Spell Power",     key = "ITEM_MOD_SPELL_POWER_SHORT",   primary = LE_UNIT_STAT_INTELLECT },
@@ -148,6 +148,58 @@ function Smartbot:CanEquip(link)
     return isUsable
 end
 
+-- Adds Smartbot upgrade information to item tooltips.  When hovering an item the
+-- addon compares it against currently equipped gear and appends a coloured line
+-- indicating the percentage change in score.  Green means an upgrade, red a
+-- downgrade and yellow indicates no change.
+local function AddTooltipInfo(tooltip)
+    if not tooltip or not tooltip.GetItem then return end
+    local _, itemLink = tooltip:GetItem()
+    if not itemLink or not Smartbot:CanEquip(itemLink) then return end
+
+    local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
+    local slotInfo = equipLoc and INVTYPE_SLOTS[equipLoc] or nil
+    if not slotInfo then return end
+
+    local candidateScore = Smartbot:EvaluateItem(itemLink)
+
+    local function calculateChange(invSlot)
+        local currentLink = GetInventoryItemLink("player", invSlot)
+        local currentScore = Smartbot:EvaluateItem(currentLink)
+        if currentScore <= 0 then
+            return candidateScore > 0 and 100 or 0
+        end
+        return (candidateScore - currentScore) / currentScore * 100
+    end
+
+    local bestChange
+    if type(slotInfo) == "table" then
+        for _, invSlot in ipairs(slotInfo) do
+            local change = calculateChange(invSlot)
+            if not bestChange or change > bestChange then bestChange = change end
+        end
+    else
+        bestChange = calculateChange(slotInfo)
+    end
+
+    if not bestChange then return end
+
+    tooltip:AddLine(" ")
+    if bestChange > 0 then
+        tooltip:AddLine(string.format("|cff00ff00Smartbot: Upgrade (+%.1f%%)|r", bestChange))
+    elseif bestChange < 0 then
+        tooltip:AddLine(string.format("|cffff0000Smartbot: Downgrade (%.1f%%)|r", bestChange))
+    else
+        tooltip:AddLine("|cffffff00Smartbot: No change|r")
+    end
+    tooltip:Show()
+end
+
+GameTooltip:HookScript("OnTooltipSetItem", AddTooltipInfo)
+if ItemRefTooltip then
+    ItemRefTooltip:HookScript("OnTooltipSetItem", AddTooltipInfo)
+end
+
 -- Attempts to equip an item from the bags in the given bag and slot positions.
 function Smartbot:EquipItem(bag, slot, targetSlot)
     -- Pick up the item and equip it into the target inventory slot.
@@ -164,46 +216,56 @@ function Smartbot:ScanBags()
     -- Even if all weights are zero we still evaluate based on item level so the
     -- addon can function out of the box without requiring manual weights.
 
-    for bag = 0, NUM_BAG_SLOTS do
-        for slot = 1, C_Container.GetContainerNumSlots(bag) do
-            local itemLink = C_Container.GetContainerItemLink(bag, slot)
-            if itemLink and self:CanEquip(itemLink) then
-                local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
-                local slotInfo
-                -- Optionally ignore trinkets unless the user explicitly allows them.
-                if equipLoc == "INVTYPE_TRINKET" and not SmartbotDB.includeTrinkets then
-                    slotInfo = nil
-                else
-                    slotInfo = INVTYPE_SLOTS[equipLoc]
-                end
-                if slotInfo then
-                    local candidateScore = self:EvaluateItem(itemLink)
-                    if type(slotInfo) == "table" then
-                        -- Items that can go into multiple slots (rings/trinkets).
-                        local bestSlot, bestScore = nil, 0
-                        for _, invSlot in ipairs(slotInfo) do
-                            local currentLink = GetInventoryItemLink("player", invSlot)
-                            local currentScore = self:EvaluateItem(currentLink)
-                            if candidateScore > currentScore and (not bestSlot or currentScore < bestScore) then
-                                bestSlot, bestScore = invSlot, currentScore
-                            end
-                        end
-                        if bestSlot then
-                            self:EquipItem(bag, slot, bestSlot)
-                            print("Smartbot equipped upgrade:", itemLink)
-                            return -- A bag update will rescan remaining items
-                        end
+    -- Repeat scanning until a full pass finds no further upgrades. This
+    -- guarantees that every item in the player's inventory is evaluated even if
+    -- equipping one upgrade uncovers another.
+    local equippedSomething = true
+    while equippedSomething do
+        equippedSomething = false
+        for bag = 0, NUM_BAG_SLOTS do
+            for slot = 1, C_Container.GetContainerNumSlots(bag) do
+                local itemLink = C_Container.GetContainerItemLink(bag, slot)
+                if itemLink and self:CanEquip(itemLink) then
+                    local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
+                    local slotInfo
+                    -- Optionally ignore trinkets unless the user explicitly allows them.
+                    if equipLoc == "INVTYPE_TRINKET" and not SmartbotDB.includeTrinkets then
+                        slotInfo = nil
                     else
-                        local currentLink = GetInventoryItemLink("player", slotInfo)
-                        local currentScore = self:EvaluateItem(currentLink)
-                        if candidateScore > currentScore then
-                            self:EquipItem(bag, slot, slotInfo)
-                            print("Smartbot equipped upgrade:", itemLink)
-                            return -- stop scanning after equipping one item
+                        slotInfo = INVTYPE_SLOTS[equipLoc]
+                    end
+                    if slotInfo then
+                        local candidateScore = self:EvaluateItem(itemLink)
+                        if type(slotInfo) == "table" then
+                            -- Items that can go into multiple slots (rings/trinkets).
+                            local bestSlot, bestScore = nil, 0
+                            for _, invSlot in ipairs(slotInfo) do
+                                local currentLink = GetInventoryItemLink("player", invSlot)
+                                local currentScore = self:EvaluateItem(currentLink)
+                                if candidateScore > currentScore and (not bestSlot or currentScore < bestScore) then
+                                    bestSlot, bestScore = invSlot, currentScore
+                                end
+                            end
+                            if bestSlot then
+                                self:EquipItem(bag, slot, bestSlot)
+                                print("Smartbot equipped upgrade:", itemLink)
+                                equippedSomething = true
+                                break -- break slot loop to restart scanning after equipment change
+                            end
+                        else
+                            local currentLink = GetInventoryItemLink("player", slotInfo)
+                            local currentScore = self:EvaluateItem(currentLink)
+                            if candidateScore > currentScore then
+                                self:EquipItem(bag, slot, slotInfo)
+                                print("Smartbot equipped upgrade:", itemLink)
+                                equippedSomething = true
+                                break -- break slot loop to restart scanning after equipment change
+                            end
                         end
                     end
                 end
             end
+            if equippedSomething then break end -- restart outer bag loop after equipping
         end
     end
 end
@@ -390,10 +452,13 @@ function Smartbot:CreateOptions()
     panel.refresh = function()
         -- Called when the panel is shown.  Populate values for current spec and
         -- hide stats that aren't relevant to the specialization's primary stat.
-        -- When "Show all stats" is unchecked we mimic Zygor's behaviour by only
-        -- showing stats that currently have a non-zero weight.  This prevents
-        -- low priority stats such as Armor or Life Steal from appearing unless
-        -- the user explicitly enables them.
+        -- When "Show all stats" is unchecked we mimic Zygor's behaviour by
+        -- showing only statistics appropriate for the player's current class
+        -- and specialization.  Unlike the initial version which hid every stat
+        -- unless it already had a positive weight, this mirrors Zygor's UI by
+        -- always displaying stats tied to the spec's primary attribute while
+        -- still allowing secondary/unused stats to remain hidden unless the
+        -- user enables "Show all stats".
         local weights = GetCurrentWeights()
         local specIndex = GetSpecialization()
         local primaryStat = specIndex and select(6, GetSpecializationInfo(specIndex)) or nil
@@ -403,13 +468,18 @@ function Smartbot:CreateOptions()
             local label = panel.labels[info.key]
             local box = panel.editBoxes[info.key]
 
-            local show = SmartbotDB.showAllStats
-            if not show then
-                -- Only show stats relevant to the current specialization and
-                -- with a positive weight.  This mirrors Zygor's options panel
-                -- behaviour and prevents zero/negative entries from showing
-                -- when "Show all stats" is unchecked.
-                show = StatAppliesToPrimary(info.primary, primaryStat) and (weights[info.key] or 0) > 0
+            local show
+            if SmartbotDB.showAllStats then
+                show = true
+            else
+                -- When unchecked display stats that apply to the current
+                -- specialization's primary attribute or have a user supplied
+                -- non-zero weight.  This matches the discrimination used by
+                -- Zygor where only relevant stats appear by default but users
+                -- can still reveal everything with the checkbox.
+                show = (info.always and StatAppliesToPrimary(info.primary, primaryStat))
+                    or (info.primary and StatAppliesToPrimary(info.primary, primaryStat))
+                    or (weights[info.key] or 0) > 0
             end
 
             if show then
