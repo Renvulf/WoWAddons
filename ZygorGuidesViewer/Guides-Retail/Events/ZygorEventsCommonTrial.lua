@@ -1,0 +1,25 @@
+local ZygorGuidesViewer=ZygorGuidesViewer
+if not ZygorGuidesViewer then return end
+if ZGV:DoMutex("EventsC") then return end
+ZygorGuidesViewer.GuideMenuTier = "TRI"
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\Dragonflight (10-70)\\Azerothian Archives!")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\Dragonflight (10-70)\\The Big Dig: Traitor's Rest")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\Dragonflight (10-70)\\Emerald Dreamsurge (Thaldraszus)")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\Dragonflight (10-70)\\Emerald Dreamsurge (The Waking Shores)")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\Dragonflight (10-70)\\Emerald Dreamsurge (Ohn'ahran Plains)")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\Dragonflight (10-70)\\Emerald Dreamsurge (The Azure Span)")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\Secrets of Azeroth\\Secrets of Azeroth")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\Secrets of Azeroth\\Community Rumors")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\Secrets of Azeroth\\Secrets of Azeroth Mimiron's Jumpjets Mount")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\Dragonflight (10-70)\\The Emerald Dream Superbloom")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\The War Within (70-80)\\20th Anniversary Celebration\\Achievements\\No Crate Left Behind")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Pets & Mounts Guides\\Mounts\\Ground Mounts\\Incognitro, the Indecipherable Felcycle")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\The War Within (70-80)\\Revisited Horrific Vision of Orgrimmar")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\The War Within (70-80)\\Revisited Horrific Vision of Stormwind")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\The War Within (70-80)\\Nightfall")
+ZGV.BETASTART()
+ZygorGuidesViewer:RegisterGuidePlaceholder("Achievement Guides\\Exploration\\The War Within Pathfinder")
+ZGV.BETAEND()
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\The War Within (70-80)\\Siren Isle\\The Drain")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\The War Within (70-80)\\Siren Isle\\The Drowned Lair")
+ZygorGuidesViewer:RegisterGuidePlaceholder("Events Guides\\The War Within (70-80)\\Siren Isle\\Shuddering Hollow")
