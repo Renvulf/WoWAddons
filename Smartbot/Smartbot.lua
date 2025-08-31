@@ -261,6 +261,11 @@ function Smartbot:ScanBags(force)
             for slot = 1, C_Container.GetContainerNumSlots(bag) do
                 local itemLink = C_Container.GetContainerItemLink(bag, slot)
 
+                -- Lua 5.1 (used by WoW) lacks a native "continue" statement,
+                -- so we track whether the rest of the loop should execute via a
+                -- flag instead of using goto.  This preserves the intent while
+                -- remaining compatible with the game's Lua version.
+                local skipItem = false
                 self.pendingItemLoad = self.pendingItemLoad or {}
                 if itemLink then
                     local name = GetItemInfo(itemLink)
@@ -273,12 +278,13 @@ function Smartbot:ScanBags(force)
                                 C_Timer.After(0, function() Smartbot:ScanBags() end)
                             end)
                         end
-                        goto continue_item
+                        skipItem = true -- item data not ready; rescan once loaded
                     end
                 end
 
-                -- Skip items that we already tried and failed to equip.
-                if itemLink and not self.failedUpgrades[itemLink] and self:CanEquip(itemLink) then
+                -- Skip items that we already tried and failed to equip or that
+                -- are awaiting item info to load.
+                if not skipItem and itemLink and not self.failedUpgrades[itemLink] and self:CanEquip(itemLink) then
                     local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
                     local slotInfo
                     -- Optionally ignore trinkets unless the user explicitly allows them.
@@ -326,7 +332,6 @@ function Smartbot:ScanBags(force)
                         end
                     end
                 end
-                ::continue_item::
             end
             if equippedSomething then break end -- restart outer bag loop after equipping
         end
