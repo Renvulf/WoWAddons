@@ -1,4 +1,4 @@
-## Interface: 100207
+## Interface: 110200
 ## Title: Smartbot
 ## Notes: Auto equips upgrades based on custom stat weights.
 ## Author: OpenAI
