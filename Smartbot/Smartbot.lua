@@ -89,6 +89,12 @@ local function InitDB()
     -- because trinkets often have on-use/proc effects that can't be evaluated
     -- purely by stat weights.
     SmartbotDB.includeTrinkets = SmartbotDB.includeTrinkets or false
+    -- When true the options panel shows all stats instead of those relevant to
+    -- the player's current specialization.
+    SmartbotDB.showAllStats = SmartbotDB.showAllStats or false
+    -- Saved angle (in degrees) of the minimap button around the minimap's
+    -- edge.  45 degrees puts it in the upper-right quadrant.
+    SmartbotDB.minimapPos = SmartbotDB.minimapPos or 45
 end
 
 -- Returns the current player's specialization ID (nil if not available).
@@ -153,11 +159,8 @@ end
 function Smartbot:ScanBags()
     if not SmartbotDB.autoEquip or InCombatLockdown() then return end
     local weights = GetCurrentWeights()
-    local hasWeight = false
-    for _, value in pairs(weights) do
-        if value ~= 0 then hasWeight = true break end
-    end
-    if not hasWeight then return end -- no weights set
+    -- Even if all weights are zero we still evaluate based on item level so the
+    -- addon can function out of the box without requiring manual weights.
 
     for bag = 0, NUM_BAG_SLOTS do
         for slot = 1, C_Container.GetContainerNumSlots(bag) do
@@ -212,6 +215,58 @@ function Smartbot:UpdateTicker()
     end
 end
 
+-- Creates a minimap button that opens the options panel when clicked.  The
+-- button can be dragged around the minimap and its position is saved between
+-- sessions.
+function Smartbot:CreateMinimapButton()
+    if self.minimapButton then
+        -- Button already exists; just ensure it's in the right spot.
+        self.minimapButton:UpdatePosition()
+        return
+    end
+
+    local button = CreateFrame("Button", "SmartbotMinimapButton", Minimap)
+    button:SetSize(32, 32)
+    button:SetFrameStrata("MEDIUM")
+    button:SetFrameLevel(8)
+    button:RegisterForClicks("LeftButtonUp")
+    button:RegisterForDrag("LeftButton")
+    button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+
+    local icon = button:CreateTexture(nil, "BACKGROUND")
+    icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+    icon:SetSize(20, 20)
+    icon:SetPoint("CENTER")
+
+    button:SetScript("OnClick", function() Smartbot:OpenOptions() end)
+
+    local function UpdatePosition()
+        local angle = SmartbotDB.minimapPos or 45
+        local radius = 80
+        local x = radius * math.cos(math.rad(angle))
+        local y = radius * math.sin(math.rad(angle))
+        button:SetPoint("CENTER", Minimap, "CENTER", x, y)
+    end
+    button.UpdatePosition = UpdatePosition
+    UpdatePosition()
+
+    button:SetScript("OnDragStart", function(self)
+        self:SetScript("OnUpdate", function()
+            local mx, my = Minimap:GetCenter()
+            local px, py = GetCursorPosition()
+            local scale = UIParent:GetEffectiveScale()
+            local angle = math.deg(math.atan2(py / scale - my, px / scale - mx))
+            SmartbotDB.minimapPos = angle
+            UpdatePosition()
+        end)
+    end)
+    button:SetScript("OnDragStop", function(self)
+        self:SetScript("OnUpdate", nil)
+    end)
+
+    self.minimapButton = button
+end
+
 -- Creates the options panel with UI elements for stat weights and auto-equip toggle.
 -- Creates an options panel and registers it with Blizzard's settings system.
 -- Retail (Dragonflight+) replaced the old InterfaceOptions API with the new
@@ -246,6 +301,16 @@ function Smartbot:CreateOptions()
         SmartbotDB.includeTrinkets = self:GetChecked()
     end)
 
+    -- Checkbox to toggle displaying all stats.  When unchecked only stats
+    -- relevant to the player's primary stat are shown, similar to Zygor's UI.
+    local showAllStats = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
+    showAllStats:SetPoint("TOPLEFT", includeTrinkets, "BOTTOMLEFT", 0, -8)
+    showAllStats.Text:SetText("Show all stats")
+    showAllStats:SetScript("OnClick", function(self)
+        SmartbotDB.showAllStats = self:GetChecked()
+        panel.refresh()
+    end)
+
     panel.labels = {}
     panel.editBoxes = {}
 
@@ -278,11 +343,11 @@ function Smartbot:CreateOptions()
         local specIndex = GetSpecialization()
         local primaryStat = specIndex and select(6, GetSpecializationInfo(specIndex)) or nil
 
-        local last = includeTrinkets
+        local last = showAllStats
         for _, info in ipairs(STAT_LIST) do
             local label = panel.labels[info.key]
             local box = panel.editBoxes[info.key]
-            local show = StatAppliesToPrimary(info.primary, primaryStat)
+            local show = SmartbotDB.showAllStats or StatAppliesToPrimary(info.primary, primaryStat)
 
             if show then
                 label:Show()
@@ -303,6 +368,7 @@ function Smartbot:CreateOptions()
 
         autoEquip:SetChecked(SmartbotDB.autoEquip)
         includeTrinkets:SetChecked(SmartbotDB.includeTrinkets)
+        showAllStats:SetChecked(SmartbotDB.showAllStats)
     end
     panel:SetScript("OnShow", panel.refresh)
 
@@ -339,10 +405,13 @@ local eventFrame = CreateFrame("Frame")
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" and ... == Smartbot.name then
         InitDB()
+        GetCurrentWeights() -- ensure tables exist for current spec
         Smartbot:CreateOptions()
         Smartbot:UpdateTicker()
+        Smartbot:CreateMinimapButton()
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" and ... == "player" then
         -- Refresh UI to show weights for new spec
+        GetCurrentWeights()
         if SmartbotOptionsPanel and SmartbotOptionsPanel.refresh then
             SmartbotOptionsPanel.refresh()
         end
