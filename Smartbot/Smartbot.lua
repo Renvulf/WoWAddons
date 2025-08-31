@@ -153,12 +153,14 @@ function Smartbot:EquipItem(bag, slot, targetSlot)
     -- Pick up the item and equip it into the target inventory slot.
     C_Container.PickupContainerItem(bag, slot)
     EquipCursorItem(targetSlot)
+    -- If for some reason equipping fails the item may remain on the cursor.
+    -- Clearing prevents accidental drops when subsequent code interacts with the cursor.
+    if CursorHasItem() then ClearCursor() end
 end
 
 -- Scans the player's bags for potential upgrades based on stat weights.
 function Smartbot:ScanBags()
     if not SmartbotDB.autoEquip or InCombatLockdown() then return end
-    local weights = GetCurrentWeights()
     -- Even if all weights are zero we still evaluate based on item level so the
     -- addon can function out of the box without requiring manual weights.
 
@@ -189,6 +191,7 @@ function Smartbot:ScanBags()
                         if bestSlot then
                             self:EquipItem(bag, slot, bestSlot)
                             print("Smartbot equipped upgrade:", itemLink)
+                            return -- A bag update will rescan remaining items
                         end
                     else
                         local currentLink = GetInventoryItemLink("player", slotInfo)
@@ -196,6 +199,7 @@ function Smartbot:ScanBags()
                         if candidateScore > currentScore then
                             self:EquipItem(bag, slot, slotInfo)
                             print("Smartbot equipped upgrade:", itemLink)
+                            return -- stop scanning after equipping one item
                         end
                     end
                 end
@@ -211,10 +215,10 @@ function Smartbot:UpdateTicker()
         self.ticker = nil
     end
     if SmartbotDB.autoEquip then
-        -- Scan bags every five seconds as a lightweight safety net.  Most
-        -- upgrades are caught via BAG_UPDATE events, but this ensures we don't
-        -- miss any items the game fails to notify us about.
-        self.ticker = C_Timer.NewTicker(5, function() Smartbot:ScanBags() end)
+        -- Scan bags once per second as a lightweight safety net. Most upgrades
+        -- are caught via BAG_UPDATE events, but this ensures we don't miss any
+        -- items the game fails to notify us about while still remaining fast.
+        self.ticker = C_Timer.NewTicker(1, function() Smartbot:ScanBags() end)
     end
 end
 
@@ -256,8 +260,10 @@ function Smartbot:CreateMinimapButton()
     button.UpdatePosition = UpdatePosition
     UpdatePosition()
 
+    button:SetMovable(true)
+
     local function OnUpdate(self)
-        if self.dragging then
+        if self:IsDragging() then
             local minimap = self:GetParent()
             local radius = (minimap:GetWidth() + self:GetWidth()) / 2
             local width = self:GetWidth()
@@ -291,14 +297,13 @@ function Smartbot:CreateMinimapButton()
             SmartbotDB.minimapPos = (math.deg(math.atan2(dy, dx)) + 360) % 360
         end
     end
+    button:SetScript("OnUpdate", OnUpdate)
 
     button:SetScript("OnDragStart", function(self)
-        self.dragging = true
-        self:SetScript("OnUpdate", OnUpdate)
+        self:StartMoving()
     end)
     button:SetScript("OnDragStop", function(self)
-        self.dragging = false
-        self:SetScript("OnUpdate", nil)
+        self:StopMovingOrSizing()
         UpdatePosition()
     end)
 
@@ -392,7 +397,11 @@ function Smartbot:CreateOptions()
 
             local show = SmartbotDB.showAllStats
             if not show then
-                show = StatAppliesToPrimary(info.primary, primaryStat) and (weights[info.key] or 0) ~= 0
+                -- Only show stats relevant to the current specialization and
+                -- with a positive weight.  This mirrors Zygor's options panel
+                -- behaviour and prevents zero/negative entries from showing
+                -- when "Show all stats" is unchecked.
+                show = StatAppliesToPrimary(info.primary, primaryStat) and (weights[info.key] or 0) > 0
             end
 
             if show then
