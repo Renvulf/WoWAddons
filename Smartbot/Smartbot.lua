@@ -6,6 +6,12 @@
 local Smartbot = {}
 Smartbot.name = ...
 
+-- API references with fallbacks for different game versions.
+-- In Dragonflight (and later) most item API functions moved under C_Item.
+-- Older clients still expose them as globals.  Using locals here avoids
+-- repeatedly resolving globals and prevents errors when a function is absent.
+local GetItemStatsFunc = C_Item and C_Item.GetItemStats or _G.GetItemStats
+
 -- List of stats exposed to the user. The keys are tokens returned by GetItemStats.
 local STAT_LIST = {
     { label = "Strength",        key = "ITEM_MOD_STRENGTH_SHORT" },
@@ -45,6 +51,10 @@ local function InitDB()
     SmartbotDB = SmartbotDB or {}
     SmartbotDB.weights = SmartbotDB.weights or {}
     SmartbotDB.autoEquip = SmartbotDB.autoEquip or false
+    -- Whether auto-equip logic should consider trinkets.  Disabled by default
+    -- because trinkets often have on-use/proc effects that can't be evaluated
+    -- purely by stat weights.
+    SmartbotDB.includeTrinkets = SmartbotDB.includeTrinkets or false
 end
 
 -- Returns the current player's specialization ID (nil if not available).
@@ -65,9 +75,10 @@ end
 
 -- Evaluates an item link and returns a score based on stat weights and item level.
 function Smartbot:EvaluateItem(link)
-    if not link then return 0 end
-    local stats = GetItemStats(link)
-    if not stats then return 0 end
+    if not link or not GetItemStatsFunc then return 0 end
+    local stats = GetItemStatsFunc(link)
+    -- GetItemStats returns nil for some toys or invalid links; guard against it.
+    if type(stats) ~= "table" then return 0 end
     local weights = GetCurrentWeights()
     local score = (select(4, GetItemInfo(link)) or 0) -- start with item level
     for stat, value in pairs(stats) do
@@ -109,7 +120,13 @@ function Smartbot:ScanBags()
             local itemLink = C_Container.GetContainerItemLink(bag, slot)
             if itemLink and self:CanEquip(itemLink) then
                 local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
-                local slotInfo = INVTYPE_SLOTS[equipLoc]
+                local slotInfo
+                -- Optionally ignore trinkets unless the user explicitly allows them.
+                if equipLoc == "INVTYPE_TRINKET" and not SmartbotDB.includeTrinkets then
+                    slotInfo = nil
+                else
+                    slotInfo = INVTYPE_SLOTS[equipLoc]
+                end
                 if slotInfo then
                     local candidateScore = self:EvaluateItem(itemLink)
                     if type(slotInfo) == "table" then
@@ -175,7 +192,17 @@ function Smartbot:CreateOptions()
         Smartbot:UpdateTicker()
     end)
 
-    local last = autoEquip
+    -- Optional checkbox to include trinkets in auto-equip logic.  Many trinkets
+    -- have special effects that can't be evaluated from stats alone, so this
+    -- is disabled by default and left to user discretion.
+    local includeTrinkets = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
+    includeTrinkets:SetPoint("TOPLEFT", autoEquip, "BOTTOMLEFT", 0, -8)
+    includeTrinkets.Text:SetText("Include trinkets")
+    includeTrinkets:SetScript("OnClick", function(self)
+        SmartbotDB.includeTrinkets = self:GetChecked()
+    end)
+
+    local last = includeTrinkets
     panel.editBoxes = {}
 
     for _, info in ipairs(STAT_LIST) do
@@ -209,6 +236,7 @@ function Smartbot:CreateOptions()
             panel.editBoxes[info.key]:SetText(tostring(val))
         end
         autoEquip:SetChecked(SmartbotDB.autoEquip)
+        includeTrinkets:SetChecked(SmartbotDB.includeTrinkets)
     end
 
     -- Register panel with whichever options system is available.
