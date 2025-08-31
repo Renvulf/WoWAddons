@@ -255,6 +255,11 @@ function Smartbot:CreateMinimapButton()
         local radius = (minimap:GetWidth() + button:GetWidth()) / 2 + RADIUS_ADJ
         local x = radius * math.cos(math.rad(angle))
         local y = radius * math.sin(math.rad(angle))
+        -- Clear any previous anchors (such as those created by StartMoving) to
+        -- avoid "anchor family connection" errors when reattaching to the
+        -- minimap.  Without this the button could remain anchored to UIParent,
+        -- causing SetPoint to fail once dragging stops.
+        button:ClearAllPoints()
         button:SetPoint("CENTER", minimap, "CENTER", x, y)
     end
     button.UpdatePosition = UpdatePosition
@@ -270,7 +275,10 @@ function Smartbot:CreateMinimapButton()
             local x,y = minimap:GetCenter()
             local sc = minimap:GetEffectiveScale()
             local mx,my = GetCursorPosition()
-            mx = mx/sc  my = my/sc
+            -- Normalize cursor coordinates by the minimap's scale so dragging
+            -- works regardless of UI scale settings.  Use a semicolon to
+            -- explicitly separate the two assignments for clarity.
+            mx = mx / sc; my = my / sc
             local dx,dy = mx-x, my-y
             local dist = (dx*dx+dy*dy)^0.5
 
