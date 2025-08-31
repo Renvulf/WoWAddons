@@ -195,9 +195,30 @@ local function AddTooltipInfo(tooltip)
     tooltip:Show()
 end
 
-GameTooltip:HookScript("OnTooltipSetItem", AddTooltipInfo)
-if ItemRefTooltip then
-    ItemRefTooltip:HookScript("OnTooltipSetItem", AddTooltipInfo)
+
+-- Initializes tooltip hooks in a version-safe manner. Retail removed the
+-- OnTooltipSetItem script handler in Dragonflight, requiring TooltipDataProcessor
+-- for item tooltips. Classic clients still use the legacy hook.  This function
+-- ensures the hook is only added once and only if the relevant API exists.
+function Smartbot:InitTooltipHooks()
+    if self.tooltipHooked then return end
+
+    if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType then
+        -- Retail: hook via TooltipDataProcessor.
+        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
+            AddTooltipInfo(tooltip)
+        end)
+        self.tooltipHooked = true
+    else
+        -- Classic-era fallback: use legacy OnTooltipSetItem scripts only if they exist.
+        if GameTooltip and GameTooltip.HookScript and GameTooltip.HasScript and GameTooltip:HasScript("OnTooltipSetItem") then
+            GameTooltip:HookScript("OnTooltipSetItem", AddTooltipInfo)
+        end
+        if ItemRefTooltip and ItemRefTooltip.HookScript and ItemRefTooltip.HasScript and ItemRefTooltip:HasScript("OnTooltipSetItem") then
+            ItemRefTooltip:HookScript("OnTooltipSetItem", AddTooltipInfo)
+        end
+        self.tooltipHooked = true
+    end
 end
 
 function Smartbot:EquipItem(bag, slot, targetSlot)
@@ -222,8 +243,8 @@ function Smartbot:EquipItem(bag, slot, targetSlot)
 end
 
 -- Scans the player's bags for potential upgrades based on stat weights.
-function Smartbot:ScanBags()
-    if not SmartbotDB.autoEquip or InCombatLockdown() then return end
+function Smartbot:ScanBags(force)
+    if (not force and not SmartbotDB.autoEquip) or InCombatLockdown() then return end
     -- Table storing items that previously failed to equip so we don't keep
     -- attempting them every scan.  Cleared each session or when bags change.
     self.failedUpgrades = self.failedUpgrades or {}
@@ -239,6 +260,23 @@ function Smartbot:ScanBags()
         for bag = 0, NUM_BAG_SLOTS do
             for slot = 1, C_Container.GetContainerNumSlots(bag) do
                 local itemLink = C_Container.GetContainerItemLink(bag, slot)
+
+                self.pendingItemLoad = self.pendingItemLoad or {}
+                if itemLink then
+                    local name = GetItemInfo(itemLink)
+                    if not name then
+                        if not self.pendingItemLoad[itemLink] then
+                            self.pendingItemLoad[itemLink] = true
+                            local obj = Item:CreateFromItemLink(itemLink)
+                            obj:ContinueOnItemLoad(function()
+                                self.pendingItemLoad[itemLink] = nil
+                                C_Timer.After(0, function() Smartbot:ScanBags() end)
+                            end)
+                        end
+                        goto continue_item
+                    end
+                end
+
                 -- Skip items that we already tried and failed to equip.
                 if itemLink and not self.failedUpgrades[itemLink] and self:CanEquip(itemLink) then
                     local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
@@ -253,12 +291,12 @@ function Smartbot:ScanBags()
                         local candidateScore = self:EvaluateItem(itemLink)
                         if type(slotInfo) == "table" then
                             -- Items that can go into multiple slots (rings/trinkets).
-                            local bestSlot, bestScore = nil, 0
+                            local bestSlot, worstScore = nil, math.huge
                             for _, invSlot in ipairs(slotInfo) do
                                 local currentLink = GetInventoryItemLink("player", invSlot)
                                 local currentScore = self:EvaluateItem(currentLink)
-                                if candidateScore > currentScore and (not bestSlot or currentScore < bestScore) then
-                                    bestSlot, bestScore = invSlot, currentScore
+                                if candidateScore > currentScore and currentScore < worstScore then
+                                    bestSlot, worstScore = invSlot, currentScore
                                 end
                             end
                             if bestSlot then
@@ -288,6 +326,7 @@ function Smartbot:ScanBags()
                         end
                     end
                 end
+                ::continue_item::
             end
             if equippedSomething then break end -- restart outer bag loop after equipping
         end
@@ -354,7 +393,7 @@ function Smartbot:CreateMinimapButton()
     button:SetMovable(true)
 
     local function OnUpdate(self)
-        if self:IsDragging() then
+        if self.dragging then
             local minimap = self:GetParent()
             local radius = (minimap:GetWidth() + self:GetWidth()) / 2
             local width = self:GetWidth()
@@ -394,9 +433,11 @@ function Smartbot:CreateMinimapButton()
     button:SetScript("OnUpdate", OnUpdate)
 
     button:SetScript("OnDragStart", function(self)
+        self.dragging = true
         self:StartMoving()
     end)
     button:SetScript("OnDragStop", function(self)
+        self.dragging = false
         self:StopMovingOrSizing()
         UpdatePosition()
     end)
@@ -566,7 +607,8 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         Smartbot:CreateOptions()
         Smartbot:UpdateTicker()
         Smartbot:CreateMinimapButton()
-        Smartbot:ScanBags()
+        Smartbot:InitTooltipHooks()
+        C_Timer.After(0, function() Smartbot:ScanBags() end)
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" and ... == "player" then
         -- Refresh UI to show weights for new spec
         GetCurrentWeights()
@@ -597,7 +639,7 @@ SLASH_SMARTBOT2 = "/sb"
 SlashCmdList["SMARTBOT"] = function(msg)
     msg = msg:lower()
     if msg == "scan" then
-        Smartbot:ScanBags()
+        Smartbot:ScanBags(true)
     elseif msg == "auto" then
         SmartbotDB.autoEquip = not SmartbotDB.autoEquip
         print("Smartbot auto equip:", SmartbotDB.autoEquip and "enabled" or "disabled")
