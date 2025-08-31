@@ -13,9 +13,12 @@ Smartbot.name = ...
 local GetItemStatsFunc = C_Item and C_Item.GetItemStats or _G.GetItemStats
 
 --
--- Some stats only apply to certain specializations.  The "primary" field
--- denotes which primary stat (Strength/Agility/Intellect) the entry belongs to
--- so the options panel can hide irrelevant ones.
+-- The list below mirrors the stat weighting options exposed by the Zygor
+-- addon.  Each entry contains a display label, the token returned by
+-- GetItemStats and an optional "primary" spec filter.  The filter may be a
+-- single LE_UNIT_STAT_* constant or a table of constants if multiple primary
+-- stats should see the value.  Domination sockets are intentionally omitted as
+-- they're obsolete in modern content.
 local STAT_LIST = {
     { label = "Strength",        key = "ITEM_MOD_STRENGTH_SHORT",       primary = LE_UNIT_STAT_STRENGTH },
     { label = "Agility",         key = "ITEM_MOD_AGILITY_SHORT",        primary = LE_UNIT_STAT_AGILITY },
@@ -25,10 +28,29 @@ local STAT_LIST = {
     { label = "Mastery",         key = "ITEM_MOD_MASTERY_RATING_SHORT" },
     { label = "Versatility",     key = "ITEM_MOD_VERSATILITY" },
     { label = "Stamina",         key = "ITEM_MOD_STAMINA_SHORT" },
+    { label = "Armor",           key = "ITEM_MOD_ARMOR_SHORT" },
+    { label = "Attack Power",    key = "ITEM_MOD_ATTACK_POWER_SHORT",  primary = {LE_UNIT_STAT_STRENGTH, LE_UNIT_STAT_AGILITY} },
+    { label = "Spell Power",     key = "ITEM_MOD_SPELL_POWER_SHORT",   primary = LE_UNIT_STAT_INTELLECT },
+    { label = "Life Steal",      key = "ITEM_MOD_LIFESTEAL_RATING_SHORT" },
+    { label = "Socket",          key = "EMPTY_SOCKET_PRISMATIC" },
     -- Weapons expose a damage-per-second stat which is important for many
     -- classes.  Zygor allows weighting this so Smartbot offers the same.
-    { label = "DPS",             key = "ITEM_MOD_DAMAGE_PER_SECOND_SHORT" },
+    { label = "DPS",             key = "ITEM_MOD_DAMAGE_PER_SECOND_SHORT", primary = {LE_UNIT_STAT_STRENGTH, LE_UNIT_STAT_AGILITY} },
 }
+
+-- Helper determining if a stat entry should be shown for the player's
+-- current primary stat.  "infoPrimary" may be nil (always show), a single
+-- LE_UNIT_STAT_* constant, or a table of such constants.
+local function StatAppliesToPrimary(infoPrimary, primaryStat)
+    if not infoPrimary or not primaryStat then return true end
+    if type(infoPrimary) == "table" then
+        for _, stat in ipairs(infoPrimary) do
+            if stat == primaryStat then return true end
+        end
+        return false
+    end
+    return infoPrimary == primaryStat
+end
 
 -- Mapping from equip location to inventory slot IDs.
 local INVTYPE_SLOTS = {
@@ -47,9 +69,15 @@ local INVTYPE_SLOTS = {
     INVTYPE_TRINKET     = {INVSLOT_TRINKET1, INVSLOT_TRINKET2},
     INVTYPE_2HWEAPON    = INVSLOT_MAINHAND,
     INVTYPE_WEAPONMAINHAND = INVSLOT_MAINHAND,
-    INVTYPE_WEAPON      = INVSLOT_MAINHAND,
+    INVTYPE_WEAPON      = {INVSLOT_MAINHAND, INVSLOT_OFFHAND}, -- one-hand weapon fits either hand
     INVTYPE_WEAPONOFFHAND = INVSLOT_OFFHAND,
     INVTYPE_SHIELD      = INVSLOT_OFFHAND,
+    INVTYPE_HOLDABLE    = INVSLOT_OFFHAND,
+    INVTYPE_RANGED      = INVSLOT_MAINHAND,
+    INVTYPE_RANGEDRIGHT = INVSLOT_MAINHAND,
+    INVTYPE_THROWN      = INVSLOT_MAINHAND,
+    INVTYPE_BODY        = INVSLOT_BODY,
+    INVTYPE_TABARD      = INVSLOT_TABARD,
 }
 
 -- Initializes the SavedVariables table and ensures all defaults are set.
@@ -254,7 +282,7 @@ function Smartbot:CreateOptions()
         for _, info in ipairs(STAT_LIST) do
             local label = panel.labels[info.key]
             local box = panel.editBoxes[info.key]
-            local show = not info.primary or not primaryStat or info.primary == primaryStat
+            local show = StatAppliesToPrimary(info.primary, primaryStat)
 
             if show then
                 label:Show()
