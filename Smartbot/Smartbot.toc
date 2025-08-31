@@ -2,7 +2,7 @@
 ## Title: Smartbot
 ## Notes: Auto equips upgrades based on custom stat weights.
 ## Author: OpenAI
-## Version: 1.0
+## Version: 1.1
 ## SavedVariables: SmartbotDB
 
 Smartbot.lua
