@@ -12,16 +12,22 @@ Smartbot.name = ...
 -- repeatedly resolving globals and prevents errors when a function is absent.
 local GetItemStatsFunc = C_Item and C_Item.GetItemStats or _G.GetItemStats
 
--- List of stats exposed to the user. The keys are tokens returned by GetItemStats.
+--
+-- Some stats only apply to certain specializations.  The "primary" field
+-- denotes which primary stat (Strength/Agility/Intellect) the entry belongs to
+-- so the options panel can hide irrelevant ones.
 local STAT_LIST = {
-    { label = "Strength",        key = "ITEM_MOD_STRENGTH_SHORT" },
-    { label = "Agility",          key = "ITEM_MOD_AGILITY_SHORT" },
-    { label = "Intellect",        key = "ITEM_MOD_INTELLECT_SHORT" },
-    { label = "Crit",             key = "ITEM_MOD_CRIT_RATING_SHORT" },
-    { label = "Haste",            key = "ITEM_MOD_HASTE_RATING_SHORT" },
-    { label = "Mastery",          key = "ITEM_MOD_MASTERY_RATING_SHORT" },
-    { label = "Versatility",      key = "ITEM_MOD_VERSATILITY" },
-    { label = "Stamina",          key = "ITEM_MOD_STAMINA_SHORT" },
+    { label = "Strength",        key = "ITEM_MOD_STRENGTH_SHORT",       primary = LE_UNIT_STAT_STRENGTH },
+    { label = "Agility",         key = "ITEM_MOD_AGILITY_SHORT",        primary = LE_UNIT_STAT_AGILITY },
+    { label = "Intellect",       key = "ITEM_MOD_INTELLECT_SHORT",      primary = LE_UNIT_STAT_INTELLECT },
+    { label = "Crit",            key = "ITEM_MOD_CRIT_RATING_SHORT" },
+    { label = "Haste",           key = "ITEM_MOD_HASTE_RATING_SHORT" },
+    { label = "Mastery",         key = "ITEM_MOD_MASTERY_RATING_SHORT" },
+    { label = "Versatility",     key = "ITEM_MOD_VERSATILITY" },
+    { label = "Stamina",         key = "ITEM_MOD_STAMINA_SHORT" },
+    -- Weapons expose a damage-per-second stat which is important for many
+    -- classes.  Zygor allows weighting this so Smartbot offers the same.
+    { label = "DPS",             key = "ITEM_MOD_DAMAGE_PER_SECOND_SHORT" },
 }
 
 -- Mapping from equip location to inventory slot IDs.
@@ -70,7 +76,13 @@ local function GetCurrentWeights()
     local specID = GetCurrentSpec()
     if not specID then return {} end
     SmartbotDB.weights[specID] = SmartbotDB.weights[specID] or {}
-    return SmartbotDB.weights[specID]
+    local weights = SmartbotDB.weights[specID]
+    -- Ensure a value exists for every known stat so that tables are persisted
+    -- in SavedVariables even if the user leaves some fields empty.
+    for _, info in ipairs(STAT_LIST) do
+        if weights[info.key] == nil then weights[info.key] = 0 end
+    end
+    return weights
 end
 
 -- Evaluates an item link and returns a score based on stat weights and item level.
@@ -113,7 +125,11 @@ end
 function Smartbot:ScanBags()
     if not SmartbotDB.autoEquip or InCombatLockdown() then return end
     local weights = GetCurrentWeights()
-    if not next(weights) then return end -- no weights set
+    local hasWeight = false
+    for _, value in pairs(weights) do
+        if value ~= 0 then hasWeight = true break end
+    end
+    if not hasWeight then return end -- no weights set
 
     for bag = 0, NUM_BAG_SLOTS do
         for slot = 1, C_Container.GetContainerNumSlots(bag) do
@@ -202,19 +218,20 @@ function Smartbot:CreateOptions()
         SmartbotDB.includeTrinkets = self:GetChecked()
     end)
 
-    local last = includeTrinkets
+    panel.labels = {}
     panel.editBoxes = {}
 
+    -- Create controls for every stat up front.  Their visibility and positions
+    -- will be adjusted in panel.refresh based on the player's current spec.
     for _, info in ipairs(STAT_LIST) do
         local label = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-        label:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -8)
         label:SetText(info.label)
+        panel.labels[info.key] = label
 
         local box = CreateFrame("EditBox", nil, panel, "InputBoxTemplate")
         box:SetAutoFocus(false)
         box:SetWidth(60)
         box:SetHeight(20)
-        box:SetPoint("LEFT", label, "RIGHT", 10, 0)
         panel.editBoxes[info.key] = box
 
         box:SetScript("OnEnterPressed", function(self)
@@ -224,20 +241,42 @@ function Smartbot:CreateOptions()
             self:ClearFocus()
         end)
         box:SetScript("OnEditFocusLost", box:GetScript("OnEnterPressed"))
-
-        last = label
     end
 
     panel.refresh = function()
-        -- Called when the panel is shown. Populate values for current spec.
+        -- Called when the panel is shown.  Populate values for current spec and
+        -- hide stats that aren't relevant to the specialization's primary stat.
+        local weights = GetCurrentWeights()
+        local specIndex = GetSpecialization()
+        local primaryStat = specIndex and select(6, GetSpecializationInfo(specIndex)) or nil
+
+        local last = includeTrinkets
         for _, info in ipairs(STAT_LIST) do
-            local weights = GetCurrentWeights()
-            local val = weights[info.key] or 0
-            panel.editBoxes[info.key]:SetText(tostring(val))
+            local label = panel.labels[info.key]
+            local box = panel.editBoxes[info.key]
+            local show = not info.primary or not primaryStat or info.primary == primaryStat
+
+            if show then
+                label:Show()
+                box:Show()
+                label:ClearAllPoints()
+                label:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -8)
+                box:ClearAllPoints()
+                box:SetPoint("LEFT", label, "RIGHT", 10, 0)
+                last = label
+
+                local val = weights[info.key] or 0
+                box:SetText(tostring(val))
+            else
+                label:Hide()
+                box:Hide()
+            end
         end
+
         autoEquip:SetChecked(SmartbotDB.autoEquip)
         includeTrinkets:SetChecked(SmartbotDB.includeTrinkets)
     end
+    panel:SetScript("OnShow", panel.refresh)
 
     -- Register panel with whichever options system is available.
     if Settings and Settings.RegisterCanvasLayoutCategory then
