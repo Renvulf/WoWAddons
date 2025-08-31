@@ -131,17 +131,16 @@ end
 function Smartbot:EvaluateItem(link)
     if not link or not GetItemStatsFunc then return 0 end
     local stats = GetItemStatsFunc(link)
-    -- GetItemStats returns nil for some toys or invalid links; guard against it.
-    if type(stats) ~= "table" then return 0 end
+    if type(stats) ~= "table" then return (select(4, GetItemInfo(link)) or 0) end
     local weights = GetCurrentWeights()
-    local score = (select(4, GetItemInfo(link)) or 0) -- start with item level
+    local score = (select(4, GetItemInfo(link)) or 0)
     for stat, value in pairs(stats) do
-        local weight = weights[stat]
-        if weight then
-            score = score + value * weight
+        local w = weights[stat]
+        if w and value then
+            score = score + value * w
         end
     end
-    return score
+    return score or 0
 end
 
 -- Determines if the player can equip the provided item link.
@@ -227,26 +226,48 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
     local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
     local slotInfo = equipLoc and INVTYPE_SLOTS[equipLoc] or nil
     if not slotInfo then return end
+    local function ensureEquippedSlotCached(invSlot)
+        local curLink = GetInventoryItemLink("player", invSlot)
+        if not curLink then return true end
+        local curObj = Item:CreateFromItemLink(curLink)
+        if curObj:IsItemDataCached() then return true end
+        curObj:ContinueOnItemLoad(function()
+            if tooltip and tooltip:IsShown() then
+                Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
+            end
+        end)
+        return false
+    end
+
+    if type(slotInfo) == "table" then
+        for _, invSlot in ipairs(slotInfo) do
+            if not ensureEquippedSlotCached(invSlot) then return end
+        end
+    else
+        if not ensureEquippedSlotCached(slotInfo) then return end
+    end
 
     local candidateScore = Smartbot:EvaluateItem(itemLink)
 
-    local function pctChange(invSlot)
-        local currentLink = GetInventoryItemLink("player", invSlot)
-        local currentScore = Smartbot:EvaluateItem(currentLink)
-        if currentScore <= 0 then
-            return candidateScore > 0 and 100 or 0
+    local function pctChangeFromScores(cand, cur)
+        if not cur or cur <= 0 then
+            return (cand and cand > 0) and 100 or 0
         end
-        return (candidateScore - currentScore) / currentScore * 100
+        return ((cand - cur) / cur) * 100
     end
 
     local bestChange
     if type(slotInfo) == "table" then
         for _, invSlot in ipairs(slotInfo) do
-            local change = pctChange(invSlot)
+            local currentLink = GetInventoryItemLink("player", invSlot)
+            local currentScore = Smartbot:EvaluateItem(currentLink)
+            local change = pctChangeFromScores(candidateScore, currentScore)
             if not bestChange or change > bestChange then bestChange = change end
         end
     else
-        bestChange = pctChange(slotInfo)
+        local currentLink = GetInventoryItemLink("player", slotInfo)
+        local currentScore = Smartbot:EvaluateItem(currentLink)
+        bestChange = pctChangeFromScores(candidateScore, currentScore)
     end
     if not bestChange then return end
 
@@ -369,6 +390,18 @@ function Smartbot:ScanBags(force)
     currentScores[INVSLOT_MAINHAND] = self:EvaluateItem(GetInventoryItemLink("player", INVSLOT_MAINHAND))
     currentScores[INVSLOT_OFFHAND] = self:EvaluateItem(GetInventoryItemLink("player", INVSLOT_OFFHAND))
 
+    -- Pre-seed single-slot scores so we rarely hit the lazy path
+    local singles = {
+        INVSLOT_HEAD, INVSLOT_NECK, INVSLOT_SHOULDER, INVSLOT_BACK,
+        INVSLOT_CHEST, INVSLOT_WRIST, INVSLOT_HAND, INVSLOT_WAIST,
+        INVSLOT_LEGS, INVSLOT_FEET,
+    }
+    for _, invSlot in ipairs(singles) do
+        if currentScores[invSlot] == nil then
+            currentScores[invSlot] = self:EvaluateItem(GetInventoryItemLink("player", invSlot)) or 0
+        end
+    end
+
     for bag = 0, NUM_BAG_SLOTS do
         for slot = 1, C_Container.GetContainerNumSlots(bag) do
             local itemLink = C_Container.GetContainerItemLink(bag, slot)
@@ -468,6 +501,10 @@ function Smartbot:ScanBags(force)
                                 -- Ignore one-hand/offhand plans when a 2H is chosen
                             else
                                 local currentScore = currentScores[slotInfo]
+                                if currentScore == nil then
+                                    currentScore = self:EvaluateItem(GetInventoryItemLink("player", slotInfo)) or 0
+                                    currentScores[slotInfo] = currentScore
+                                end
                                 local delta = candidateScore - currentScore
                                 if delta > 0 and (not bestBySlot[slotInfo] or delta > bestBySlot[slotInfo].delta) then
                                     bestBySlot[slotInfo] = {bag=bag, slot=slot, targetSlot=slotInfo, link=itemLink, delta=delta}
