@@ -152,8 +152,14 @@ function Smartbot:UpdateTicker()
 end
 
 -- Creates the options panel with UI elements for stat weights and auto-equip toggle.
+-- Creates an options panel and registers it with Blizzard's settings system.
+-- Retail (Dragonflight+) replaced the old InterfaceOptions API with the new
+-- Settings API.  To stay compatible with both versions we try the new API
+-- first and fall back to the old calls if available.
 function Smartbot:CreateOptions()
-    local panel = CreateFrame("Frame", "SmartbotOptionsPanel", InterfaceOptionsFramePanelContainer)
+    -- Parent is nil so that the panel works with both InterfaceOptions and
+    -- the new Settings panel.  A global name allows slash commands to open it.
+    local panel = CreateFrame("Frame", "SmartbotOptionsPanel")
     panel.name = "Smartbot"
 
     local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
@@ -205,7 +211,31 @@ function Smartbot:CreateOptions()
         autoEquip:SetChecked(SmartbotDB.autoEquip)
     end
 
-    InterfaceOptions_AddCategory(panel)
+    -- Register panel with whichever options system is available.
+    if Settings and Settings.RegisterCanvasLayoutCategory then
+        local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
+        Smartbot.optionsCategoryID = category:GetID()
+        Settings.RegisterAddOnCategory(category)
+    elseif InterfaceOptions_AddCategory then
+        InterfaceOptions_AddCategory(panel)
+    else
+        -- If neither API exists, still create the frame so slash commands can
+        -- show it via :Show().  This shouldn't happen on Retail but guards
+        -- against future API changes.
+        panel:Hide()
+    end
+end
+
+-- Opens the options panel using the appropriate API.
+function Smartbot:OpenOptions()
+    if self.optionsCategoryID and Settings and Settings.OpenToCategory then
+        Settings.OpenToCategory(self.optionsCategoryID)
+    elseif InterfaceOptionsFrame_OpenToCategory then
+        InterfaceOptionsFrame_OpenToCategory("Smartbot")
+    elseif SmartbotOptionsPanel then
+        -- As a last resort simply show the panel.
+        SmartbotOptionsPanel:Show()
+    end
 end
 
 -- Event handler frame to catch game events.
@@ -240,11 +270,14 @@ SlashCmdList["SMARTBOT"] = function(msg)
         SmartbotDB.autoEquip = not SmartbotDB.autoEquip
         print("Smartbot auto equip:", SmartbotDB.autoEquip and "enabled" or "disabled")
         Smartbot:UpdateTicker()
+    elseif msg == "options" or msg == "config" or msg == "" then
+        Smartbot:OpenOptions()
     else
         print("Smartbot commands:")
         print("/sb scan - scan bags now")
         print("/sb auto - toggle auto equip")
-        print("Use the Interface Options -> AddOns -> Smartbot panel to set stat weights.")
+        print("/sb options - open the options panel")
+        print("Use the options panel to set stat weights per specialization.")
     end
 end
 
