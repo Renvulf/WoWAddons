@@ -211,7 +211,10 @@ function Smartbot:UpdateTicker()
         self.ticker = nil
     end
     if SmartbotDB.autoEquip then
-        self.ticker = C_Timer.NewTicker(10, function() Smartbot:ScanBags() end)
+        -- Scan bags every five seconds as a lightweight safety net.  Most
+        -- upgrades are caught via BAG_UPDATE events, but this ensures we don't
+        -- miss any items the game fails to notify us about.
+        self.ticker = C_Timer.NewTicker(5, function() Smartbot:ScanBags() end)
     end
 end
 
@@ -240,28 +243,63 @@ function Smartbot:CreateMinimapButton()
 
     button:SetScript("OnClick", function() Smartbot:OpenOptions() end)
 
+    local RADIUS_ADJ = -5
+
     local function UpdatePosition()
         local angle = SmartbotDB.minimapPos or 45
-        local radius = 80
+        local minimap = Minimap
+        local radius = (minimap:GetWidth() + button:GetWidth()) / 2 + RADIUS_ADJ
         local x = radius * math.cos(math.rad(angle))
         local y = radius * math.sin(math.rad(angle))
-        button:SetPoint("CENTER", Minimap, "CENTER", x, y)
+        button:SetPoint("CENTER", minimap, "CENTER", x, y)
     end
     button.UpdatePosition = UpdatePosition
     UpdatePosition()
 
+    local function OnUpdate(self)
+        if self.dragging then
+            local minimap = self:GetParent()
+            local radius = (minimap:GetWidth() + self:GetWidth()) / 2
+            local width = self:GetWidth()
+            local x,y = minimap:GetCenter()
+            local sc = minimap:GetEffectiveScale()
+            local mx,my = GetCursorPosition()
+            mx = mx/sc  my = my/sc
+            local dx,dy = mx-x, my-y
+            local dist = (dx*dx+dy*dy)^0.5
+
+            local radmin = radius + RADIUS_ADJ
+            local radsnap = radius + width*0.2
+            local radpull = radius + width*0.7
+            local radfre  = radius + width
+
+            local radclamp
+            if dist<=radsnap then self.snapped=true radclamp=radmin
+            elseif dist<radpull and self.snapped then radclamp=radmin
+            elseif dist<radfre and self.snapped then radclamp=radmin+(dist-radpull)/2
+            else self.snapped=false
+            end
+
+            if radclamp then
+                dx=dx/(dist/radclamp)
+                dy=dy/(dist/radclamp)
+            end
+
+            self:ClearAllPoints()
+            self:SetPoint("CENTER", minimap, "CENTER", dx, dy)
+
+            SmartbotDB.minimapPos = (math.deg(math.atan2(dy, dx)) + 360) % 360
+        end
+    end
+
     button:SetScript("OnDragStart", function(self)
-        self:SetScript("OnUpdate", function()
-            local mx, my = Minimap:GetCenter()
-            local px, py = GetCursorPosition()
-            local scale = UIParent:GetEffectiveScale()
-            local angle = math.deg(math.atan2(py / scale - my, px / scale - mx))
-            SmartbotDB.minimapPos = angle
-            UpdatePosition()
-        end)
+        self.dragging = true
+        self:SetScript("OnUpdate", OnUpdate)
     end)
     button:SetScript("OnDragStop", function(self)
+        self.dragging = false
         self:SetScript("OnUpdate", nil)
+        UpdatePosition()
     end)
 
     self.minimapButton = button
@@ -339,6 +377,10 @@ function Smartbot:CreateOptions()
     panel.refresh = function()
         -- Called when the panel is shown.  Populate values for current spec and
         -- hide stats that aren't relevant to the specialization's primary stat.
+        -- When "Show all stats" is unchecked we mimic Zygor's behaviour by only
+        -- showing stats that currently have a non-zero weight.  This prevents
+        -- low priority stats such as Armor or Life Steal from appearing unless
+        -- the user explicitly enables them.
         local weights = GetCurrentWeights()
         local specIndex = GetSpecialization()
         local primaryStat = specIndex and select(6, GetSpecializationInfo(specIndex)) or nil
@@ -347,7 +389,11 @@ function Smartbot:CreateOptions()
         for _, info in ipairs(STAT_LIST) do
             local label = panel.labels[info.key]
             local box = panel.editBoxes[info.key]
-            local show = SmartbotDB.showAllStats or StatAppliesToPrimary(info.primary, primaryStat)
+
+            local show = SmartbotDB.showAllStats
+            if not show then
+                show = StatAppliesToPrimary(info.primary, primaryStat) and (weights[info.key] or 0) ~= 0
+            end
 
             if show then
                 label:Show()
@@ -409,18 +455,27 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         Smartbot:CreateOptions()
         Smartbot:UpdateTicker()
         Smartbot:CreateMinimapButton()
+        Smartbot:ScanBags()
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" and ... == "player" then
         -- Refresh UI to show weights for new spec
         GetCurrentWeights()
         if SmartbotOptionsPanel and SmartbotOptionsPanel.refresh then
             SmartbotOptionsPanel.refresh()
         end
+        Smartbot:ScanBags()
+    elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "BAG_UPDATE_DELAYED" then
+        -- Re-evaluate gear whenever bags or equipped items change.  This keeps
+        -- upgrade detection responsive without relying solely on the periodic
+        -- ticker.
+        Smartbot:ScanBags()
     end
 end)
 
 -- Register events
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
 
 -- Expose slash commands for manual access
 SLASH_SMARTBOT1 = "/smartbot"
