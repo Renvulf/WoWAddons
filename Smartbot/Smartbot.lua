@@ -200,19 +200,33 @@ if ItemRefTooltip then
     ItemRefTooltip:HookScript("OnTooltipSetItem", AddTooltipInfo)
 end
 
--- Attempts to equip an item from the bags in the given bag and slot positions.
 function Smartbot:EquipItem(bag, slot, targetSlot)
-    -- Pick up the item and equip it into the target inventory slot.
+    -- Clear any existing cursor item to avoid accidental swaps.
+    if CursorHasItem() then ClearCursor() end
+
+    local itemLink = C_Container.GetContainerItemLink(bag, slot)
+    if not itemLink then return false end
+
+    -- Pick up the item from the bag and place it into the desired slot.
     C_Container.PickupContainerItem(bag, slot)
     EquipCursorItem(targetSlot)
-    -- If for some reason equipping fails the item may remain on the cursor.
-    -- Clearing prevents accidental drops when subsequent code interacts with the cursor.
+
+    -- If equipping failed the item might remain on the cursor.  Clearing the
+    -- cursor prevents dropping the item on the world when the player clicks.
     if CursorHasItem() then ClearCursor() end
+
+    -- Verify that the item actually equipped into the requested slot.  Some
+    -- items (for example unique-equipped rings) may silently fail to equip.
+    local equippedLink = GetInventoryItemLink("player", targetSlot)
+    return equippedLink == itemLink
 end
 
 -- Scans the player's bags for potential upgrades based on stat weights.
 function Smartbot:ScanBags()
     if not SmartbotDB.autoEquip or InCombatLockdown() then return end
+    -- Table storing items that previously failed to equip so we don't keep
+    -- attempting them every scan.  Cleared each session or when bags change.
+    self.failedUpgrades = self.failedUpgrades or {}
     -- Even if all weights are zero we still evaluate based on item level so the
     -- addon can function out of the box without requiring manual weights.
 
@@ -225,7 +239,8 @@ function Smartbot:ScanBags()
         for bag = 0, NUM_BAG_SLOTS do
             for slot = 1, C_Container.GetContainerNumSlots(bag) do
                 local itemLink = C_Container.GetContainerItemLink(bag, slot)
-                if itemLink and self:CanEquip(itemLink) then
+                -- Skip items that we already tried and failed to equip.
+                if itemLink and not self.failedUpgrades[itemLink] and self:CanEquip(itemLink) then
                     local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
                     local slotInfo
                     -- Optionally ignore trinkets unless the user explicitly allows them.
@@ -247,19 +262,28 @@ function Smartbot:ScanBags()
                                 end
                             end
                             if bestSlot then
-                                self:EquipItem(bag, slot, bestSlot)
-                                print("Smartbot equipped upgrade:", itemLink)
-                                equippedSomething = true
-                                break -- break slot loop to restart scanning after equipment change
+                                local equipped = self:EquipItem(bag, slot, bestSlot)
+                                if equipped then
+                                    print("Smartbot equipped upgrade:", itemLink)
+                                    equippedSomething = true
+                                    break -- break slot loop to restart scanning after equipment change
+                                else
+                                    -- Remember the item so we don't keep trying.
+                                    self.failedUpgrades[itemLink] = true
+                                end
                             end
                         else
                             local currentLink = GetInventoryItemLink("player", slotInfo)
                             local currentScore = self:EvaluateItem(currentLink)
                             if candidateScore > currentScore then
-                                self:EquipItem(bag, slot, slotInfo)
-                                print("Smartbot equipped upgrade:", itemLink)
-                                equippedSomething = true
-                                break -- break slot loop to restart scanning after equipment change
+                                local equipped = self:EquipItem(bag, slot, slotInfo)
+                                if equipped then
+                                    print("Smartbot equipped upgrade:", itemLink)
+                                    equippedSomething = true
+                                    break -- break slot loop to restart scanning after equipment change
+                                else
+                                    self.failedUpgrades[itemLink] = true
+                                end
                             end
                         end
                     end
@@ -549,11 +573,13 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         if SmartbotOptionsPanel and SmartbotOptionsPanel.refresh then
             SmartbotOptionsPanel.refresh()
         end
+        Smartbot.failedUpgrades = nil
         Smartbot:ScanBags()
     elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "BAG_UPDATE_DELAYED" then
-        -- Re-evaluate gear whenever bags or equipped items change.  This keeps
-        -- upgrade detection responsive without relying solely on the periodic
-        -- ticker.
+        -- Bag or equipment changes may mean previously failed upgrades are now
+        -- valid (for example after swapping rings).  Clear the blacklist and
+        -- rescan.
+        Smartbot.failedUpgrades = nil
         Smartbot:ScanBags()
     end
 end)
