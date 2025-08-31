@@ -6,6 +6,14 @@
 local Smartbot = {}
 Smartbot.name = ...
 
+-- Runtime state guarded by event-driven logic. Initialized on ADDON_LOADED.
+Smartbot.isScanning = false
+Smartbot.equipQueue = {}
+Smartbot.equipInFlight = nil -- {slot=slotId, itemID=itemID, link=itemLink, timeout=timerObj}
+Smartbot.rescanRequested = false
+Smartbot.debounceHandle = nil
+Smartbot.failedUpgrades = {}
+
 -- API references with fallbacks for different game versions.
 -- In Dragonflight (and later) most item API functions moved under C_Item.
 -- Older clients still expose them as globals.  Using locals here avoids
@@ -285,62 +293,96 @@ function Smartbot:InitTooltipHooks()
     end
 end
 
-function Smartbot:EquipItem(bag, slot, targetSlot)
-    local itemLink = C_Container.GetContainerItemLink(bag, slot)
-    if not itemLink then return false end
+-- Schedules a debounced bag scan. Multiple requests within the debounce window
+-- coalesce into a single ScanBags call.  If an equip is currently in flight the
+-- actual scan is deferred until it completes.
+function Smartbot:RequestRescan()
+    self.rescanRequested = true
+    if not self.debounceHandle then
+        self.debounceHandle = C_Timer.NewTimer(0.2, function()
+            self.debounceHandle = nil
+            if self.rescanRequested and not self.equipInFlight then
+                self.rescanRequested = false
+                self:ScanBags()
+            end
+        end)
+    end
+end
 
-    -- Use API that doesn’t depend on the cursor, then verify by item ID.
-    EquipItemByName(itemLink, targetSlot)
+-- Processes the next queued upgrade, equipping one item at a time.  Equip
+-- confirmation is handled via PLAYER_EQUIPMENT_CHANGED or a timeout.
+function Smartbot:ProcessNextInQueue()
+    if self.equipInFlight then return end
 
-    -- Verify on the next frame to allow the equip to complete
-    local wantID = (select(1, GetItemInfoInstant(itemLink)))
-    local equippedOK = false
-    C_Timer.After(0, function()
-        local haveID = GetInventoryItemID("player", targetSlot)
-        equippedOK = (haveID == wantID)
-        if not equippedOK then
-            -- Mark as failed so ScanBags won’t thrash on it
-            self.failedUpgrades = self.failedUpgrades or {}
-            self.failedUpgrades[itemLink] = true
+    local entry = table.remove(self.equipQueue, 1)
+    if not entry then
+        -- If more bag changes arrived while equipping, schedule a rescan now.
+        if self.rescanRequested then
+            self:RequestRescan()
+        end
+        return
+    end
+
+    EquipItemByName(entry.link, entry.targetSlot)
+
+    self.equipInFlight = {
+        slot = entry.targetSlot,
+        itemID = select(1, GetItemInfoInstant(entry.link)),
+        link = entry.link,
+    }
+
+    self.equipInFlight.timeout = C_Timer.NewTimer(1.0, function()
+        if self.equipInFlight then
+            self.failedUpgrades[self.equipInFlight.link] = true
+            self.equipInFlight = nil
+            self:ProcessNextInQueue()
         end
     end)
-
-    -- Return a best-effort guess immediately; the blacklist above prevents loops
-    return true
 end
 
 -- Scans the player's bags for potential upgrades based on stat weights.
 function Smartbot:ScanBags(force)
-    if (not force and not SmartbotDB.autoEquip) or InCombatLockdown() then return end
-    -- Table storing items that previously failed to equip so we don't keep
-    -- attempting them every scan.  Cleared each session or when bags change.
-    self.failedUpgrades = self.failedUpgrades or {}
-    -- Even if all weights are zero we still evaluate based on item level so the
-    -- addon can function out of the box without requiring manual weights.
+    if (not force and not SmartbotDB.autoEquip)
+        or InCombatLockdown()
+        or self.isScanning
+        or self.equipInFlight ~= nil then
+        return
+    end
 
-    -- Repeat scanning until a full pass finds no further upgrades. This
-    -- guarantees that every item in the player's inventory is evaluated even if
-    -- equipping one upgrade uncovers another.
-    local equippedSomething = true
-    while equippedSomething do
-        equippedSomething = false
-        for bag = 0, NUM_BAG_SLOTS do
-            for slot = 1, C_Container.GetContainerNumSlots(bag) do
-                local itemLink = C_Container.GetContainerItemLink(bag, slot)
+    self.isScanning = true
+    self.equipQueue = {}
 
-                -- Lua 5.1 (used by WoW) lacks a native "continue" statement,
-                -- so we track whether the rest of the loop should execute via a
-                -- flag instead of using goto.  This preserves the intent while
-                -- remaining compatible with the game's Lua version.
-                local skipItem = false
+    local bestBySlot = {}
+    local ringCandidates = {}
+    local trinketCandidates = {}
+    local includeTrinkets = SmartbotDB.includeTrinkets
+    local twoHandSelected = false
 
-                local info = C_Container.GetContainerItemInfo(bag, slot)
-                if info and info.isLocked then
-                    -- Item is in flux (being moved/sold/etc); skip for now
+    self.pendingItemLoad = self.pendingItemLoad or {}
+
+    -- Precompute current scores for ring and trinket slots.
+    local currentScores = {}
+    currentScores[INVSLOT_FINGER1] = self:EvaluateItem(GetInventoryItemLink("player", INVSLOT_FINGER1))
+    currentScores[INVSLOT_FINGER2] = self:EvaluateItem(GetInventoryItemLink("player", INVSLOT_FINGER2))
+    currentScores[INVSLOT_TRINKET1] = self:EvaluateItem(GetInventoryItemLink("player", INVSLOT_TRINKET1))
+    currentScores[INVSLOT_TRINKET2] = self:EvaluateItem(GetInventoryItemLink("player", INVSLOT_TRINKET2))
+    currentScores[INVSLOT_MAINHAND] = self:EvaluateItem(GetInventoryItemLink("player", INVSLOT_MAINHAND))
+    currentScores[INVSLOT_OFFHAND] = self:EvaluateItem(GetInventoryItemLink("player", INVSLOT_OFFHAND))
+
+    for bag = 0, NUM_BAG_SLOTS do
+        for slot = 1, C_Container.GetContainerNumSlots(bag) do
+            local itemLink = C_Container.GetContainerItemLink(bag, slot)
+
+            local skipItem = false
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.isLocked then
+                skipItem = true
+            end
+
+            if itemLink then
+                if self.failedUpgrades[itemLink] then
                     skipItem = true
-                end
-                self.pendingItemLoad = self.pendingItemLoad or {}
-                if itemLink then
+                else
                     local name = GetItemInfo(itemLink)
                     if not name then
                         if not self.pendingItemLoad[itemLink] then
@@ -348,67 +390,105 @@ function Smartbot:ScanBags(force)
                             local obj = Item:CreateFromItemLink(itemLink)
                             obj:ContinueOnItemLoad(function()
                                 self.pendingItemLoad[itemLink] = nil
-                                C_Timer.After(0, function() Smartbot:ScanBags() end)
+                                Smartbot:RequestRescan()
                             end)
                         end
-                        skipItem = true -- item data not ready; rescan once loaded
+                        skipItem = true
                     end
                 end
+            end
 
-                -- Skip items that we already tried and failed to equip or that
-                -- are awaiting item info to load.
-                if not skipItem and itemLink and not self.failedUpgrades[itemLink] and self:CanEquip(itemLink) then
-                    local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
-                    local slotInfo
-                    -- Optionally ignore trinkets unless the user explicitly allows them.
-                    if equipLoc == "INVTYPE_TRINKET" and not SmartbotDB.includeTrinkets then
-                        slotInfo = nil
-                    else
-                        slotInfo = INVTYPE_SLOTS[equipLoc]
-                    end
-                    if slotInfo then
-                        local candidateScore = self:EvaluateItem(itemLink)
-                        if type(slotInfo) == "table" then
-                            -- Items that can go into multiple slots (rings/trinkets).
-                            local bestSlot, worstScore = nil, math.huge
-                            for _, invSlot in ipairs(slotInfo) do
-                                local currentLink = GetInventoryItemLink("player", invSlot)
-                                local currentScore = self:EvaluateItem(currentLink)
-                                if candidateScore > currentScore and currentScore < worstScore then
-                                    bestSlot, worstScore = invSlot, currentScore
+            if not skipItem and itemLink and self:CanEquip(itemLink) then
+                local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
+                local slotInfo = INVTYPE_SLOTS[equipLoc]
+                if equipLoc == "INVTYPE_TRINKET" and not includeTrinkets then
+                    slotInfo = nil
+                end
+
+                if slotInfo then
+                    local candidateScore = self:EvaluateItem(itemLink)
+
+                    if type(slotInfo) == "table" then
+                        if equipLoc == "INVTYPE_FINGER" then
+                            local delta1 = candidateScore - currentScores[INVSLOT_FINGER1]
+                            local delta2 = candidateScore - currentScores[INVSLOT_FINGER2]
+                            if ringCandidates[INVSLOT_FINGER1] and ringCandidates[INVSLOT_FINGER1].delta >= delta1 then
+                                delta1 = -math.huge
+                            end
+                            if ringCandidates[INVSLOT_FINGER2] and ringCandidates[INVSLOT_FINGER2].delta >= delta2 then
+                                delta2 = -math.huge
+                            end
+                            local targetSlot, delta
+                            if delta1 >= delta2 then
+                                targetSlot, delta = INVSLOT_FINGER1, delta1
+                            else
+                                targetSlot, delta = INVSLOT_FINGER2, delta2
+                            end
+                            if delta > 0 then
+                                ringCandidates[targetSlot] = {bag=bag, slot=slot, targetSlot=targetSlot, link=itemLink, delta=delta}
+                            end
+                        elseif equipLoc == "INVTYPE_TRINKET" then
+                            local delta1 = candidateScore - currentScores[INVSLOT_TRINKET1]
+                            local delta2 = candidateScore - currentScores[INVSLOT_TRINKET2]
+                            if trinketCandidates[INVSLOT_TRINKET1] and trinketCandidates[INVSLOT_TRINKET1].delta >= delta1 then
+                                delta1 = -math.huge
+                            end
+                            if trinketCandidates[INVSLOT_TRINKET2] and trinketCandidates[INVSLOT_TRINKET2].delta >= delta2 then
+                                delta2 = -math.huge
+                            end
+                            local targetSlot, delta
+                            if delta1 >= delta2 then
+                                targetSlot, delta = INVSLOT_TRINKET1, delta1
+                            else
+                                targetSlot, delta = INVSLOT_TRINKET2, delta2
+                            end
+                            if delta > 0 then
+                                trinketCandidates[targetSlot] = {bag=bag, slot=slot, targetSlot=targetSlot, link=itemLink, delta=delta}
+                            end
+                        elseif equipLoc == "INVTYPE_WEAPON" then
+                            if not twoHandSelected then
+                                for _, invSlot in ipairs(slotInfo) do
+                                    local delta = candidateScore - currentScores[invSlot]
+                                    if delta > 0 and (not bestBySlot[invSlot] or delta > bestBySlot[invSlot].delta) then
+                                        bestBySlot[invSlot] = {bag=bag, slot=slot, targetSlot=invSlot, link=itemLink, delta=delta}
+                                    end
                                 end
                             end
-                            if bestSlot then
-                                local equipped = self:EquipItem(bag, slot, bestSlot)
-                                if equipped then
-                                    print("Smartbot equipped upgrade:", itemLink)
-                                    equippedSomething = true
-                                    break -- break slot loop to restart scanning after equipment change
-                                else
-                                    -- Remember the item so we don't keep trying.
-                                    self.failedUpgrades[itemLink] = true
-                                end
+                        end
+                    else
+                        if equipLoc == "INVTYPE_2HWEAPON" then
+                            local delta = candidateScore - currentScores[INVSLOT_MAINHAND]
+                            if delta > 0 then
+                                twoHandSelected = true
+                                bestBySlot[INVSLOT_MAINHAND] = {bag=bag, slot=slot, targetSlot=slotInfo, link=itemLink, delta=delta}
+                                bestBySlot[INVSLOT_OFFHAND] = nil
                             end
                         else
-                            local currentLink = GetInventoryItemLink("player", slotInfo)
-                            local currentScore = self:EvaluateItem(currentLink)
-                            if candidateScore > currentScore then
-                                local equipped = self:EquipItem(bag, slot, slotInfo)
-                                if equipped then
-                                    print("Smartbot equipped upgrade:", itemLink)
-                                    equippedSomething = true
-                                    break -- break slot loop to restart scanning after equipment change
-                                else
-                                    self.failedUpgrades[itemLink] = true
+                            if twoHandSelected and (slotInfo == INVSLOT_MAINHAND or slotInfo == INVSLOT_OFFHAND) then
+                                -- Ignore one-hand/offhand plans when a 2H is chosen
+                            else
+                                local currentScore = currentScores[slotInfo]
+                                local delta = candidateScore - currentScore
+                                if delta > 0 and (not bestBySlot[slotInfo] or delta > bestBySlot[slotInfo].delta) then
+                                    bestBySlot[slotInfo] = {bag=bag, slot=slot, targetSlot=slotInfo, link=itemLink, delta=delta}
                                 end
                             end
                         end
                     end
                 end
             end
-            if equippedSomething then break end -- restart outer bag loop after equipping
         end
     end
+
+    for _, entry in pairs(bestBySlot) do table.insert(self.equipQueue, entry) end
+    for _, entry in pairs(ringCandidates) do table.insert(self.equipQueue, entry) end
+    for _, entry in pairs(trinketCandidates) do table.insert(self.equipQueue, entry) end
+
+    table.sort(self.equipQueue, function(a,b) return a.delta > b.delta end)
+
+    self.isScanning = false
+
+    self:ProcessNextInQueue()
 end
 
 -- Starts or stops the scanning ticker depending on the autoEquip setting.
@@ -418,10 +498,9 @@ function Smartbot:UpdateTicker()
         self.ticker = nil
     end
     if SmartbotDB.autoEquip then
-        -- Scan bags once per second as a lightweight safety net. Most upgrades
-        -- are caught via BAG_UPDATE events, but this ensures we don't miss any
-        -- items the game fails to notify us about while still remaining fast.
-        self.ticker = C_Timer.NewTicker(1, function() Smartbot:ScanBags() end)
+        -- Periodic safety net; actual work is event driven. Throttled to keep
+        -- CPU usage minimal.
+        self.ticker = C_Timer.NewTicker(2, function() Smartbot:ScanBags() end)
     end
 end
 
@@ -686,21 +765,48 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         Smartbot:UpdateTicker()
         Smartbot:CreateMinimapButton()
         Smartbot:InitTooltipHooks()
-        C_Timer.After(0, function() Smartbot:ScanBags() end)
+        Smartbot.failedUpgrades = {}
+        Smartbot.isScanning = false
+        Smartbot.equipQueue = {}
+        Smartbot.equipInFlight = nil
+        Smartbot.rescanRequested = false
+        Smartbot.debounceHandle = nil
+        Smartbot.pendingItemLoad = {}
+        Smartbot:RequestRescan()
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" and ... == "player" then
-        -- Refresh UI to show weights for new spec
         GetCurrentWeights()
         if SmartbotOptionsPanel and SmartbotOptionsPanel.refresh then
             SmartbotOptionsPanel.refresh()
         end
-        Smartbot.failedUpgrades = nil
-        Smartbot:ScanBags()
-    elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "BAG_UPDATE_DELAYED" then
-        -- Bag or equipment changes may mean previously failed upgrades are now
-        -- valid (for example after swapping rings).  Clear the blacklist and
-        -- rescan.
-        Smartbot.failedUpgrades = nil
-        Smartbot:ScanBags()
+        Smartbot.failedUpgrades = {}
+        Smartbot.equipQueue = {}
+        Smartbot.equipInFlight = nil
+        Smartbot.pendingItemLoad = {}
+        Smartbot:RequestRescan()
+    elseif event == "PLAYER_EQUIPMENT_CHANGED" then
+        local slotId = ...
+        if Smartbot.equipInFlight and slotId == Smartbot.equipInFlight.slot then
+            if Smartbot.equipInFlight.timeout and Smartbot.equipInFlight.timeout.Cancel then
+                Smartbot.equipInFlight.timeout:Cancel()
+            end
+            local haveID = GetInventoryItemID("player", slotId)
+            if haveID == Smartbot.equipInFlight.itemID then
+                Smartbot.equipInFlight = nil
+            else
+                Smartbot.failedUpgrades[Smartbot.equipInFlight.link] = true
+                Smartbot.equipInFlight = nil
+            end
+            Smartbot:ProcessNextInQueue()
+            if Smartbot.rescanRequested and not Smartbot.debounceHandle and not Smartbot.equipInFlight then
+                Smartbot:RequestRescan()
+            end
+        end
+    elseif event == "BAG_UPDATE_DELAYED" then
+        if Smartbot.equipInFlight then
+            Smartbot.rescanRequested = true
+        else
+            Smartbot:RequestRescan()
+        end
     end
 end)
 
