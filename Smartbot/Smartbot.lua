@@ -403,10 +403,11 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
             else
                 local currentScore = Smartbot:EvaluateItem(currentLink)
                 local change = pctChangeFromScores(candidateScore, currentScore)
+                -- Color the percentage similarly to Zygor: green for upgrades, red for downgrades.
                 if change > 0 then
-                    tooltip:AddLine(string.format("|r  %sUpgrade (+%.1f%%)", slotLabel(invSlot), change))
+                    tooltip:AddLine(string.format("|r  %sUpgrade: |cff00ff00%+.1f%%|r", slotLabel(invSlot), change))
                 elseif change < 0 then
-                    tooltip:AddLine(string.format("|r  %sDowngrade (%.1f%%)", slotLabel(invSlot), change))
+                    tooltip:AddLine(string.format("|r  %sDowngrade: |cffff0000%+.1f%%|r", slotLabel(invSlot), change))
                 else
                     tooltip:AddLine("|r  " .. slotLabel(invSlot) .. "No change")
                 end
