@@ -311,56 +311,31 @@ function Smartbot:CanEquip(link)
     return true
 end
 
--- Adds Smartbot upgrade information to item tooltips.  When hovering an item the
--- addon compares it against currently equipped gear and appends a coloured line
--- indicating the percentage change in score.  Green means an upgrade, red a
--- downgrade and yellow indicates no change.
+--[[
+Legacy tooltip hook used on client versions that still expose the
+`OnTooltipSetItem` script handler.  The heavy lifting is performed by
+`Smartbot:AddOrUpdateTooltip` which safely handles asynchronous item
+information retrieval and comparison logic.  This wrapper merely fetches the
+item link from the tooltip and forwards it to the main handler once the item is
+confirmed to be equippable by the player.
+--]]
 local function AddTooltipInfo(tooltip)
     if not tooltip or not tooltip.GetItem then return end
     local _, itemLink = tooltip:GetItem()
     if not itemLink or not Smartbot:CanEquip(itemLink) then return end
-
-    local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
-    local slotInfo = equipLoc and INVTYPE_SLOTS[equipLoc] or nil
-    if not slotInfo then return end
-
-    local candidateScore = Smartbot:EvaluateItem(itemLink)
-
-    local function calculateChange(invSlot)
-        local currentLink = GetInventoryItemLink("player", invSlot)
-        local currentScore = Smartbot:EvaluateItem(currentLink)
-        if currentScore <= 0 then
-            return candidateScore > 0 and 100 or 0
-        end
-        return (candidateScore - currentScore) / currentScore * 100
-    end
-
-    local bestChange
-    if type(slotInfo) == "table" then
-        for _, invSlot in ipairs(slotInfo) do
-            local change = calculateChange(invSlot)
-            if not bestChange or change > bestChange then bestChange = change end
-        end
-    else
-        bestChange = calculateChange(slotInfo)
-    end
-
-    if not bestChange then return end
-
-    tooltip:AddLine(" ")
-    if bestChange > 0 then
-        tooltip:AddLine(string.format("|cff00ff00Smartbot: Upgrade (+%.1f%%)|r", bestChange))
-    elseif bestChange < 0 then
-        tooltip:AddLine(string.format("|cffff0000Smartbot: Downgrade (%.1f%%)|r", bestChange))
-    else
-        tooltip:AddLine("|cffffff00Smartbot: No change|r")
-    end
-    tooltip:Show()
+    Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
 end
 
 
+-- Adds or updates Smartbot upgrade information on an item tooltip.  This is
+-- used by both modern and legacy tooltip hooks and performs all necessary
+-- caching and comparison of equipped items.
 function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
     if not tooltip or not itemLink then return end
+    -- Only evaluate items the player can actually use.  This mirrors the
+    -- filtering performed in the legacy hook and prevents misleading upgrade
+    -- hints on gear that is unusable due to class or proficiency restrictions.
+    if not Smartbot:CanEquip(itemLink) then return end
 
     -- Ensure item info is cached; if not, repaint once it arrives
     local itemObj = Item:CreateFromItemLink(itemLink)
