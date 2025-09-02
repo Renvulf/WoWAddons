@@ -120,8 +120,133 @@ end
 -- Returns whether the current player can dual wield weapons.  Some classes
 -- (and even certain specializations) only gain this ability through talents or
 -- passives, so we query the API each time instead of caching the result.
+-- Returns whether the player can dual wield and whether two handed weapons can
+-- be wielded in both hands (Titan's Grip style).  The latter isn't exposed by
+-- Blizzard's API so we mirror the logic used by ZygorGuidesViewer for
+-- consistency.
+function Smartbot:PlayerDualWieldInfo()
+    local _, class = UnitClass("player")
+    local spec = GetSpecialization()
+    local level = UnitLevel("player")
+
+    -- Start with the API result if available.  This covers most modern clients
+    -- and ensures any temporary effects (spells, procs) are honoured.
+    local canDualWield = CanDualWieldFunc and CanDualWieldFunc()
+    local canDualTwoHand = false
+
+    if level and level >= 10 then
+        if class == "DEATHKNIGHT" and spec == 2 then
+            canDualWield = true
+        elseif class == "ROGUE" then
+            canDualWield = true
+        elseif class == "DEMONHUNTER" then
+            canDualWield = true
+        elseif class == "WARRIOR" and spec == 2 and level >= 14 then
+            -- Fury warriors gain Titan's Grip allowing dual two handers.
+            canDualWield = true
+            canDualTwoHand = true
+        elseif class == "MONK" and spec == 3 then
+            canDualWield = true
+        elseif class == "SHAMAN" and spec == 2 then
+            canDualWield = true
+        elseif class == "DRUID" and (spec == 2 or spec == 3) then
+            canDualWield = true
+        end
+    end
+
+    return canDualWield or false, canDualTwoHand
+end
+
+-- Compatibility wrapper used by older logic.  Returns only the dual wield
+-- capability since callers historically expected a single boolean.
 function Smartbot:PlayerCanDualWield()
-    return CanDualWieldFunc and CanDualWieldFunc()
+    local canDualWield = self:PlayerDualWieldInfo()
+    return canDualWield
+end
+
+--[[
+Determines which equipment slots an item may be equipped in and whether it is
+considered a true two handed item for players that cannot dual wield them.  The
+logic mirrors ZygorGuidesViewer's ItemScore:GetValidSlots so that Smartbot and
+Zygor evaluate gear in the same manner.
+
+Returns: firstSlot, secondSlot, isTwoHander
+ * firstSlot  - main inventory slot for the item or nil if not equippable
+ * secondSlot - optional secondary slot (offhand, second ring/trinket slot)
+ * isTwoHander - true if the item occupies both hands for players without
+                 special dual-wield-two-hand ability
+--]]
+function Smartbot:GetValidSlots(link)
+    if not link then return nil end
+
+    local itemID, _, _, equipLoc, _, _, subclassID = GetItemInfoInstant(link)
+    if not equipLoc then return nil end
+
+    local function slotsByType(type)
+        if type == "INVTYPE_WEAPON" then return INVSLOT_MAINHAND, INVSLOT_OFFHAND end
+        if type == "INVTYPE_2HWEAPON" then return INVSLOT_MAINHAND, INVSLOT_OFFHAND end
+        if type == "INVTYPE_FINGER" then return INVSLOT_FINGER1, INVSLOT_FINGER2 end
+        if type == "INVTYPE_TRINKET" then return INVSLOT_TRINKET1, INVSLOT_TRINKET2 end
+        if type == "INVTYPE_RANGED" then return INVSLOT_MAINHAND, false end
+        if type == "INVTYPE_RANGEDRIGHT" then return INVSLOT_MAINHAND, false end
+        if type == "INVTYPE_THROWN" then return INVSLOT_OFFHAND, false end
+        return INVTYPE_SLOTS[type], false
+    end
+
+    local s1, s2 = slotsByType(equipLoc)
+    if not s1 and not s2 then return nil end
+
+    -- Special handling for a Fury warrior artefact which is flagged as a two
+    -- hander but only occupies the main hand.
+    if itemID == 128908 then
+        return s1, false, true
+    end
+
+    local class = select(2, UnitClass("player"))
+    local spec = GetSpecialization()
+    local level = UnitLevel("player")
+    local canDualWield, canDualTwoHand = self:PlayerDualWieldInfo()
+
+    -- Subtlety rogues can only use certain weapons in the offhand.
+    local rogueOffhandOnly = {
+        [0] = true,  -- Axe
+        [4] = true,  -- Mace
+        [7] = true,  -- Sword
+        [13] = true, -- Fist weapon
+    }
+
+    if class == "ROGUE" and spec == 3 and equipLoc == "INVTYPE_WEAPON" and rogueOffhandOnly[subclassID] then
+        return s2, false, false
+    end
+
+    -- Outlaw rogues: daggers become offhand only once the spec is chosen.
+    if class == "ROGUE" and spec == 2 and equipLoc == "INVTYPE_WEAPON" and subclassID == 15 then
+        return s2, (level < 10) and s1 or false, false
+    end
+
+    -- Enhancement shamans: daggers are offhand only before level 20.
+    if class == "SHAMAN" and spec == 2 and equipLoc == "INVTYPE_WEAPON" and subclassID == 15 then
+        return s2, (level < 20) and s1 or false, false
+    end
+
+    if equipLoc == "INVTYPE_WEAPON" and canDualWield then
+        return s1, s2, false
+    end
+
+    if equipLoc == "INVTYPE_2HWEAPON" and canDualTwoHand then
+        -- Treat two handers as one handed if the player can dual wield them.
+        return s1, s2, false
+    end
+
+    if equipLoc == "INVTYPE_2HWEAPON" or equipLoc == "INVTYPE_RANGED" or equipLoc == "INVTYPE_RANGEDRIGHT" then
+        return s1, false, true
+    end
+
+    if equipLoc == "INVTYPE_WEAPON" and not canDualWield then
+        return s1, false, false
+    end
+
+    return s1, s2, false
 end
 
 -- Retrieves the weight table for the current spec, creating one if necessary.
@@ -415,6 +540,16 @@ function Smartbot:ScanBags(force)
     currentScores[INVSLOT_TRINKET2] = self:EvaluateItem(GetInventoryItemLink("player", INVSLOT_TRINKET2))
     currentScores[INVSLOT_MAINHAND] = self:EvaluateItem(GetInventoryItemLink("player", INVSLOT_MAINHAND))
     currentScores[INVSLOT_OFFHAND] = self:EvaluateItem(GetInventoryItemLink("player", INVSLOT_OFFHAND))
+    
+    -- Determine if a two handed weapon is currently equipped.  If so, we
+    -- suppress evaluation of off-hand items to avoid equip loops.
+    local equippedMH = GetInventoryItemLink("player", INVSLOT_MAINHAND)
+    if equippedMH then
+        local _, _, mhTwoHand = self:GetValidSlots(equippedMH)
+        if mhTwoHand then
+            twoHandSelected = true
+        end
+    end
 
     -- Pre-seed single-slot scores so we rarely hit the lazy path
     local singles = {
@@ -459,91 +594,71 @@ function Smartbot:ScanBags(force)
 
             if not skipItem and itemLink and self:CanEquip(itemLink) then
                 local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
-                local slotInfo = INVTYPE_SLOTS[equipLoc]
+                local slot1, slot2, isTwoHand = self:GetValidSlots(itemLink)
                 if equipLoc == "INVTYPE_TRINKET" and not includeTrinkets then
-                    slotInfo = nil
+                    slot1, slot2 = nil, nil
                 end
 
-                if slotInfo then
+                if slot1 then
                     local candidateScore = self:EvaluateItem(itemLink)
 
-                    if type(slotInfo) == "table" then
-                        if equipLoc == "INVTYPE_FINGER" then
-                            local delta1 = candidateScore - currentScores[INVSLOT_FINGER1]
-                            local delta2 = candidateScore - currentScores[INVSLOT_FINGER2]
-                            if ringCandidates[INVSLOT_FINGER1] and ringCandidates[INVSLOT_FINGER1].delta >= delta1 then
-                                delta1 = -math.huge
-                            end
-                            if ringCandidates[INVSLOT_FINGER2] and ringCandidates[INVSLOT_FINGER2].delta >= delta2 then
-                                delta2 = -math.huge
-                            end
-                            local targetSlot, delta
-                            if delta1 >= delta2 then
-                                targetSlot, delta = INVSLOT_FINGER1, delta1
-                            else
-                                targetSlot, delta = INVSLOT_FINGER2, delta2
-                            end
-                            if delta > 0 then
-                                ringCandidates[targetSlot] = {bag=bag, slot=slot, targetSlot=targetSlot, link=itemLink, delta=delta}
-                            end
-                        elseif equipLoc == "INVTYPE_TRINKET" then
-                            local delta1 = candidateScore - currentScores[INVSLOT_TRINKET1]
-                            local delta2 = candidateScore - currentScores[INVSLOT_TRINKET2]
-                            if trinketCandidates[INVSLOT_TRINKET1] and trinketCandidates[INVSLOT_TRINKET1].delta >= delta1 then
-                                delta1 = -math.huge
-                            end
-                            if trinketCandidates[INVSLOT_TRINKET2] and trinketCandidates[INVSLOT_TRINKET2].delta >= delta2 then
-                                delta2 = -math.huge
-                            end
-                            local targetSlot, delta
-                            if delta1 >= delta2 then
-                                targetSlot, delta = INVSLOT_TRINKET1, delta1
-                            else
-                                targetSlot, delta = INVSLOT_TRINKET2, delta2
-                            end
-                            if delta > 0 then
-                                trinketCandidates[targetSlot] = {bag=bag, slot=slot, targetSlot=targetSlot, link=itemLink, delta=delta}
-                            end
-                        elseif equipLoc == "INVTYPE_WEAPON" then
-                            if not twoHandSelected then
-                                if self:PlayerCanDualWield() then
-                                    for _, invSlot in ipairs(slotInfo) do
-                                        local delta = candidateScore - currentScores[invSlot]
-                                        if delta > 0 and (not bestBySlot[invSlot] or delta > bestBySlot[invSlot].delta) then
-                                            bestBySlot[invSlot] = {bag=bag, slot=slot, targetSlot=invSlot, link=itemLink, delta=delta}
-                                        end
-                                    end
-                                else
-                                    -- Player can only use a main-hand weapon.  Off-hand evaluation would
-                                    -- produce invalid upgrades and potential error spam.
-                                    local invSlot = INVSLOT_MAINHAND
-                                    local delta = candidateScore - currentScores[invSlot]
-                                    if delta > 0 and (not bestBySlot[invSlot] or delta > bestBySlot[invSlot].delta) then
-                                        bestBySlot[invSlot] = {bag=bag, slot=slot, targetSlot=invSlot, link=itemLink, delta=delta}
-                                    end
+                    if slot2 and equipLoc == "INVTYPE_FINGER" then
+                        local delta1 = candidateScore - currentScores[slot1]
+                        local delta2 = candidateScore - currentScores[slot2]
+                        if ringCandidates[slot1] and ringCandidates[slot1].delta >= delta1 then delta1 = -math.huge end
+                        if ringCandidates[slot2] and ringCandidates[slot2].delta >= delta2 then delta2 = -math.huge end
+                        local targetSlot, delta
+                        if delta1 >= delta2 then
+                            targetSlot, delta = slot1, delta1
+                        else
+                            targetSlot, delta = slot2, delta2
+                        end
+                        if delta > 0 then
+                            ringCandidates[targetSlot] = {bag=bag, slot=slot, targetSlot=targetSlot, link=itemLink, delta=delta}
+                        end
+                    elseif slot2 and equipLoc == "INVTYPE_TRINKET" then
+                        local delta1 = candidateScore - currentScores[slot1]
+                        local delta2 = candidateScore - currentScores[slot2]
+                        if trinketCandidates[slot1] and trinketCandidates[slot1].delta >= delta1 then delta1 = -math.huge end
+                        if trinketCandidates[slot2] and trinketCandidates[slot2].delta >= delta2 then delta2 = -math.huge end
+                        local targetSlot, delta
+                        if delta1 >= delta2 then
+                            targetSlot, delta = slot1, delta1
+                        else
+                            targetSlot, delta = slot2, delta2
+                        end
+                        if delta > 0 then
+                            trinketCandidates[targetSlot] = {bag=bag, slot=slot, targetSlot=targetSlot, link=itemLink, delta=delta}
+                        end
+                    elseif slot2 then
+                        if not twoHandSelected then
+                            for _, invSlot in ipairs({slot1, slot2}) do
+                                local delta = candidateScore - currentScores[invSlot]
+                                if delta > 0 and (not bestBySlot[invSlot] or delta > bestBySlot[invSlot].delta) then
+                                    bestBySlot[invSlot] = {bag=bag, slot=slot, targetSlot=invSlot, link=itemLink, delta=delta}
                                 end
                             end
                         end
                     else
-                        if equipLoc == "INVTYPE_2HWEAPON" then
+                        if isTwoHand then
                             local delta = candidateScore - currentScores[INVSLOT_MAINHAND]
                             if delta > 0 then
                                 twoHandSelected = true
-                                bestBySlot[INVSLOT_MAINHAND] = {bag=bag, slot=slot, targetSlot=slotInfo, link=itemLink, delta=delta}
+                                bestBySlot[INVSLOT_MAINHAND] = {bag=bag, slot=slot, targetSlot=slot1, link=itemLink, delta=delta}
                                 bestBySlot[INVSLOT_OFFHAND] = nil
                             end
                         else
-                            if twoHandSelected and (slotInfo == INVSLOT_MAINHAND or slotInfo == INVSLOT_OFFHAND) then
-                                -- Ignore one-hand/offhand plans when a 2H is chosen
+                            if twoHandSelected and (slot1 == INVSLOT_MAINHAND or slot1 == INVSLOT_OFFHAND) then
+                                -- ignore off-hand items when a two hander is selected
                             else
-                                local currentScore = currentScores[slotInfo]
+                                local currentScore = currentScores[slot1]
                                 if currentScore == nil then
-                                    currentScore = self:EvaluateItem(GetInventoryItemLink("player", slotInfo)) or 0
-                                    currentScores[slotInfo] = currentScore
+                                    currentScore = self:EvaluateItem(GetInventoryItemLink("player", slot1)) or 0
+                                    currentScores[slot1] = currentScore
                                 end
                                 local delta = candidateScore - currentScore
-                                if delta > 0 and (not bestBySlot[slotInfo] or delta > bestBySlot[slotInfo].delta) then
-                                    bestBySlot[slotInfo] = {bag=bag, slot=slot, targetSlot=slotInfo, link=itemLink, delta=delta}
+                                if delta > 0 and (not bestBySlot[slot1] or delta > bestBySlot[slot1].delta) then
+                                    bestBySlot[slot1] = {bag=bag, slot=slot, targetSlot=slot1, link=itemLink, delta=delta}
                                 end
                             end
                         end
