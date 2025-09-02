@@ -401,11 +401,24 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
 
     local candidateScore = Smartbot:EvaluateItem(itemLink)
 
-    local function pctChangeFromScores(cand, cur)
-        if not cur or cur <= 0 then
-            return (cand and cand > 0) and 100 or 0
+    -- Mirrors Zygor's percentage calculation for upgrade evaluation.
+    -- The function returns the percent difference between two scores,
+    -- floored to two decimal places.  If there is no valid current score
+    -- (e.g. empty slot), a flat 100%% upgrade is assumed.
+    local function pctChangeFromScores(newScore, oldScore)
+        if oldScore and oldScore > 0 then
+            return math.floor(((newScore * 100 / oldScore) - 100) * 100) / 100
+        else
+            return 100
         end
-        return ((cand - cur) / cur) * 100
+    end
+
+    -- Formats percentage values in the same way as Zygor: limit to "999+" for
+    -- very large upgrades and trim unnecessary trailing zeroes.
+    local function formatChange(change)
+        if change > 999 then return "999+" end
+        local str = string.format("%.2f", change)
+        return str:gsub("%.?0+$", "")
     end
 
     local function slotLabel(invSlot)
@@ -432,11 +445,12 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
             else
                 local currentScore = Smartbot:EvaluateItem(currentLink)
                 local change = pctChangeFromScores(candidateScore, currentScore)
+                local display = formatChange(change)
                 -- Color the percentage similarly to Zygor: green for upgrades, red for downgrades.
                 if change > 0 then
-                    tooltip:AddLine(string.format("|r  %sUpgrade: |cff00ff00%+.1f%%|r", slotLabel(invSlot), change))
+                    tooltip:AddLine(string.format("|r  %sUpgrade: |cff00ff00%s%%|r", slotLabel(invSlot), display))
                 elseif change < 0 then
-                    tooltip:AddLine(string.format("|r  %sDowngrade: |cffff0000%+.1f%%|r", slotLabel(invSlot), change))
+                    tooltip:AddLine(string.format("|r  %sDowngrade: |cffff0000%s%%|r", slotLabel(invSlot), display))
                 else
                     tooltip:AddLine("|r  " .. slotLabel(invSlot) .. "No change")
                 end
