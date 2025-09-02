@@ -337,11 +337,11 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
     -- hints on gear that is unusable due to class or proficiency restrictions.
     if not Smartbot:CanEquip(itemLink) then return end
 
-    -- Ensure item info is cached; if not, repaint once it arrives
+    -- Ensure item info is cached; if not, repaint once it arrives.
     local itemObj = Item:CreateFromItemLink(itemLink)
     if not itemObj:IsItemDataCached() then
         itemObj:ContinueOnItemLoad(function()
-            -- Tooltip might have changed; bail if it's gone
+            -- Tooltip might have changed; bail if it's gone.
             if tooltip and tooltip:IsShown() then
                 Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
             end
@@ -349,9 +349,14 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
         return
     end
 
-    local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
-    local slotInfo = equipLoc and INVTYPE_SLOTS[equipLoc] or nil
-    if not slotInfo then return end
+    -- Determine which slots the item can occupy.  This mirrors the logic used
+    -- when scanning bags and incorporates all class/spec based weapon rules.
+    local slot1, slot2 = self:GetValidSlots(itemLink)
+    if not slot1 then return end
+
+    -- Ensure information about currently equipped items in those slots is
+    -- loaded.  Tooltip comparisons are delayed until data is available to
+    -- avoid nil errors when item info hasn't been fetched yet.
     local function ensureEquippedSlotCached(invSlot)
         local curLink = GetInventoryItemLink("player", invSlot)
         if not curLink then return true end
@@ -364,14 +369,8 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
         end)
         return false
     end
-
-    if type(slotInfo) == "table" then
-        for _, invSlot in ipairs(slotInfo) do
-            if not ensureEquippedSlotCached(invSlot) then return end
-        end
-    else
-        if not ensureEquippedSlotCached(slotInfo) then return end
-    end
+    if not ensureEquippedSlotCached(slot1) then return end
+    if slot2 and not ensureEquippedSlotCached(slot2) then return end
 
     local candidateScore = Smartbot:EvaluateItem(itemLink)
 
@@ -382,29 +381,39 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
         return ((cand - cur) / cur) * 100
     end
 
-    local bestChange
-    if type(slotInfo) == "table" then
-        for _, invSlot in ipairs(slotInfo) do
-            local currentLink = GetInventoryItemLink("player", invSlot)
-            local currentScore = Smartbot:EvaluateItem(currentLink)
-            local change = pctChangeFromScores(candidateScore, currentScore)
-            if not bestChange or change > bestChange then bestChange = change end
-        end
-    else
-        local currentLink = GetInventoryItemLink("player", slotInfo)
-        local currentScore = Smartbot:EvaluateItem(currentLink)
-        bestChange = pctChangeFromScores(candidateScore, currentScore)
+    local function slotLabel(invSlot)
+        if invSlot == INVSLOT_MAINHAND then return "Main Hand: " end
+        if invSlot == INVSLOT_OFFHAND then return "Off Hand: " end
+        if invSlot == INVSLOT_FINGER1 then return "Ring 1: " end
+        if invSlot == INVSLOT_FINGER2 then return "Ring 2: " end
+        if invSlot == INVSLOT_TRINKET1 then return "Trinket 1: " end
+        if invSlot == INVSLOT_TRINKET2 then return "Trinket 2: " end
+        return ""
     end
-    if not bestChange then return end
 
     tooltip:AddLine(" ")
-    if bestChange > 0 then
-        tooltip:AddLine(string.format("|cff00ff00Smartbot: Upgrade (+%.1f%%)|r", bestChange))
-    elseif bestChange < 0 then
-        tooltip:AddLine(string.format("|cffff0000Smartbot: Downgrade (%.1f%%)|r", bestChange))
-    else
-        tooltip:AddLine("|cffffff00Smartbot: No change|r")
+    tooltip:AddLine("|cfffe6100Smartbot:|r")
+
+    local slots = {slot1, slot2}
+    for _, invSlot in ipairs(slots) do
+        if invSlot then
+            local currentLink = GetInventoryItemLink("player", invSlot)
+            if currentLink and currentLink == itemLink then
+                tooltip:AddLine("|r  " .. slotLabel(invSlot) .. "Equipped")
+            else
+                local currentScore = Smartbot:EvaluateItem(currentLink)
+                local change = pctChangeFromScores(candidateScore, currentScore)
+                if change > 0 then
+                    tooltip:AddLine(string.format("|r  %sUpgrade (+%.1f%%)", slotLabel(invSlot), change))
+                elseif change < 0 then
+                    tooltip:AddLine(string.format("|r  %sDowngrade (%.1f%%)", slotLabel(invSlot), change))
+                else
+                    tooltip:AddLine("|r  " .. slotLabel(invSlot) .. "No change")
+                end
+            end
+        end
     end
+
     tooltip:Show()
 end
 
