@@ -78,7 +78,11 @@ local INVTYPE_SLOTS = {
     INVTYPE_LEGS        = INVSLOT_LEGS,
     INVTYPE_FEET        = INVSLOT_FEET,
     INVTYPE_FINGER      = {INVSLOT_FINGER1, INVSLOT_FINGER2}, -- multiple slots
-    INVTYPE_TRINKET     = {INVSLOT_TRINKET1, INVSLOT_TRINKET2},
+    -- Trinkets are handled specially: GetValidSlots returns nil for them and the
+    -- upgrade scanner decides which trinket slot to target.  Mapping to the
+    -- first slot here mirrors Zygor's data tables and simply validates that
+    -- trinkets are equippable items.
+    INVTYPE_TRINKET     = INVSLOT_TRINKET1,
     INVTYPE_2HWEAPON    = INVSLOT_MAINHAND,
     INVTYPE_WEAPONMAINHAND = INVSLOT_MAINHAND,
     INVTYPE_WEAPON      = {INVSLOT_MAINHAND, INVSLOT_OFFHAND}, -- one-hand weapon fits either hand
@@ -205,14 +209,14 @@ function Smartbot:GetValidSlots(link)
         if type == "INVTYPE_WEAPON" then return INVSLOT_MAINHAND, INVSLOT_OFFHAND end
         if type == "INVTYPE_2HWEAPON" then return INVSLOT_MAINHAND, INVSLOT_OFFHAND end
         if type == "INVTYPE_FINGER" then return INVSLOT_FINGER1, INVSLOT_FINGER2 end
-        if type == "INVTYPE_TRINKET" then return INVSLOT_TRINKET1, INVSLOT_TRINKET2 end
-        if type == "INVTYPE_RANGED" or type == "INVTYPE_RANGEDRIGHT" then return INVSLOT_MAINHAND, false end
+        if type == "INVTYPE_TRINKET" then return false, false end
+        if type == "INVTYPE_RANGED" then return INVSLOT_MAINHAND, false end
+        if type == "INVTYPE_RANGEDRIGHT" then return INVSLOT_MAINHAND, false end
         if type == "INVTYPE_THROWN" then return INVSLOT_OFFHAND, false end
         return INVTYPE_SLOTS[type], false
     end
 
     local s1, s2 = slotsByType(equipLoc)
-    if not s1 and not s2 then return nil end
 
     -- Special handling for a Fury warrior artefact which is flagged as a two
     -- hander but only occupies the main hand.
@@ -362,7 +366,19 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
 
     -- Determine which slots the item can occupy.  This mirrors the logic used
     -- when scanning bags and incorporates all class/spec based weapon rules.
+    local equipLoc = select(9, GetItemInfo(itemLink))
     local slot1, slot2 = self:GetValidSlots(itemLink)
+    if equipLoc == "INVTYPE_TRINKET" then
+        if not SmartbotDB.includeTrinkets then
+            tooltip:AddLine(" ")
+            tooltip:AddLine("|cfffe6100Smartbot Gear|r")
+            tooltip:AddLine("   Trinkets are not part of the Smartbot scoring system.")
+            tooltip:Show()
+            return
+        else
+            slot1, slot2 = INVSLOT_TRINKET1, INVSLOT_TRINKET2
+        end
+    end
     if not slot1 then return end
 
     -- Ensure information about currently equipped items in those slots is
@@ -593,8 +609,12 @@ function Smartbot:ScanBags(force)
             if not skipItem and itemLink and self:CanEquip(itemLink) then
                 local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(itemLink)
                 local slot1, slot2, isTwoHand = self:GetValidSlots(itemLink)
-                if equipLoc == "INVTYPE_TRINKET" and not includeTrinkets then
-                    slot1, slot2 = nil, nil
+                if equipLoc == "INVTYPE_TRINKET" then
+                    if not includeTrinkets then
+                        slot1, slot2 = nil, nil
+                    else
+                        slot1, slot2 = INVSLOT_TRINKET1, INVSLOT_TRINKET2
+                    end
                 end
 
                 if slot1 then
