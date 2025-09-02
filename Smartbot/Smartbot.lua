@@ -92,6 +92,16 @@ local INVTYPE_SLOTS = {
     INVTYPE_TABARD      = INVSLOT_TABARD,
 }
 
+-- Weapon subclasses that Subtlety rogues may only use in the offhand.  Zygor
+-- keeps this table shared to avoid re-creating it every query, so Smartbot does
+-- the same for minor performance wins.
+local ROGUE_OFFHAND_ONLY = {
+    [0] = true,  -- Axe
+    [4] = true,  -- Mace
+    [7] = true,  -- Sword
+    [13] = true, -- Fist weapon
+}
+
 -- Initializes the SavedVariables table and ensures all defaults are set.
 local function InitDB()
     SmartbotDB = SmartbotDB or {}
@@ -125,36 +135,40 @@ end
 -- Blizzard's API so we mirror the logic used by ZygorGuidesViewer for
 -- consistency.
 function Smartbot:PlayerDualWieldInfo()
+    -- Determine class, spec and level every call as talents or shapeshifts may
+    -- temporarily alter weapon proficiencies.  This mirrors Zygor's
+    -- ItemScore:CanPlayerDualWield behaviour.
     local _, class = UnitClass("player")
     local spec = GetSpecialization()
     local level = UnitLevel("player")
 
-    -- Start with the API result if available.  This covers most modern clients
-    -- and ensures any temporary effects (spells, procs) are honoured.
+    -- Base result from the native API when available.  This automatically
+    -- honours temporary effects such as spells granted by equipment or auras.
     local canDualWield = CanDualWieldFunc and CanDualWieldFunc()
     local canDualTwoHand = false
 
+    -- Fallback to explicit class/spec checks.  These mimic the logic used by
+    -- ZygorGuidesViewer's ItemScore module to keep upgrade evaluations in sync.
     if level and level >= 10 then
-        if class == "DEATHKNIGHT" and spec == 2 then
+        if class == "DEATHKNIGHT" and spec == 2 then -- Frost DK
             canDualWield = true
-        elseif class == "ROGUE" then
+        elseif class == "ROGUE" then -- all rogues
             canDualWield = true
         elseif class == "DEMONHUNTER" then
             canDualWield = true
-        elseif class == "WARRIOR" and spec == 2 and level >= 14 then
-            -- Fury warriors gain Titan's Grip allowing dual two handers.
+        elseif class == "WARRIOR" and spec == 2 and level >= 14 then -- Fury
             canDualWield = true
-            canDualTwoHand = true
-        elseif class == "MONK" and spec == 3 then
+            canDualTwoHand = true -- Titan's Grip
+        elseif class == "MONK" and spec == 3 then -- Windwalker
             canDualWield = true
-        elseif class == "SHAMAN" and spec == 2 then
+        elseif class == "SHAMAN" and spec == 2 then -- Enhancement
             canDualWield = true
-        elseif class == "DRUID" and (spec == 2 or spec == 3) then
+        elseif class == "DRUID" and (spec == 2 or spec == 3) then -- Feral/Guardian
             canDualWield = true
         end
     end
 
-    return canDualWield or false, canDualTwoHand
+    return (canDualWield and true or false), canDualTwoHand
 end
 
 -- Compatibility wrapper used by older logic.  Returns only the dual wield
@@ -180,15 +194,19 @@ function Smartbot:GetValidSlots(link)
     if not link then return nil end
 
     local itemID, _, _, equipLoc, _, _, subclassID = GetItemInfoInstant(link)
-    if not equipLoc then return nil end
+    -- Bail out early if we don't recognise the equipment type.  This prevents
+    -- accidentally trying to equip profession tools or other unsupported gear
+    -- types.
+    if not equipLoc or not INVTYPE_SLOTS[equipLoc] then return nil end
 
+    -- Helper mirroring Zygor's internal slot resolution.  Most types map
+    -- directly via INVTYPE_SLOTS but a few special cases need overriding.
     local function slotsByType(type)
         if type == "INVTYPE_WEAPON" then return INVSLOT_MAINHAND, INVSLOT_OFFHAND end
         if type == "INVTYPE_2HWEAPON" then return INVSLOT_MAINHAND, INVSLOT_OFFHAND end
         if type == "INVTYPE_FINGER" then return INVSLOT_FINGER1, INVSLOT_FINGER2 end
         if type == "INVTYPE_TRINKET" then return INVSLOT_TRINKET1, INVSLOT_TRINKET2 end
-        if type == "INVTYPE_RANGED" then return INVSLOT_MAINHAND, false end
-        if type == "INVTYPE_RANGEDRIGHT" then return INVSLOT_MAINHAND, false end
+        if type == "INVTYPE_RANGED" or type == "INVTYPE_RANGEDRIGHT" then return INVSLOT_MAINHAND, false end
         if type == "INVTYPE_THROWN" then return INVSLOT_OFFHAND, false end
         return INVTYPE_SLOTS[type], false
     end
@@ -207,15 +225,8 @@ function Smartbot:GetValidSlots(link)
     local level = UnitLevel("player")
     local canDualWield, canDualTwoHand = self:PlayerDualWieldInfo()
 
-    -- Subtlety rogues can only use certain weapons in the offhand.
-    local rogueOffhandOnly = {
-        [0] = true,  -- Axe
-        [4] = true,  -- Mace
-        [7] = true,  -- Sword
-        [13] = true, -- Fist weapon
-    }
-
-    if class == "ROGUE" and spec == 3 and equipLoc == "INVTYPE_WEAPON" and rogueOffhandOnly[subclassID] then
+    -- Subtlety rogues can only use certain weapon types in the offhand.
+    if class == "ROGUE" and spec == 3 and equipLoc == "INVTYPE_WEAPON" and ROGUE_OFFHAND_ONLY[subclassID] then
         return s2, false, false
     end
 
@@ -392,7 +403,9 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
     end
 
     tooltip:AddLine(" ")
-    tooltip:AddLine("|cfffe6100Smartbot:|r")
+    -- Mirror Zygor's tooltip formatting: colored addon name followed by per-slot
+    -- upgrade information.
+    tooltip:AddLine("|cfffe6100Smartbot Gear|r")
 
     local slots = {slot1, slot2}
     for _, invSlot in ipairs(slots) do
