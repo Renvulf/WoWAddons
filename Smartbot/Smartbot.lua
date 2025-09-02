@@ -19,6 +19,10 @@ Smartbot.failedUpgrades = {}
 -- Older clients still expose them as globals.  Using locals here avoids
 -- repeatedly resolving globals and prevents errors when a function is absent.
 local GetItemStatsFunc = C_Item and C_Item.GetItemStats or _G.GetItemStats
+local CanEquipItemFunc = C_PlayerInfo and C_PlayerInfo.CanEquipItem or nil
+local CanDualWieldFunc = _G.CanDualWield or function()
+    return IsSpellKnown and IsSpellKnown(674) -- dual wield spell in classic
+end
 
 --
 -- The list below mirrors the stat weighting options exposed by the Zygor
@@ -113,6 +117,13 @@ local function GetCurrentSpec()
     return specID
 end
 
+-- Returns whether the current player can dual wield weapons.  Some classes
+-- (and even certain specializations) only gain this ability through talents or
+-- passives, so we query the API each time instead of caching the result.
+function Smartbot:PlayerCanDualWield()
+    return CanDualWieldFunc and CanDualWieldFunc()
+end
+
 -- Retrieves the weight table for the current spec, creating one if necessary.
 local function GetCurrentWeights()
     local specID = GetCurrentSpec()
@@ -148,6 +159,16 @@ function Smartbot:CanEquip(link)
     if not link then return false end
     if not IsEquippableItem(link) then return false end
 
+    -- Retail provides C_PlayerInfo.CanEquipItem which performs the full set of
+    -- class, race and proficiency checks.  Fall back gracefully if the API
+    -- isn't available (e.g. older clients) and simply assume the item is
+    -- usable as long as it passes our manual checks below.
+    local itemID = GetItemInfoInstant(link)
+    if CanEquipItemFunc and itemID then
+        local ok = CanEquipItemFunc(itemID)
+        if not ok then return false end
+    end
+
     -- Block too-low character levels
     local reqLevel = select(5, GetItemInfo(link)) or 0
     if UnitLevel("player") < reqLevel then return false end
@@ -156,7 +177,12 @@ function Smartbot:CanEquip(link)
     local equipLoc = select(9, GetItemInfo(link))
     if not equipLoc or not INVTYPE_SLOTS[equipLoc] then return false end
 
-    -- Do NOT call IsUsableItem here (it returns false for most gear without a "Use:" effect)
+    -- Off-hand weapons require the ability to dual wield.  Shields and other
+    -- off-hand items use different equipLoc values and are unaffected.
+    if equipLoc == "INVTYPE_WEAPONOFFHAND" and not self:PlayerCanDualWield() then
+        return false
+    end
+
     return true
 end
 
@@ -480,7 +506,17 @@ function Smartbot:ScanBags(force)
                             end
                         elseif equipLoc == "INVTYPE_WEAPON" then
                             if not twoHandSelected then
-                                for _, invSlot in ipairs(slotInfo) do
+                                if self:PlayerCanDualWield() then
+                                    for _, invSlot in ipairs(slotInfo) do
+                                        local delta = candidateScore - currentScores[invSlot]
+                                        if delta > 0 and (not bestBySlot[invSlot] or delta > bestBySlot[invSlot].delta) then
+                                            bestBySlot[invSlot] = {bag=bag, slot=slot, targetSlot=invSlot, link=itemLink, delta=delta}
+                                        end
+                                    end
+                                else
+                                    -- Player can only use a main-hand weapon.  Off-hand evaluation would
+                                    -- produce invalid upgrades and potential error spam.
+                                    local invSlot = INVSLOT_MAINHAND
                                     local delta = candidateScore - currentScores[invSlot]
                                     if delta > 0 and (not bestBySlot[invSlot] or delta > bestBySlot[invSlot].delta) then
                                         bestBySlot[invSlot] = {bag=bag, slot=slot, targetSlot=invSlot, link=itemLink, delta=delta}
