@@ -401,46 +401,85 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
 
     local candidateScore = Smartbot:EvaluateItem(itemLink)
 
-    local function pctChangeFromScores(cand, cur)
-        if not cur or cur <= 0 then
-            return (cand and cand > 0) and 100 or 0
+    ---------------------------------------------------------------------
+    -- Percentage and icon helpers copied from ZygorGuidesViewer's logic.
+    -- get_change mirrors Zygor's math for computing percentage differences
+    -- between the currently equipped item (old) and the candidate item (new).
+    ---------------------------------------------------------------------
+    local function get_change(old, new)
+        if old and old > 0 then
+            -- Floor to two decimals to match Zygor's display precision.
+            return math.floor(((new * 100 / old) - 100) * 100) / 100
+        else
+            -- Empty slot or invalid current item is treated as a full upgrade.
+            return 100
         end
-        return ((cand - cur) / cur) * 100
     end
 
-    local function slotLabel(invSlot)
-        if invSlot == INVSLOT_MAINHAND then return "Main Hand: " end
-        if invSlot == INVSLOT_OFFHAND then return "Off Hand: " end
-        if invSlot == INVSLOT_FINGER1 then return "Ring 1: " end
-        if invSlot == INVSLOT_FINGER2 then return "Ring 2: " end
-        if invSlot == INVSLOT_TRINKET1 then return "Trinket 1: " end
-        if invSlot == INVSLOT_TRINKET2 then return "Trinket 2: " end
-        return ""
+    -- Returns a texture string similar to Zygor's arrow/bullet icons.  If the
+    -- user has Zygor installed we reuse its icon set, otherwise fall back to
+    -- simple built-in textures.  The returned value is suitable for use inside
+    -- "|T..|t" markup.
+    local function icon_for_change(change)
+        local width, height = 10, 10
+        local icons = ZGV and ZGV.IconSets and ZGV.IconSets.AuctionToolsPriceIcons
+        if icons then
+            if change < 0 then
+                return icons.DOWN1:GetFontString(width, height, nil, nil, 255, 0, 0)
+            elseif change > 0 and change < 100 then
+                return icons.UP1:GetFontString(width, height, nil, nil, 0, 255, 0)
+            elseif change > 99 and change < 200 then
+                return icons.UP2:GetFontString(width, height, nil, nil, 0, 255, 0)
+            elseif change > 199 then
+                return icons.UP3:GetFontString(width, height, nil, nil, 0, 255, 0)
+            else
+                return icons.BULLET:GetFontString(width, height, nil, nil, 155, 155, 155)
+            end
+        end
+
+        -- Fallback textures using simple arrow icons when Zygor is absent.
+        if change < 0 then
+            return "Interface\\Buttons\\UI-ScrollBar-ScrollDownButton-Up:10:10"
+        elseif change > 0 then
+            return "Interface\\Buttons\\UI-ScrollBar-ScrollUpButton-Up:10:10"
+        else
+            return "Interface\\FriendsFrame\\StatusIcon-Offline:10:10"
+        end
     end
+
+    -- When an item can occupy multiple slots (rings, trinkets, weapons) the
+    -- tooltip prefixes lines with "Slot 1"/"Slot 2" just like Zygor.
+    local slotinfo1 = slot2 and "Slot 1: " or ""
+    local slotinfo2 = slot2 and "Slot 2: " or ""
 
     tooltip:AddLine(" ")
-    -- Mirror Zygor's tooltip formatting: colored addon name followed by per-slot
-    -- upgrade information.
     tooltip:AddLine("|cfffe6100Smartbot Gear|r")
 
-    local slots = {slot1, slot2}
-    for _, invSlot in ipairs(slots) do
-        if invSlot then
-            local currentLink = GetInventoryItemLink("player", invSlot)
-            if currentLink and currentLink == itemLink then
-                tooltip:AddLine("|r  " .. slotLabel(invSlot) .. "Equipped")
-            else
-                local currentScore = Smartbot:EvaluateItem(currentLink)
-                local change = pctChangeFromScores(candidateScore, currentScore)
-                -- Color the percentage similarly to Zygor: green for upgrades, red for downgrades.
-                if change > 0 then
-                    tooltip:AddLine(string.format("|r  %sUpgrade: |cff00ff00%+.1f%%|r", slotLabel(invSlot), change))
-                elseif change < 0 then
-                    tooltip:AddLine(string.format("|r  %sDowngrade: |cffff0000%+.1f%%|r", slotLabel(invSlot), change))
-                else
-                    tooltip:AddLine("|r  " .. slotLabel(invSlot) .. "No change")
-                end
-            end
+    -- Slot 1 comparison -------------------------------------------------
+    local currentLink1 = GetInventoryItemLink("player", slot1)
+    if currentLink1 and currentLink1 == itemLink then
+        tooltip:AddLine("|r  " .. slotinfo1 .. "Equipped")
+    else
+        local currentScore1 = Smartbot:EvaluateItem(currentLink1)
+        local change1 = get_change(currentScore1, candidateScore)
+        local icon1 = icon_for_change(change1)
+        local prefix1 = (change1 > 0) and "Upgrade: |T" .. icon1 .. "|t |cff00ff00"
+                                    or "Downgrade: |T" .. icon1 .. "|t |cffff0000"
+        tooltip:AddLine("|r  " .. slotinfo1 .. prefix1 .. ((change1 > 999 and "999+" or change1)) .. "% ")
+    end
+
+    -- Slot 2 comparison (if applicable) --------------------------------
+    if slot2 then
+        local currentLink2 = GetInventoryItemLink("player", slot2)
+        if currentLink2 and currentLink2 == itemLink then
+            tooltip:AddLine("|r  " .. slotinfo2 .. "Equipped")
+        else
+            local currentScore2 = Smartbot:EvaluateItem(currentLink2)
+            local change2 = get_change(currentScore2, candidateScore)
+            local icon2 = icon_for_change(change2)
+            local prefix2 = (change2 > 0) and "Upgrade: |T" .. icon2 .. "|t |cff00ff00"
+                                        or "Downgrade: |T" .. icon2 .. "|t |cffff0000"
+            tooltip:AddLine("|r  " .. slotinfo2 .. prefix2 .. ((change2 > 999 and "999+" or change2)) .. "% ")
         end
     end
 
