@@ -347,16 +347,27 @@ end
 -- caching and comparison of equipped items.
 function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
     if not tooltip or not itemLink then return end
-    -- Only evaluate items the player can actually use.  This mirrors the
-    -- filtering performed in the legacy hook and prevents misleading upgrade
-    -- hints on gear that is unusable due to class or proficiency restrictions.
-    if not Smartbot:CanEquip(itemLink) then return end
 
-    -- Ensure item info is cached; if not, repaint once it arrives.
+    -- Determine whether the item is usable now or only in the future.
+    -- Zygor's tooltip logic still evaluates higher-level items and marks
+    -- them as future upgrades, so we mirror that behaviour here.
+    local canEquip = Smartbot:CanEquip(itemLink)
+    local futureprefix, futuresuffix = "", ""
+    if not canEquip then
+        local reqLevel = select(5, GetItemInfo(itemLink)) or 0
+        local playerLevel = UnitLevel("player")
+        if IsEquippableItem(itemLink) and reqLevel > playerLevel then
+            futureprefix = "Future "
+            futuresuffix = "|r in " .. (reqLevel - playerLevel) .. " levels"
+        else
+            return
+        end
+    end
+
+    -- Ensure item data is cached; if not, rescan once available.
     local itemObj = Item:CreateFromItemLink(itemLink)
     if not itemObj:IsItemDataCached() then
         itemObj:ContinueOnItemLoad(function()
-            -- Tooltip might have changed; bail if it's gone.
             if tooltip and tooltip:IsShown() then
                 Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
             end
@@ -364,8 +375,7 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
         return
     end
 
-    -- Determine which slots the item can occupy.  This mirrors the logic used
-    -- when scanning bags and incorporates all class/spec based weapon rules.
+    -- Determine which slots the item can occupy.
     local equipLoc = select(9, GetItemInfo(itemLink))
     local slot1, slot2 = self:GetValidSlots(itemLink)
     if equipLoc == "INVTYPE_TRINKET" then
@@ -381,9 +391,7 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
     end
     if not slot1 then return end
 
-    -- Ensure information about currently equipped items in those slots is
-    -- loaded.  Tooltip comparisons are delayed until data is available to
-    -- avoid nil errors when item info hasn't been fetched yet.
+    -- Ensure information about currently equipped items is cached.
     local function ensureEquippedSlotCached(invSlot)
         local curLink = GetInventoryItemLink("player", invSlot)
         if not curLink then return true end
@@ -402,24 +410,16 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
     local candidateScore = Smartbot:EvaluateItem(itemLink)
 
     ---------------------------------------------------------------------
-    -- Percentage and icon helpers copied from ZygorGuidesViewer's logic.
-    -- get_change mirrors Zygor's math for computing percentage differences
-    -- between the currently equipped item (old) and the candidate item (new).
+    -- Helpers for percentage math and icon selection mirroring Zygor. --
     ---------------------------------------------------------------------
     local function get_change(old, new)
         if old and old > 0 then
-            -- Floor to two decimals to match Zygor's display precision.
             return math.floor(((new * 100 / old) - 100) * 100) / 100
         else
-            -- Empty slot or invalid current item is treated as a full upgrade.
             return 100
         end
     end
 
-    -- Returns a texture string similar to Zygor's arrow/bullet icons.  If the
-    -- user has Zygor installed we reuse its icon set, otherwise fall back to
-    -- simple built-in textures.  The returned value is suitable for use inside
-    -- "|T..|t" markup.
     local function icon_for_change(change)
         local width, height = 10, 10
         local icons = ZGV and ZGV.IconSets and ZGV.IconSets.AuctionToolsPriceIcons
@@ -436,8 +436,6 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
                 return icons.BULLET:GetFontString(width, height, nil, nil, 155, 155, 155)
             end
         end
-
-        -- Fallback textures using simple arrow icons when Zygor is absent.
         if change < 0 then
             return "Interface\\Buttons\\UI-ScrollBar-ScrollDownButton-Up:10:10"
         elseif change > 0 then
@@ -447,8 +445,7 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
         end
     end
 
-    -- When an item can occupy multiple slots (rings, trinkets, weapons) the
-    -- tooltip prefixes lines with "Slot 1"/"Slot 2" just like Zygor.
+    -- Build tooltip lines.
     local slotinfo1 = slot2 and "Slot 1: " or ""
     local slotinfo2 = slot2 and "Slot 2: " or ""
 
@@ -463,9 +460,11 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
         local currentScore1 = Smartbot:EvaluateItem(currentLink1)
         local change1 = get_change(currentScore1, candidateScore)
         local icon1 = icon_for_change(change1)
-        local prefix1 = (change1 > 0) and "Upgrade: |T" .. icon1 .. "|t |cff00ff00"
-                                    or "Downgrade: |T" .. icon1 .. "|t |cffff0000"
-        tooltip:AddLine("|r  " .. slotinfo1 .. prefix1 .. ((change1 > 999 and "999+" or change1)) .. "% ")
+        local line1 = "|r  " .. slotinfo1 .. futureprefix .. ((change1 > 0) and
+            "Upgrade: |T" .. icon1 .. "|t |cff00ff00" or
+            "Downgrade: |T" .. icon1 .. "|t |cffff0000")
+        line1 = line1 .. futuresuffix .. (change1 > 999 and "999+" or change1) .. "% "
+        tooltip:AddLine(line1)
     end
 
     -- Slot 2 comparison (if applicable) --------------------------------
@@ -477,14 +476,17 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
             local currentScore2 = Smartbot:EvaluateItem(currentLink2)
             local change2 = get_change(currentScore2, candidateScore)
             local icon2 = icon_for_change(change2)
-            local prefix2 = (change2 > 0) and "Upgrade: |T" .. icon2 .. "|t |cff00ff00"
-                                        or "Downgrade: |T" .. icon2 .. "|t |cffff0000"
-            tooltip:AddLine("|r  " .. slotinfo2 .. prefix2 .. ((change2 > 999 and "999+" or change2)) .. "% ")
+            local line2 = "|r  " .. slotinfo2 .. futureprefix .. ((change2 > 0) and
+                "Upgrade: |T" .. icon2 .. "|t |cff00ff00" or
+                "Downgrade: |T" .. icon2 .. "|t |cffff0000")
+            line2 = line2 .. futuresuffix .. (change2 > 999 and "999+" or change2) .. "% "
+            tooltip:AddLine(line2)
         end
     end
 
     tooltip:Show()
 end
+
 
 
 -- Initializes tooltip hooks in a version-safe manner. Retail removed the
