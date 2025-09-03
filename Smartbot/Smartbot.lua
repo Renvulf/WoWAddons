@@ -106,6 +106,52 @@ local ROGUE_OFFHAND_ONLY = {
     [13] = true, -- Fist weapon
 }
 
+-- Database schema management.  As new features are added the schema version is
+-- incremented and MigrateDB applies any missing defaults.  This keeps existing
+-- SavedVariables compatible across addon updates.
+local DB_SCHEMA_VERSION = 1
+local DEFAULT_LEARN_PARAMS = {
+    minLengthSec = 20,
+    minEvents = 40,
+    lr = 0.02,
+    deltaHuber = 300,
+    minSamples = 15,
+}
+
+local function MigrateDB()
+    SmartbotDB = SmartbotDB or {}
+    SmartbotDB.schemaVersion = SmartbotDB.schemaVersion or 0
+
+    if SmartbotDB.schemaVersion < DB_SCHEMA_VERSION then
+        -- Learning system defaults.  Stored per character so that each toon can
+        -- opt-in separately and maintain spec-specific models.
+        if SmartbotDB.learnEnabled == nil then
+            SmartbotDB.learnEnabled = false
+        end
+        SmartbotDB.models = SmartbotDB.models or {}
+        SmartbotDB.learnParams = SmartbotDB.learnParams or {}
+        for k, v in pairs(DEFAULT_LEARN_PARAMS) do
+            if SmartbotDB.learnParams[k] == nil then
+                SmartbotDB.learnParams[k] = v
+            end
+        end
+
+        SmartbotDB.schemaVersion = DB_SCHEMA_VERSION
+    else
+        -- Ensure any missing keys are populated even if schema versions match.
+        if SmartbotDB.learnEnabled == nil then
+            SmartbotDB.learnEnabled = false
+        end
+        SmartbotDB.models = SmartbotDB.models or {}
+        SmartbotDB.learnParams = SmartbotDB.learnParams or {}
+        for k, v in pairs(DEFAULT_LEARN_PARAMS) do
+            if SmartbotDB.learnParams[k] == nil then
+                SmartbotDB.learnParams[k] = v
+            end
+        end
+    end
+end
+
 -- Initializes the SavedVariables table and ensures all defaults are set.
 local function InitDB()
     SmartbotDB = SmartbotDB or {}
@@ -121,6 +167,9 @@ local function InitDB()
     -- Saved angle (in degrees) of the minimap button around the minimap's
     -- edge.  45 degrees puts it in the upper-right quadrant.
     SmartbotDB.minimapPos = SmartbotDB.minimapPos or 45
+
+    -- Apply schema migrations after basic defaults to ensure new fields exist.
+    MigrateDB()
 end
 
 -- Returns the current player's specialization ID (nil if not available).
@@ -893,6 +942,23 @@ function Smartbot:CreateOptions()
         panel.refresh()
     end)
 
+    -- Master toggle for the learning system added in later stages.  When
+    -- disabled Smartbot behaves exactly as it did before learning support.
+    local learnEnabled = CreateFrame("CheckButton", nil, panel, "InterfaceOptionsCheckButtonTemplate")
+    learnEnabled:SetPoint("TOPLEFT", showAllStats, "BOTTOMLEFT", 0, -8)
+    learnEnabled.Text:SetText("Enable learning")
+    learnEnabled:SetScript("OnClick", function(self)
+        SmartbotDB.learnEnabled = self:GetChecked()
+    end)
+
+    -- Reset button is wired in a later stage.  For now keep it disabled so
+    -- users can see where the control will live without interacting with it.
+    local learnReset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    learnReset:SetSize(140, 22)
+    learnReset:SetPoint("LEFT", learnEnabled, "RIGHT", 10, 0)
+    learnReset:SetText("Reset learning")
+    learnReset:Disable()
+
     panel.labels = {}
     panel.editBoxes = {}
 
@@ -932,7 +998,10 @@ function Smartbot:CreateOptions()
         local specIndex = GetSpecialization()
         local primaryStat = specIndex and select(6, GetSpecializationInfo(specIndex)) or nil
 
-        local last = showAllStats
+        learnEnabled:SetChecked(SmartbotDB.learnEnabled)
+        learnReset:Disable()
+
+        local last = learnEnabled
         for _, info in ipairs(STAT_LIST) do
             local label = panel.labels[info.key]
             local box = panel.editBoxes[info.key]
@@ -999,6 +1068,34 @@ function Smartbot:OpenOptions()
         -- As a last resort simply show the panel.
         SmartbotOptionsPanel:Show()
     end
+end
+
+-- Placeholder stubs for the learning subsystem.  These will be fleshed out in
+-- later stages as functionality is implemented.
+function Smartbot:LearnReset()
+    local spec = GetCurrentSpec()
+    if spec and SmartbotDB.models then
+        SmartbotDB.models[spec] = nil
+        print("Smartbot: learning data reset for spec", spec)
+    else
+        print("Smartbot: no learning data to reset")
+    end
+end
+
+function Smartbot:LearnStats()
+    print("Smartbot: learning stats not yet implemented")
+end
+
+function Smartbot:LearnScore()
+    print("Smartbot: learning score not yet implemented")
+end
+
+function Smartbot:LearnExport()
+    print("Smartbot: learning export not yet implemented")
+end
+
+function Smartbot:LearnImport(data)
+    print("Smartbot: learning import not yet implemented")
 end
 
 -- Event handler frame to catch game events.
@@ -1068,20 +1165,50 @@ SLASH_SMARTBOT1 = "/smartbot"
 SLASH_SMARTBOT2 = "/sb"
 
 SlashCmdList["SMARTBOT"] = function(msg)
-    msg = msg:lower()
-    if msg == "scan" then
+    msg = msg and msg:lower() or ""
+    local cmd, rest = msg:match("^(%S*)%s*(.*)$")
+    if cmd == "scan" then
         Smartbot:ScanBags(true)
-    elseif msg == "auto" then
+    elseif cmd == "auto" then
         SmartbotDB.autoEquip = not SmartbotDB.autoEquip
         print("Smartbot auto equip:", SmartbotDB.autoEquip and "enabled" or "disabled")
         Smartbot:UpdateTicker()
-    elseif msg == "options" or msg == "config" or msg == "" then
+    elseif cmd == "options" or cmd == "config" or cmd == "" then
         Smartbot:OpenOptions()
+    elseif cmd == "learn" then
+        local sub, arg = rest:match("^(%S*)%s*(.*)$")
+        if sub == "on" then
+            SmartbotDB.learnEnabled = true
+            print("Smartbot learning: enabled")
+        elseif sub == "off" then
+            SmartbotDB.learnEnabled = false
+            print("Smartbot learning: disabled")
+        elseif sub == "reset" then
+            Smartbot:LearnReset()
+        elseif sub == "stats" then
+            Smartbot:LearnStats()
+        elseif sub == "score" then
+            Smartbot:LearnScore()
+        elseif sub == "export" then
+            Smartbot:LearnExport()
+        elseif sub == "import" then
+            Smartbot:LearnImport(arg)
+        else
+            print("Smartbot learn commands:")
+            print("/sb learn on - enable learning")
+            print("/sb learn off - disable learning")
+            print("/sb learn reset - reset model for current spec")
+            print("/sb learn stats - show learning stats (placeholder)")
+            print("/sb learn score - score hovered item (placeholder)")
+            print("/sb learn export - export model (placeholder)")
+            print("/sb learn import <data> - import model (placeholder)")
+        end
     else
         print("Smartbot commands:")
         print("/sb scan - scan bags now")
         print("/sb auto - toggle auto equip")
         print("/sb options - open the options panel")
+        print("/sb learn <cmd> - learning subsystem commands")
         print("Use the options panel to set stat weights per specialization.")
     end
 end
