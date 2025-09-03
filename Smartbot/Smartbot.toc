@@ -5,4 +5,5 @@
 ## Version: 1.2
 ## SavedVariablesPerCharacter: SmartbotDB
 
+Segment.lua
 Smartbot.lua

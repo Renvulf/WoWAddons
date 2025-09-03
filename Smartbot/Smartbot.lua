@@ -14,6 +14,12 @@ Smartbot.rescanRequested = false
 Smartbot.debounceHandle = nil
 Smartbot.failedUpgrades = {}
 
+local Segment = SmartbotSegment
+Smartbot.playerGUID = nil
+Smartbot.currentPetGUID = nil
+Smartbot.activeSegment = nil
+Smartbot.lastSegment = nil
+
 -- API references with fallbacks for different game versions.
 -- In Dragonflight (and later) most item API functions moved under C_Item.
 -- Older clients still expose them as globals.  Using locals here avoids
@@ -178,6 +184,51 @@ local function GetCurrentSpec()
     if not specIndex then return nil end
     local specID = GetSpecializationInfo(specIndex)
     return specID
+end
+
+-- Combat segment handling -------------------------------------------------
+
+local DAMAGE_EVENTS = {
+    SWING_DAMAGE = true,
+    RANGE_DAMAGE = true,
+    SPELL_DAMAGE = true,
+    SPELL_PERIODIC_DAMAGE = true,
+    DAMAGE_SHIELD = true,
+    DAMAGE_SPLIT = true,
+}
+
+function Smartbot:LearnCombatStart()
+    self.playerGUID = UnitGUID("player")
+    self.currentPetGUID = UnitGUID("pet")
+    self.activeSegment = Segment:New(GetTime())
+end
+
+function Smartbot:LearnCombatEnd()
+    if not self.activeSegment then return end
+    self.activeSegment:Finish(GetTime())
+    self.lastSegment = self.activeSegment
+    self.activeSegment = nil
+end
+
+function Smartbot:LearnFlush()
+    if self.activeSegment then
+        self:LearnCombatEnd()
+    end
+end
+
+function Smartbot:HandleCombatLogEvent(...)
+    if not self.activeSegment then return end
+    local timestamp, subevent, _, srcGUID, _, _, _, dstGUID, _, dstFlags = ...
+    if not DAMAGE_EVENTS[subevent] then return end
+    if srcGUID ~= self.playerGUID and srcGUID ~= self.currentPetGUID then return end
+    if bit.band(dstFlags, COMBATLOG_OBJECT_REACTION_HOSTILE) == 0 then return end
+    local amount
+    if subevent == "SWING_DAMAGE" then
+        amount = select(12, ...)
+    else
+        amount = select(15, ...)
+    end
+    self.activeSegment:AddEvent(timestamp, dstGUID, amount or 0)
 end
 
 -- Returns whether the current player can dual wield weapons.  Some classes
@@ -1083,7 +1134,12 @@ function Smartbot:LearnReset()
 end
 
 function Smartbot:LearnStats()
-    print("Smartbot: learning stats not yet implemented")
+    local seg = self.lastSegment
+    if not seg then
+        print("Smartbot: no combat segment recorded")
+        return
+    end
+    print(string.format("Last segment: damage=%d events=%d activeTime=%.1f avgTargets=%.2f", seg.totalDamage, seg.events, seg.activeTime, seg.avgTargets or 0))
 end
 
 function Smartbot:LearnScore()
@@ -1116,8 +1172,11 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         Smartbot.rescanRequested = false
         Smartbot.debounceHandle = nil
         Smartbot.pendingItemLoad = {}
+        Smartbot.playerGUID = UnitGUID("player")
+        Smartbot.currentPetGUID = UnitGUID("pet")
         Smartbot:RequestRescan()
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" and ... == "player" then
+        Smartbot:LearnFlush()
         GetCurrentWeights()
         if SmartbotOptionsPanel and SmartbotOptionsPanel.refresh then
             SmartbotOptionsPanel.refresh()
@@ -1151,6 +1210,16 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         else
             Smartbot:RequestRescan()
         end
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        Smartbot:LearnCombatStart()
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        Smartbot:LearnCombatEnd()
+    elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
+        Smartbot:HandleCombatLogEvent(CombatLogGetCurrentEventInfo())
+    elseif event == "UNIT_PET" and ... == "player" then
+        Smartbot.currentPetGUID = UnitGUID("pet")
+    elseif event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_DEAD" or event == "PLAYER_UNGHOST" then
+        Smartbot:LearnFlush()
     end
 end)
 
@@ -1159,6 +1228,13 @@ eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+eventFrame:RegisterEvent("UNIT_PET")
+eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+eventFrame:RegisterEvent("PLAYER_DEAD")
+eventFrame:RegisterEvent("PLAYER_UNGHOST")
 
 -- Expose slash commands for manual access
 SLASH_SMARTBOT1 = "/smartbot"
