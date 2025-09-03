@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "completed": {
+    "stages": [
+      1,
+      2
+    ],
+    "refinements": [],
+    "health_ok": false
+  },
+  "open_issues": null,
+  "last_commit": "dcc01004252b98a5e414513a99e7a1ff5d5d73fe",
+  "timestamp_utc": "2025-09-03T10:54:21Z"
+}
