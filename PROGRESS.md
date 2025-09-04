@@ -8,3 +8,4 @@ DONE_STAGE:4 - Added online regression model with per-spec storage and synthetic
 DONE_STAGE:5 - Integrated learned item scoring into bag scanning and tooltips. (Smartbot/Smartbot.lua)
 
 DONE_STAGE:6 - Added model stats panel and enabled reset button. (Smartbot/Smartbot.lua)
+DONE_STAGE:7 - Added developer commands for stats, scoring, and model export/import with checksum. (Smartbot/Model.lua Smartbot/Smartbot.lua tests/export_spec.lua)
