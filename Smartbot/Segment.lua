@@ -1,76 +1,74 @@
--- Smartbot - Segment.lua
+-- Segment.lua - combat segment tracking for Smartbot
+
 local Segment = {}
 Segment.__index = Segment
 
 function Segment:New(startTime)
     local o = {
         segStart = startTime or 0,
-        segEnd = nil,
+        segEnd = 0,
         totalDamage = 0,
         totalHealing = 0,
         events = 0,
-        healingEvents = 0,
         activeTime = 0,
         lastEventTime = nil,
         targetTimes = {},
         targetSum = 0,
-        features = nil, -- optional: feature vector captured at pull start
+        features = nil,
         avgTargets = 0,
-        dps = 0, hps = 0,
+        dps = 0,
+        hps = 0,
     }
-    setmetatable(o, Segment)
-    return o
+    return setmetatable(o, Segment)
 end
 
-local function Count(tbl)
+local function count(tbl)
     local n = 0
     for _ in pairs(tbl) do n = n + 1 end
     return n
 end
 
--- timestamp: number, destGUID: string, amount: number, isHeal: boolean
 function Segment:AddEvent(timestamp, destGUID, amount, isHeal)
-    self.events = (self.events or 0) + 1
+    self.events = self.events + 1
     if isHeal then
-        self.healingEvents = (self.healingEvents or 0) + 1
-        self.totalHealing = (self.totalHealing or 0) + (amount or 0)
+        self.totalHealing = self.totalHealing + (amount or 0)
     else
-        self.totalDamage = (self.totalDamage or 0) + (amount or 0)
+        self.totalDamage = self.totalDamage + (amount or 0)
     end
 
     if self.lastEventTime then
         local dt = timestamp - self.lastEventTime
         if dt > 3 then dt = 3 end
         if dt > 0 then
-            self.activeTime = (self.activeTime or 0) + dt
+            self.activeTime = self.activeTime + dt
         end
     end
     self.lastEventTime = timestamp
 
-    -- moving window for unique target count
-    local tt = self.targetTimes
     if destGUID then
-        tt[destGUID] = timestamp
+        self.targetTimes[destGUID] = timestamp
     end
-    for guid, t in pairs(tt) do
-        if timestamp - t > 5 then tt[guid] = nil end
+    for guid, t in pairs(self.targetTimes) do
+        if timestamp - t > 5 then
+            self.targetTimes[guid] = nil
+        end
     end
-    self.targetSum = (self.targetSum or 0) + Count(tt)
+    self.targetSum = self.targetSum + count(self.targetTimes)
 end
 
 function Segment:Finish(endTime)
-    self.segEnd = endTime or (GetTime and GetTime()) or 0
-    if (self.events or 0) > 0 then
-        self.avgTargets = (self.targetSum or 0) / (self.events or 1)
+    self.segEnd = endTime or 0
+    if self.events > 0 then
+        self.avgTargets = self.targetSum / self.events
     else
         self.avgTargets = 0
     end
     if self.features then
         self.features[#self.features + 1] = self.avgTargets
     end
-    if (self.activeTime or 0) > 0 then
-        self.dps = (self.totalDamage or 0) / self.activeTime
-        self.hps = (self.totalHealing or 0) / self.activeTime
+    if self.activeTime > 0 then
+        self.dps = self.totalDamage / self.activeTime
+        self.hps = self.totalHealing / self.activeTime
     else
         self.dps, self.hps = 0, 0
     end

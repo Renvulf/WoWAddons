@@ -1,110 +1,80 @@
--- Smartbot - Features.lua
-local F = {}
-F.__index = F
+-- Features.lua - gear feature extraction for Smartbot
 
--- Map stat tokens from GetItemStats to our feature order
-local FEATURE_ORDER = {
-    "STR","AGI","INT","STAM",
-    "CRIT","HASTE","MASTERY","VERS",
-    "LEECH","AVOIDANCE","SPEED",
-    "WEAPON_DPS","WEAPON_SPEED",
-    "ARMOR","ILVL",
+local Features = {}
+Features.FEATURE_ORDER = {
+    "INT", "AGI", "STR", "STAM",
+    "CRIT", "HASTE", "MASTERY", "VERS",
+    "LEECH", "AVOID", "SPEED",
+    "WDPS", "WSPEED",
+    "ARMOR", "ILVL",
     "AVG_TARGETS",
 }
 
-local STATS_MAP = {
-    ITEM_MOD_STRENGTH_SHORT = "STR",
-    ITEM_MOD_AGILITY_SHORT = "AGI",
-    ITEM_MOD_INTELLECT_SHORT = "INT",
-    ITEM_MOD_STAMINA_SHORT = "STAM",
-    ITEM_MOD_CRIT_RATING_SHORT = "CRIT",
-    ITEM_MOD_HASTE_RATING_SHORT = "HASTE",
-    ITEM_MOD_MASTERY_RATING_SHORT = "MASTERY",
-    ITEM_MOD_VERSATILITY = "VERS",
-    ITEM_MOD_LIFESTEAL = "LEECH",
-    ITEM_MOD_AVOIDANCE = "AVOIDANCE",
-    ITEM_MOD_SPEED = "SPEED",
-    -- WEAPON_DPS & WEAPON_SPEED handled separately
-    -- ARMOR handled via GetItemStats sum
-}
-
-local function zeros(n) local t={} for i=1,n do t[i]=0 end return t end
-
-local function feature_index(name)
-    for i,v in ipairs(FEATURE_ORDER) do if v==name then return i end end
+local function statOrZero(stats, key)
+    return stats and stats[key] or 0
 end
 
-local function ensure_len(vec)
-    local need = #FEATURE_ORDER
-    for i=1,need do vec[i] = vec[i] or 0 end
-    return vec
-end
-
-local function fill_from_stats(vec, stats)
-    for token,val in pairs(stats or {}) do
-        local key = STATS_MAP[token]
-        if key then
-            local idx = feature_index(key)
-            vec[idx] = (vec[idx] or 0) + (val or 0)
-        elseif token == "ITEM_MOD_VERSATILITY_RATING_SHORT" then
-            local idx = feature_index("VERS")
-            vec[idx] = (vec[idx] or 0) + (val or 0)
-        elseif token == "ITEM_MOD_CR_MULTISTRike_SHORT" then
-            -- legacy no-op
-        elseif token == "ITEM_MOD_ARMOR_SHORT" then
-            local idx = feature_index("ARMOR")
-            vec[idx] = (vec[idx] or 0) + (val or 0)
-        end
-    end
-end
-
-local function weapon_info_from_stats(stats)
-    local dps, speed = 0, 0
-    if stats and stats.DAMAGE_PER_SECOND then
-        dps = tonumber(stats.DAMAGE_PER_SECOND) or 0
-    end
-    if stats and stats.ITEM_MOD_WEAPON_SPEED_SHORT then
-        speed = tonumber(stats.ITEM_MOD_WEAPON_SPEED_SHORT) or 0
-    end
+local function weaponStats(link)
+    local stats = GetItemStats and GetItemStats(link) or nil
+    local dps = statOrZero(stats, "ITEM_MOD_DAMAGE_PER_SECOND_SHORT")
+    local speed = statOrZero(stats, "ITEM_MOD_SPEED_SHORT")
     return dps, speed
 end
 
--- Build a per-equip snapshot feature vector for the currently equipped gear.
-function F.BuildEquippedVector()
-    local vec = zeros(#FEATURE_ORDER)
-    if not GetInventoryItemLink then return ensure_len(vec) end
-    for slot=1,19 do
-        if slot ~= 4 then -- shirt
-            local link = GetInventoryItemLink("player", slot)
-            if link and GetItemStats then
-                local stats = GetItemStats(link) or {}
-                fill_from_stats(vec, stats)
-                local dps, speed = weapon_info_from_stats(stats)
-                local iDps = feature_index("WEAPON_DPS"); vec[iDps] = (vec[iDps] or 0) + dps
-                local iSpd = feature_index("WEAPON_SPEED"); vec[iSpd] = math.max(vec[iSpd] or 0, speed or 0)
-                local ilvl = select(4, GetDetailedItemLevelInfo(link)) or 0
-                vec[feature_index("ILVL")] = (vec[feature_index("ILVL")] or 0) + ilvl
+function Features.BuildEquippedVector()
+    local vec = {}
+    for i=1,#Features.FEATURE_ORDER do vec[i] = 0 end
+    for slot=1,17 do
+        if slot ~= 4 then
+            local link = GetInventoryItemLink and GetInventoryItemLink("player", slot)
+            if link then
+                local stats = GetItemStats and GetItemStats(link) or {}
+                vec[1] = vec[1] + statOrZero(stats, "ITEM_MOD_INTELLECT_SHORT")
+                vec[2] = vec[2] + statOrZero(stats, "ITEM_MOD_AGILITY_SHORT")
+                vec[3] = vec[3] + statOrZero(stats, "ITEM_MOD_STRENGTH_SHORT")
+                vec[4] = vec[4] + statOrZero(stats, "ITEM_MOD_STAMINA_SHORT")
+                vec[5] = vec[5] + statOrZero(stats, "ITEM_MOD_CRIT_RATING_SHORT")
+                vec[6] = vec[6] + statOrZero(stats, "ITEM_MOD_HASTE_RATING_SHORT")
+                vec[7] = vec[7] + statOrZero(stats, "ITEM_MOD_MASTERY_RATING_SHORT")
+                vec[8] = vec[8] + statOrZero(stats, "ITEM_MOD_VERSATILITY")
+                vec[9] = vec[9] + statOrZero(stats, "ITEM_MOD_CR_LIFESTEAL_SHORT")
+                vec[10] = vec[10] + statOrZero(stats, "ITEM_MOD_CR_AVOIDANCE_SHORT")
+                vec[11] = vec[11] + statOrZero(stats, "ITEM_MOD_CR_SPEED_SHORT")
+                local dps, speed = weaponStats(link)
+                vec[12] = vec[12] + dps
+                vec[13] = vec[13] + speed
+                vec[14] = vec[14] + statOrZero(stats, "ITEM_MOD_ARMOR_SHORT")
+                local ilvl = select(4, GetDetailedItemLevelInfo and GetDetailedItemLevelInfo(link)) or 0
+                vec[15] = vec[15] + ilvl
             end
         end
     end
-    return ensure_len(vec)
+    return vec
 end
 
--- Build a feature vector for a specific item link as if equipped (approx).
-function F.BuildItemVector(itemLink)
-    local vec = zeros(#FEATURE_ORDER)
-    if itemLink and GetItemStats then
-        local stats = GetItemStats(itemLink) or {}
-        fill_from_stats(vec, stats)
-        local dps, speed = weapon_info_from_stats(stats)
-        vec[feature_index("WEAPON_DPS")] = dps
-        vec[feature_index("WEAPON_SPEED")] = speed
-        local ilvl = select(4, GetDetailedItemLevelInfo(itemLink)) or 0
-        vec[feature_index("ILVL")] = ilvl
-    end
-    return ensure_len(vec)
+function Features.BuildItemVector(link)
+    local stats = GetItemStats and GetItemStats(link) or {}
+    local vec = {
+        statOrZero(stats, "ITEM_MOD_INTELLECT_SHORT"),
+        statOrZero(stats, "ITEM_MOD_AGILITY_SHORT"),
+        statOrZero(stats, "ITEM_MOD_STRENGTH_SHORT"),
+        statOrZero(stats, "ITEM_MOD_STAMINA_SHORT"),
+        statOrZero(stats, "ITEM_MOD_CRIT_RATING_SHORT"),
+        statOrZero(stats, "ITEM_MOD_HASTE_RATING_SHORT"),
+        statOrZero(stats, "ITEM_MOD_MASTERY_RATING_SHORT"),
+        statOrZero(stats, "ITEM_MOD_VERSATILITY"),
+        statOrZero(stats, "ITEM_MOD_CR_LIFESTEAL_SHORT"),
+        statOrZero(stats, "ITEM_MOD_CR_AVOIDANCE_SHORT"),
+        statOrZero(stats, "ITEM_MOD_CR_SPEED_SHORT"),
+    }
+    local dps, speed = weaponStats(link)
+    vec[#vec+1] = dps
+    vec[#vec+1] = speed
+    vec[#vec+1] = statOrZero(stats, "ITEM_MOD_ARMOR_SHORT")
+    vec[#vec+1] = select(4, GetDetailedItemLevelInfo and GetDetailedItemLevelInfo(link)) or 0
+    vec[#vec+1] = 0
+    return vec
 end
 
-F.FEATURE_ORDER = FEATURE_ORDER
-SmartbotFeatures = F
-return F
+SmartbotFeatures = Features
+return Features

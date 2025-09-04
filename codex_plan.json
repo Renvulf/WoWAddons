@@ -1,32 +1,29 @@
 {
   "version": 1,
   "tasks": [
-    "add_hps_support",
-    "equip_features",
-    "rls_model",
-    "role_models_ui",
-    "equip_logic",
-    "cleanup_strings_dependencies",
-    "persistence_toc"
+    "repair_segment_class_and_forward_decls",
+    "equip_snapshot_features",
+    "combat_logger_dps_hps",
+    "context_bucket_and_outlier_handler",
+    "rls_model_core",
+    "delta_pairwise_model",
+    "blended_weights_and_persistence",
+    "tooltip_overlay",
+    "retail_safe_equip_queue",
+    "ui_minimum",
+    "dev_harness",
+    "perf_guards_and_logging",
+    "final_polish"
   ],
   "completed": [
-    "add_hps_support",
-    "equip_features",
-    "rls_model",
-    "role_models_ui",
-    "cleanup_strings_dependencies",
-    "persistence_toc"
+    "repair_segment_class_and_forward_decls"
   ],
   "files_checksum": {
-    "Smartbot/Segment.lua": "e7b25d0b44ce8842e0e6b0d905fe15c124e27a8f75ff917824927b2ea1e73bab",
-    "Smartbot/Features.lua": "fd52bbb53cb137bde78879381f709a3c167f6ff5593659fe869cb1d3bae11f41",
-    "Smartbot/Model.lua": "406ac7e31ee47fd10ce993056d5f8bc993bd5e15909bd3ea0454564ea6893364",
-    "Smartbot/Smartbot.lua": "4c796cc46584640d8c06d0d6e00120cb29f110265accc8be1519e7862b91b1a3",
-    "Smartbot/Smartbot.toc": "4944d9aac8c0ec862401d36b2cd749d92895dd71407ab3ba5bfd142ef721ad63",
-    "tests/segment_spec.lua": "83c225ba83d1cc750c59fb867b781fb471f4195421977111483cef69b74193ec",
-    "tests/features_spec.lua": "afea0c55462eaeaf40ab0bdf6715c5edd7942d9d78d3dbbab12025c96ddb3881",
-    "tests/model_spec.lua": "1c4b87bee082f77c5bb69d09c00f25a1659fc34e03ef44f9acc08d7c7977ce56",
-    "tests/export_spec.lua": "780ded3d04969b1a4635e569efddcf5a46265a8cb7aec1159e3a3bad9609eaea",
-    "tests/guards_spec.lua": "3e993d01e43b418690a2f5dbda30bd8e3728569093f40d8f349517635e518b7b"
+    "Smartbot/Segment.lua": "e1210747e397ee040dd0501c54824b8f7a7ecc1d5dab42e80ffa3e47d7e0db22",
+    "Smartbot/Features.lua": "8bdc5a332a263404c931b9e143187a00dc3a7c2ddd0af0098981ca0e16c6c74f",
+    "Smartbot/Model.lua": "a0800e7bce6bf812a1de6efba1b93bacc1254f53a8b5e2bc98a2b95dd245ec04",
+    "Smartbot/Smartbot.lua": "fdb3c18e91430c930a50f026d6283cb810325502ceb6e6880acd0867f77408f1",
+    "Smartbot/Smartbot.toc": "9a361980239a62eea5b5ec67ae9faa52d2b0b3b1171458be7a94dd7e05abc15e",
+    "tests/segment_spec.lua": "83c225ba83d1cc750c59fb867b781fb471f4195421977111483cef69b74193ec"
   }
 }
