@@ -41,7 +41,14 @@ function Core:SpecRole()
     U.log("SpecRole detected %s %s", tostring(specID), tostring(role))
 end
 
-function Core:SlashCmd()
+function Core:SlashCmd(msg)
+    if msg=="export" then
+        U.warn(Core:Export())
+        return
+    elseif msg=="import" then
+        U.warn("Use settings panel for import")
+        return
+    end
     print("SmartWeaver status: spec="..(state.specID or "?").." role="..(state.role or "?"))
     if SW.UI and SW.UI.Open then SW.UI:Open() end
 end
@@ -54,6 +61,29 @@ function Core:OnLoad()
     SLASH_SMARTWEAVER1 = "/sw"
     SlashCmdList["SMARTWEAVER"] = Core.SlashCmd
     U.log("Loaded %s v%s", C.ADDON_NAME, C.VERSION)
+end
+
+function Core:Export()
+    return U.jsonEncode({models=SW.db.models, history=SW.db.history, config=SW.db.config})
+end
+
+function Core:Import(str)
+    local t = U.jsonDecode(str)
+    if type(t)~='table' then
+        U.warn("Import failed")
+        return
+    end
+    if t.models then SW.db.models=t.models end
+    if t.history then SW.db.history=t.history end
+    if t.config then for k,v in pairs(t.config) do SW.db.config[k]=v end end
+    U.warn("Import complete")
+end
+
+function Core:ResetSpec()
+    if state.charKey then
+        SW.db.models[state.charKey]=nil
+        U.warn("Model reset for %s", state.charKey)
+    end
 end
 
 local f = CreateFrame("Frame")
