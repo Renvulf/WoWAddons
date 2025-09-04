@@ -1,11 +1,36 @@
 {
   "schema": 1,
   "completed": {
-    "stages": [1,2,3,4,5,6,7,8],
-    "refinements": ["R1","R2","R3","R4","R5","R6","R7","R8","R9","R10"],
+    "stages": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "refinements": [
+      "R1",
+      "R2",
+      "R3",
+      "R4",
+      "R5",
+      "R6",
+      "R7",
+      "R8",
+      "R9",
+      "R10"
+    ],
     "health_ok": false
   },
   "open_issues": null,
-  "last_commit": "1023b1fdad5ecaddf52a721907c0ac73d7fed4a9",
-  "timestamp_utc": "2025-09-04T06:05:05Z"
+  "last_commit": "baa03c47a009883a9c5d22cfb4cf38fc9301ed29",
+  "timestamp_utc": "2025-09-04T06:23:35Z",
+  "ci": {
+    "workflow": "lua-tests.yml",
+    "status": "unknown",
+    "last_run": null
+  }
 }
