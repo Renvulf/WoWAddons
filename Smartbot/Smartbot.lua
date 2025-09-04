@@ -1315,23 +1315,84 @@ end
 
 function Smartbot:LearnStats()
     local seg = self.lastSegment
-    if not seg then
+    if not seg or not seg.features then
         print("Smartbot: no combat segment recorded")
         return
     end
-    print(string.format("Last segment: damage=%d events=%d activeTime=%.1f avgTargets=%.2f", seg.totalDamage, seg.events, seg.activeTime, seg.avgTargets or 0))
+    local y = seg.totalDamage / (seg.activeTime > 0 and seg.activeTime or 1)
+    local yhat = self.lastYHat or 0
+    local m = GetCurrentModel()
+    local err = math.abs(y - yhat)
+    local parts = {}
+    for i, v in ipairs(seg.features) do parts[i] = string.format("%.2f", v) end
+    print("x={" .. table.concat(parts, ",") .. "}")
+    print(string.format("y=%.1f yhat=%.1f |e|=%.1f maeEWMA=%.1f", y, yhat, err, m and (m.maeEWMA or 0) or 0))
 end
 
-function Smartbot:LearnScore()
-    print("Smartbot: learning score not yet implemented")
+function Smartbot:LearnScore(arg)
+    local link
+    if arg and arg ~= "" then
+        link = arg
+    else
+        local focus = GetMouseFocus()
+        if focus and focus.GetItem then _, link = focus:GetItem() end
+        if not link and GameTooltip and GameTooltip.GetItem then _, link = GameTooltip:GetItem() end
+    end
+    if not link then
+        print("Smartbot: no item to score")
+        return
+    end
+    if not self:CanEquip(link) then
+        print("Smartbot: item not equippable")
+        return
+    end
+    local slot1, slot2 = self:GetValidSlots(link)
+    local d1 = slot1 and self:EvaluateItemLearned(link, slot1)
+    local d2 = slot2 and self:EvaluateItemLearned(link, slot2)
+    if d1 then
+        print(string.format("slot %d ΔDPS %.1f", slot1, d1))
+    end
+    if d2 then
+        print(string.format("slot %d ΔDPS %.1f", slot2, d2))
+    end
+    if not d1 and not d2 then
+        print("Smartbot: model not ready")
+    end
 end
 
 function Smartbot:LearnExport()
-    print("Smartbot: learning export not yet implemented")
+    local m = GetCurrentModel()
+    if not m or m.n == 0 then
+        print("Smartbot: no model to export")
+        return
+    end
+    local s = m:Export()
+    if s then
+        print("Smartbot export:")
+        print(s)
+    else
+        print("Smartbot: export failed")
+    end
 end
 
 function Smartbot:LearnImport(data)
-    print("Smartbot: learning import not yet implemented")
+    if not data or data == "" then
+        print("Smartbot: no data provided")
+        return
+    end
+    local m, err = Model.Import(data)
+    if not m then
+        print("Smartbot: import failed", err)
+        return
+    end
+    local spec = GetCurrentSpec()
+    if not spec then
+        print("Smartbot: cannot determine spec")
+        return
+    end
+    SmartbotDB.models = SmartbotDB.models or {}
+    SmartbotDB.models[spec] = m
+    print(string.format("Smartbot: model imported (n=%d)", m.n or 0))
 end
 
 -- Event handler frame to catch game events.
@@ -1431,6 +1492,8 @@ SlashCmdList["SMARTBOT"] = function(msg)
         Smartbot:UpdateTicker()
     elseif cmd == "options" or cmd == "config" or cmd == "" then
         Smartbot:OpenOptions()
+    elseif cmd == "score" then
+        Smartbot:LearnScore(rest)
     elseif cmd == "learn" then
         local sub, arg = rest:match("^(%S*)%s*(.*)$")
         if sub == "on" then
@@ -1444,7 +1507,7 @@ SlashCmdList["SMARTBOT"] = function(msg)
         elseif sub == "stats" then
             Smartbot:LearnStats()
         elseif sub == "score" then
-            Smartbot:LearnScore()
+            Smartbot:LearnScore(arg)
         elseif sub == "export" then
             Smartbot:LearnExport()
         elseif sub == "import" then
@@ -1454,16 +1517,17 @@ SlashCmdList["SMARTBOT"] = function(msg)
             print("/sb learn on - enable learning")
             print("/sb learn off - disable learning")
             print("/sb learn reset - reset model for current spec")
-            print("/sb learn stats - show learning stats (placeholder)")
-            print("/sb learn score - score hovered item (placeholder)")
-            print("/sb learn export - export model (placeholder)")
-            print("/sb learn import <data> - import model (placeholder)")
+            print("/sb learn stats - show learning stats")
+            print("/sb learn score - score hovered item")
+            print("/sb learn export - export model")
+            print("/sb learn import <data> - import model")
         end
     else
         print("Smartbot commands:")
         print("/sb scan - scan bags now")
         print("/sb auto - toggle auto equip")
         print("/sb options - open the options panel")
+        print("/sb score - score hovered item with learned model")
         print("/sb learn <cmd> - learning subsystem commands")
         print("Use the options panel to set stat weights per specialization.")
     end
