@@ -1,8 +1,6 @@
-## Interface: 110000
+## Interface: 100105
 ## Title: Smartbot
-## Notes: Learns DPS/HPS stat weights and auto-equips upgrades out of combat.
-## Author: Ivan + GPT
-## Version: 0.9.0
+## Notes: Learns stat weights and auto-equips upgrades
 ## SavedVariables: SmartbotDB
 
 Segment.lua
