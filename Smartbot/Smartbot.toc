@@ -6,4 +6,5 @@
 ## SavedVariablesPerCharacter: SmartbotDB
 
 Segment.lua
+Features.lua
 Smartbot.lua
