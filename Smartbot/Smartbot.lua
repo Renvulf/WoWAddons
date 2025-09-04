@@ -26,6 +26,12 @@ Smartbot.featureSampler = nil
 Smartbot.featureTicker = nil
 Smartbot.lastYHat = nil
 
+function Smartbot:DebugPrint(...)
+    if SmartbotDB and SmartbotDB.learnVerbose then
+        print(...)
+    end
+end
+
 -- API references with fallbacks for different game versions.
 -- In Dragonflight (and later) most item API functions moved under C_Item.
 -- Older clients still expose them as globals.  Using locals here avoids
@@ -185,6 +191,10 @@ local function MigrateDB()
                 SmartbotDB.learnParams[k] = v
             end
         end
+    end
+
+    if SmartbotDB.learnVerbose == nil then
+        SmartbotDB.learnVerbose = false
     end
 
     for spec, m in pairs(SmartbotDB.models) do
@@ -1355,7 +1365,7 @@ end
 function Smartbot:LearnStats()
     local seg = self.lastSegment
     if not seg or not seg.features then
-        print("Smartbot: no combat segment recorded")
+        self:DebugPrint("Smartbot: no combat segment recorded")
         return
     end
     local y = seg.totalDamage / (seg.activeTime > 0 and seg.activeTime or 1)
@@ -1364,17 +1374,17 @@ function Smartbot:LearnStats()
     local err = math.abs(y - yhat)
     local parts = {}
     for i, v in ipairs(seg.features) do parts[i] = string.format("%.2f", v) end
-    print("x={" .. table.concat(parts, ",") .. "}")
-    print(string.format("y=%.1f yhat=%.1f |e|=%.1f maeEWMA=%.1f", y, yhat, err, m and (m.maeEWMA or 0) or 0))
+    self:DebugPrint("x={" .. table.concat(parts, ",") .. "}")
+    self:DebugPrint(string.format("y=%.1f yhat=%.1f |e|=%.1f maeEWMA=%.1f", y, yhat, err, m and (m.maeEWMA or 0) or 0))
 end
 
 function Smartbot:HealthCheck()
     local issues = 0
     local function check(cond, msg)
         if cond then
-            print(msg .. ": OK")
+            Smartbot:DebugPrint(msg .. ": OK")
         else
-            print(msg .. ": ISSUE")
+            Smartbot:DebugPrint(msg .. ": ISSUE")
             issues = issues + 1
         end
     end
@@ -1401,7 +1411,7 @@ end
 
 function Smartbot:LearnHealth()
     local n = self:HealthCheck()
-    print("OPEN_ISSUES:", n)
+    self:DebugPrint("OPEN_ISSUES:", n)
 end
 
 function Smartbot:LearnScore(arg)
@@ -1544,6 +1554,23 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         Smartbot.vehicleGUID = nil
     elseif event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_DEAD" or event == "PLAYER_UNGHOST" then
         Smartbot:LearnFlush()
+    elseif event == "PLAYER_LOGOUT" then
+        Smartbot:LearnFlush()
+        if Smartbot.featureTicker and Smartbot.featureTicker.Cancel then
+            Smartbot.featureTicker:Cancel()
+            Smartbot.featureTicker = nil
+        end
+        if Smartbot.ticker and Smartbot.ticker.Cancel then
+            Smartbot.ticker:Cancel()
+            Smartbot.ticker = nil
+        end
+        if Smartbot.debounceHandle and Smartbot.debounceHandle.Cancel then
+            Smartbot.debounceHandle:Cancel()
+            Smartbot.debounceHandle = nil
+        end
+        if Smartbot.equipInFlight and Smartbot.equipInFlight.timeout and Smartbot.equipInFlight.timeout.Cancel then
+            Smartbot.equipInFlight.timeout:Cancel()
+        end
     end
 end)
 
@@ -1561,6 +1588,7 @@ eventFrame:RegisterEvent("UNIT_EXITED_VEHICLE")
 eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 eventFrame:RegisterEvent("PLAYER_DEAD")
 eventFrame:RegisterEvent("PLAYER_UNGHOST")
+eventFrame:RegisterEvent("PLAYER_LOGOUT")
 
 -- Expose slash commands for manual access
 SLASH_SMARTBOT1 = "/smartbot"

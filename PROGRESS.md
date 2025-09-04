@@ -21,3 +21,4 @@ DONE_REFINE:R7 - Verified timers and CLEU handlers reuse resources.
 DONE_REFINE:R8 - Added vehicle GUID handling for combat log filtering. (Smartbot/Smartbot.lua)
 DONE_REFINE:R9 - Added feature-order checksum to export/import. (Smartbot/Model.lua)
 DONE_REFINE:R10 - Added developer health check command. (Smartbot/Smartbot.lua)
+GATED_PRINTS - Added learnVerbose flag and logout timer cleanup. (Smartbot/Smartbot.lua)
