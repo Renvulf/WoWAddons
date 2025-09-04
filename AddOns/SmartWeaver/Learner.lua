@@ -23,7 +23,7 @@ end
 local function equippedFeatures()
     local sum
     for slot=1,17 do
-        if slot~=4 then -- skip shirt
+        if slot~=4 then
             local link = GetInventoryItemLink("player", slot)
             if link then
                 local f = SW.ItemStats:Features(link)
