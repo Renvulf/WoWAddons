@@ -7,4 +7,5 @@
 
 Segment.lua
 Features.lua
+Model.lua
 Smartbot.lua
