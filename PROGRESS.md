@@ -23,3 +23,4 @@ DONE_REFINE:R9 - Added feature-order checksum to export/import. (Smartbot/Model.
 DONE_REFINE:R10 - Added developer health check command. (Smartbot/Smartbot.lua)
 GATED_PRINTS - Added learnVerbose flag and logout timer cleanup. (Smartbot/Smartbot.lua)
 BLOCKER: Missing Lua interpreter; cannot execute self-tests or /sb learn health to finalize.
+BLOCKER: Apt repository 403 prevents installing Lua interpreter; tests and health check remain unrun.
