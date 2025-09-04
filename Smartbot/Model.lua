@@ -1,239 +1,140 @@
+-- Smartbot - Model.lua (RLS with ridge + forgetting)
 local Model = {}
 Model.__index = Model
 
-local FEATURE_NAMES = {
-    "PrimaryStat","CritRating","HasteRating","MasteryRating","VersatilityRating",
-    "MH_DPS","OH_DPS","ItemLevel","avgTargets"
-}
-
--- Lightweight Base64 implementation -------------------------------------------------
--- These helpers operate on plain Lua strings and avoid external dependencies.  They
--- are intentionally tiny as the exported model data is already small.
-local B64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-
-local function b64encode(data)
-    return ((data:gsub('.', function(x)
-        local r = B64_CHARS:find(x) - 1
-        return string.format('%06b', r)
-    end) .. '0000'):gsub('%d%d%d?%d?%d?%d?', function(bits)
-        if #bits < 6 then return '' end
-        local c = tonumber(bits, 2) + 1
-        return B64_CHARS:sub(c, c)
-    end) .. ({ '', '==', '=' })[#data % 3 + 1])
+local function deepcopy(t)
+    if type(t) ~= "table" then return t end
+    local r = {}
+    for k,v in pairs(t) do r[k] = deepcopy(v) end
+    return r
 end
 
-local function b64decode(data)
-    data = data:gsub('[^' .. B64_CHARS .. '=]', '')
-    return (data:gsub('.', function(x)
-        if x == '=' then return '' end
-        local r = B64_CHARS:find(x) - 1
-        return string.format('%06b', r)
-    end):gsub('%d%d%d?%d?%d?%d?', function(bits)
-        if #bits < 8 then return '' end
-        local c = tonumber(bits, 2)
-        return string.char(c)
-    end))
-end
-
--- Minimal JSON (sufficient for numbers, booleans, strings and arrays) --------------
-local function json_encode(v)
-    local t = type(v)
-    if t == 'number' or t == 'boolean' then
-        return tostring(v)
-    elseif t == 'string' then
-        return string.format('%q', v)
-    elseif t == 'table' then
-        local isArray = (#v > 0)
-        local parts = {}
-        if isArray then
-            for i = 1, #v do parts[i] = json_encode(v[i]) end
-            return '[' .. table.concat(parts, ',') .. ']'
-        else
-            for k, val in pairs(v) do
-                parts[#parts + 1] = string.format('%q:%s', k, json_encode(val))
-            end
-            return '{' .. table.concat(parts, ',') .. '}'
-        end
-    else
-        return 'null'
-    end
-end
-
-local function json_decode(str)
-    local lua = str:gsub('"([%w_]+)":', '["%1"]=')
-    lua = lua:gsub('null', 'nil')
-    local f, err = load('return ' .. lua)
-    if not f then return nil, err end
-    return f()
-end
-
-local function checksum(str)
-    local sum = 0
-    for i = 1, #str do
-        sum = (sum + str:byte(i)) % 4294967296
-    end
-    return string.format('%x', sum)
-end
-
-function Model:New()
+function Model:New(featureNames)
     local o = {
-        featureNames = FEATURE_NAMES,
-        A = {},
-        bVec = {},
-        w = {},
-        mean = {},
-        var = {},
+        featureNames = featureNames or {
+            "STR","AGI","INT","STAM",
+            "CRIT","HASTE","MASTERY","VERS",
+            "LEECH","AVOIDANCE","SPEED",
+            "WEAPON_DPS","WEAPON_SPEED",
+            "ARMOR","ILVL",
+            "AVG_TARGETS",
+        },
         n = 0,
-        maeEWMA = 0,
-        ridge = 1e-3,
-        gamma = 0.99,
         accepted = 0,
         rejected = 0,
+        lambda = 1.0,
+        gamma = 0.995, -- forgetting factor
+        -- RLS state
+        A = nil, -- matrix (#f x #f)
+        b = nil, -- vector (#f)
+        w = nil, -- weights (#f)
+        minSamples = 15,
     }
-    return setmetatable(o, self)
+    setmetatable(o, Model)
+    local F = #o.featureNames
+    o.A = {}
+    for i=1,F do
+        o.A[i] = {}
+        for j=1,F do o.A[i][j] = (i==j) and o.lambda or 0 end
+    end
+    o.b = {}
+    for i=1,F do o.b[i] = 0 end
+    o.w = {}
+    for i=1,F do o.w[i] = 0 end
+    return o
 end
 
-local function standardize(model, x)
-    local xhat = {}
-    for i = 1, #x do
-        local mu = model.mean[i] or 0
-        local var = (model.var[i] or 0)
-        local n = model.n
-        local sd = 0
-        if n > 0 then
-            sd = math.sqrt(var / n)
-        end
-        if sd < 1e-6 then sd = 1e-6 end
-        xhat[i] = (x[i] - mu) / sd
-    end
-    return xhat
+local function dot(a,b)
+    local s = 0
+    for i=1,#a do s = s + (a[i] or 0) * (b[i] or 0) end
+    return s
 end
 
-function Model:Update(x, y, seg, params)
-    params = params or {}
-    local gamma = params.gamma or self.gamma or 0.99
-    local ridge = params.ridge or self.ridge or 1e-3
-    self.gamma = gamma
-    self.ridge = ridge
-
-    self.n = self.n + 1
-    for i = 1, #x do
-        local xi = x[i]
-        local mean = self.mean[i] or 0
-        local delta = xi - mean
-        mean = mean + delta / self.n
-        self.mean[i] = mean
-        local M2 = self.var[i] or 0
-        self.var[i] = M2 + delta * (xi - mean)
+local function cholesky_solve(A, b)
+    local n = #A
+    -- copy
+    local L = {}
+    for i=1,n do
+        L[i] = {}
+        for j=1,n do L[i][j] = A[i][j] end
     end
-
-    local xhat = standardize(self, x)
-    local d = #xhat
-
-    for i = 1, d + 1 do
-        self.bVec[i] = (self.bVec[i] or 0) * gamma
-        self.A[i] = self.A[i] or {}
-        for j = 1, d + 1 do
-            self.A[i][j] = (self.A[i][j] or 0) * gamma
-            if i == j then self.A[i][j] = self.A[i][j] + ridge end
+    -- Cholesky
+    for i=1,n do
+        for j=1,i do
+            local sum = L[i][j]
+            for k=1,j-1 do sum = sum - L[i][k]*L[j][k] end
+            if i == j then
+                if sum <= 1e-8 then sum = 1e-8 end
+                L[i][j] = math.sqrt(sum)
+            else
+                L[i][j] = sum / L[j][j]
+            end
         end
+        for j=i+1,n do L[i][j] = 0 end
     end
-
-    local xaug = {}
-    for i = 1, d do xaug[i] = xhat[i] end
-    xaug[d + 1] = 1
-    for i = 1, d + 1 do
-        self.bVec[i] = self.bVec[i] + xaug[i] * y
-        for j = 1, d + 1 do
-            self.A[i][j] = self.A[i][j] + xaug[i] * xaug[j]
-        end
+    -- solve Ly=b
+    local y = {}
+    for i=1,n do
+        local sum = b[i]
+        for k=1,i-1 do sum = sum - L[i][k]*y[k] end
+        y[i] = sum / L[i][i]
     end
-
-    self.w = solve(self.A, self.bVec)
-
-    local yhat = 0
-    for i = 1, d do
-        yhat = yhat + (self.w[i] or 0) * xhat[i]
+    -- solve L^T w = y
+    local w = {}
+    for i=n,1,-1 do
+        local sum = y[i]
+        for k=i+1,n do sum = sum - L[k][i]*w[k] end
+        w[i] = sum / L[i][i]
     end
-    yhat = yhat + (self.w[d + 1] or 0)
-
-    local e = y - yhat
-    local absE = math.abs(e)
-    if self.n == 1 then
-        self.maeEWMA = absE
-    else
-        self.maeEWMA = 0.9 * self.maeEWMA + 0.1 * absE
-    end
-
-    for i = 1, d do
-        local w = self.w[i] or 0
-        if w > 1000 then w = 1000 elseif w < -1000 then w = -1000 end
-        if i == 1 and not params.allowNegativeWeights and w < 0 then
-            w = 0
-        end
-        self.w[i] = w
-    end
-
-    return yhat, e
+    return w
 end
 
--- Returns standardized feature vector; exposed for unit tests.
-function Model:Standardize(x)
-    return standardize(self, x)
-end
-
--- Estimates change in prediction for a delta feature vector.
-function Model:PredictDelta(delta)
-    local ydelta = 0
-    for i = 1, #delta do
-        local var = self.var[i] or 0
-        local n = self.n
-        local sd = 0
-        if n > 0 then
-            sd = math.sqrt(var / n)
+function Model:Update(x, y)
+    local F = #self.featureNames
+    if #x ~= F then return false, "feature_len" end
+    -- apply forgetting
+    for i=1,F do
+        for j=1,F do
+            self.A[i][j] = self.gamma * self.A[i][j]
         end
-        if sd < 1e-6 then sd = 1e-6 end
-        ydelta = ydelta + (self.w[i] or 0) * (delta[i] / sd)
+        self.A[i][i] = self.A[i][i] + 1e-6 -- gentle ridge refresh
     end
-    return ydelta
+    -- A += x x^T ; b += x y
+    for i=1,F do
+        local xi = x[i] or 0
+        for j=1,F do
+            self.A[i][j] = self.A[i][j] + xi * (x[j] or 0)
+        end
+        self.b[i] = (self.b[i] or 0) + xi * y
+    end
+    -- solve
+    self.w = cholesky_solve(self.A, self.b)
+    self.n = (self.n or 0) + 1
+    return true
 end
 
--- Serialises the model into a base64 encoded JSON string with a simple checksum.
+function Model:Predict(x)
+    return dot(self.w, x)
+end
+
 function Model:Export()
-    local fchk = checksum(table.concat(self.featureNames, ','))
-    local data = {
-        featureNames = self.featureNames,
-        featureChecksum = fchk,
-        A = self.A,
-        bVec = self.bVec,
-        w = self.w,
-        mean = self.mean,
-        var = self.var,
-        n = self.n,
-        maeEWMA = self.maeEWMA,
-        ridge = self.ridge,
-        gamma = self.gamma,
-        accepted = self.accepted,
-        rejected = self.rejected,
+    return {
+        featureNames = deepcopy(self.featureNames),
+        n = self.n, accepted = self.accepted, rejected = self.rejected,
+        lambda = self.lambda, gamma = self.gamma,
+        A = deepcopy(self.A),
+        b = deepcopy(self.b),
+        w = deepcopy(self.w),
+        minSamples = self.minSamples,
     }
-    local json = json_encode(data)
-    local chk = checksum(json)
-    return b64encode(chk .. ':' .. json)
 end
 
--- Recreates a model instance from an exported string.  Returns model or nil + err.
-function Model.Import(str)
-    if type(str) ~= 'string' then return nil, 'invalid' end
-    local decoded = b64decode(str or '')
-    local chk, json = decoded:match('^([^:]+):(.*)$')
-    if not chk or not json then return nil, 'format' end
-    if chk ~= checksum(json) then return nil, 'checksum' end
-    local tbl, err = json_decode(json)
-    if not tbl then return nil, err or 'json' end
-    local fchk = checksum(table.concat(tbl.featureNames or {}, ','))
-    if tbl.featureChecksum and fchk ~= tbl.featureChecksum then return nil, 'features' end
-    local m = Model:New()
-    for k, v in pairs(tbl) do m[k] = v end
+function Model.Import(t)
+    local m = Model:New(t.featureNames)
+    m.n = t.n or 0; m.accepted = t.accepted or 0; m.rejected = t.rejected or 0
+    m.lambda = t.lambda or 1.0; m.gamma = t.gamma or 0.995
+    m.A = t.A or m.A; m.b = t.b or m.b; m.w = t.w or m.w
+    m.minSamples = t.minSamples or m.minSamples
     return m
 end
 

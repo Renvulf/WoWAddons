@@ -1,11 +1,11 @@
-## Interface: 110200
+## Interface: 110000
 ## Title: Smartbot
-## Notes: Auto equips upgrades based on custom stat weights.
-## Author: OpenAI
-## Version: 1.2
+## Notes: Learns DPS/HPS stat weights and auto-equips upgrades out of combat.
+## Author: Ivan + GPT
+## Version: 0.9.0
 ## SavedVariables: SmartbotDB
 
 Segment.lua
-Features.lua
 Model.lua
+Features.lua
 Smartbot.lua
