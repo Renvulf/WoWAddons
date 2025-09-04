@@ -9,3 +9,15 @@ DONE_STAGE:5 - Integrated learned item scoring into bag scanning and tooltips. (
 
 DONE_STAGE:6 - Added model stats panel and enabled reset button. (Smartbot/Smartbot.lua)
 DONE_STAGE:7 - Added developer commands for stats, scoring, and model export/import with checksum. (Smartbot/Model.lua Smartbot/Smartbot.lua tests/export_spec.lua)
+
+DONE_STAGE:8 - Added safeguards for missing data, non-combat equipping, and non-NaN checks. (Smartbot/Model.lua Smartbot/Smartbot.lua tests/guards_spec.lua)
+DONE_REFINE:R1 - Hardened DB schema with model validation and versioning. (Smartbot/Smartbot.lua)
+DONE_REFINE:R2 - Added instance and PvP learning filters. (Smartbot/Smartbot.lua)
+DONE_REFINE:R3 - Added AoE learning weight controls. (Smartbot/Model.lua Smartbot/Smartbot.lua)
+DONE_REFINE:R4 - Added weight clamping and negative-weight guard. (Smartbot/Model.lua Smartbot/Smartbot.lua)
+DONE_REFINE:R5 - Existing ring and trinket slot logic verified.
+DONE_REFINE:R6 - Enhanced tooltip with learned ΔDPS and warm-up notice. (Smartbot/Smartbot.lua)
+DONE_REFINE:R7 - Verified timers and CLEU handlers reuse resources.
+DONE_REFINE:R8 - Added vehicle GUID handling for combat log filtering. (Smartbot/Smartbot.lua)
+DONE_REFINE:R9 - Added feature-order checksum to export/import. (Smartbot/Model.lua)
+DONE_REFINE:R10 - Added developer health check command. (Smartbot/Smartbot.lua)

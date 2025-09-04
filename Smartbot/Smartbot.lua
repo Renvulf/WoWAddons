@@ -19,6 +19,7 @@ local FeatureSampler = SmartbotFeatureSampler
 local Model = SmartbotModel
 Smartbot.playerGUID = nil
 Smartbot.currentPetGUID = nil
+Smartbot.vehicleGUID = nil
 Smartbot.activeSegment = nil
 Smartbot.lastSegment = nil
 Smartbot.featureSampler = nil
@@ -121,21 +122,47 @@ local ROGUE_OFFHAND_ONLY = {
 -- incremented and MigrateDB applies any missing defaults.  This keeps existing
 -- SavedVariables compatible across addon updates.
 local DB_SCHEMA_VERSION = 1
+local MODEL_SCHEMA_VERSION = 1
 local DEFAULT_LEARN_PARAMS = {
     minLengthSec = 20,
     minEvents = 40,
     lr = 0.02,
     deltaHuber = 300,
     minSamples = 15,
+    learnWorld = true,
+    learnParty = true,
+    learnRaid = true,
+    ignorePvP = false,
+    learnAoE = false,
+    allowNegativeWeights = false,
 }
+
+local function ValidateModel(m)
+    if type(m) ~= "table" then return Model:New() end
+    if type(m.featureNames) ~= "table" or #m.featureNames ~= 10 then
+        return Model:New()
+    end
+    m.w = m.w or {}
+    m.b = m.b or 0
+    m.mean = m.mean or {}
+    m.var = m.var or {}
+    m.g2sum = m.g2sum or {}
+    m.g2sum0 = m.g2sum0 or 0
+    m.n = m.n or 0
+    m.maeEWMA = m.maeEWMA or 0
+    m.deltaHuber = m.deltaHuber or 300
+    m.ridge = m.ridge or 1e-4
+    m.accepted = m.accepted or 0
+    m.rejected = m.rejected or 0
+    return m
+end
 
 local function MigrateDB()
     SmartbotDB = SmartbotDB or {}
     SmartbotDB.schemaVersion = SmartbotDB.schemaVersion or 0
+    SmartbotDB.modelsVersion = SmartbotDB.modelsVersion or 0
 
     if SmartbotDB.schemaVersion < DB_SCHEMA_VERSION then
-        -- Learning system defaults.  Stored per character so that each toon can
-        -- opt-in separately and maintain spec-specific models.
         if SmartbotDB.learnEnabled == nil then
             SmartbotDB.learnEnabled = false
         end
@@ -146,10 +173,8 @@ local function MigrateDB()
                 SmartbotDB.learnParams[k] = v
             end
         end
-
         SmartbotDB.schemaVersion = DB_SCHEMA_VERSION
     else
-        -- Ensure any missing keys are populated even if schema versions match.
         if SmartbotDB.learnEnabled == nil then
             SmartbotDB.learnEnabled = false
         end
@@ -161,6 +186,11 @@ local function MigrateDB()
             end
         end
     end
+
+    for spec, m in pairs(SmartbotDB.models) do
+        SmartbotDB.models[spec] = ValidateModel(m)
+    end
+    SmartbotDB.modelsVersion = MODEL_SCHEMA_VERSION
 end
 
 -- Initializes the SavedVariables table and ensures all defaults are set.
@@ -229,8 +259,20 @@ function Smartbot:StopFeatureSampling()
 end
 
 function Smartbot:LearnCombatStart()
+    local params = SmartbotDB.learnParams or {}
+    local _, instType = IsInInstance()
+    if params.ignorePvP and (instType == "pvp" or instType == "arena") then return end
+    if IsInRaid() then
+        if not params.learnRaid then return end
+    elseif IsInGroup() then
+        if not params.learnParty then return end
+    else
+        if not params.learnWorld then return end
+    end
+
     self.playerGUID = UnitGUID("player")
     self.currentPetGUID = UnitGUID("pet")
+    self.vehicleGUID = UnitGUID("vehicle")
     self.activeSegment = Segment:New(GetTime())
     self:StartFeatureSampling()
 end
@@ -275,7 +317,7 @@ function Smartbot:HandleCombatLogEvent(...)
     if not self.activeSegment then return end
     local timestamp, subevent, _, srcGUID, _, _, _, dstGUID, _, dstFlags = ...
     if not DAMAGE_EVENTS[subevent] then return end
-    if srcGUID ~= self.playerGUID and srcGUID ~= self.currentPetGUID then return end
+    if srcGUID ~= self.playerGUID and srcGUID ~= self.currentPetGUID and srcGUID ~= self.vehicleGUID then return end
     if bit.band(dstFlags, COMBATLOG_OBJECT_REACTION_HOSTILE) == 0 then return end
     local amount
     if subevent == "SWING_DAMAGE" then
@@ -515,15 +557,9 @@ function Smartbot:EvaluateItemLearned(link, slot)
     local currentLevel = currentLink and (select(4, GetItemInfo(currentLink)) or 0) or 0
     delta[8] = itemLevel - currentLevel
 
-    local ydelta = 0
-    for i=1,10 do
-        local sd = 0
-        if model.n > 0 then
-            sd = math.sqrt((model.var[i] or 0) / model.n)
-        end
-        if sd < 1e-6 then sd = 1e-6 end
-        local dHat = delta[i] / sd
-        ydelta = ydelta + (model.w[i] or 0) * dHat
+    local ydelta = model:PredictDelta(delta)
+    if not ydelta or ydelta ~= ydelta or ydelta == math.huge or ydelta == -math.huge then
+        return nil
     end
     return ydelta
 end
@@ -640,19 +676,22 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
     end
     if not ensureEquippedSlotCached(slot1) then return end
     if slot2 and not ensureEquippedSlotCached(slot2) then return end
+    local model = GetCurrentModel()
+    local params = SmartbotDB.learnParams or {}
     local learned1 = slot1 and self:EvaluateItemLearned(itemLink, slot1) or nil
     local learned2 = slot2 and self:EvaluateItemLearned(itemLink, slot2) or nil
     if learned1 or learned2 then
+        local best = math.max(learned1 or -math.huge, learned2 or -math.huge)
         tooltip:AddLine(" ")
         tooltip:AddLine("|cfffe6100Smartbot Gear|r")
-        if learned1 then
-            tooltip:AddLine(string.format("  Slot 1 ΔDPS: %.1f", learned1))
-        end
-        if learned2 then
-            tooltip:AddLine(string.format("  Slot 2 ΔDPS: %.1f", learned2))
-        end
+        tooltip:AddLine(string.format("  Learned ΔDPS: %+.1f (model n=%d)", best, model and model.n or 0))
         tooltip:Show()
         return
+    elseif model and model.n < (params.minSamples or 15) then
+        tooltip:AddLine(" ")
+        tooltip:AddLine("|cfffe6100Smartbot Gear|r")
+        tooltip:AddLine("  (warming up: using static weights)")
+        tooltip:Show()
     end
 
     local candidateScore = Smartbot:EvaluateItem(itemLink)
@@ -787,7 +826,7 @@ end
 -- Processes the next queued upgrade, equipping one item at a time.  Equip
 -- confirmation is handled via PLAYER_EQUIPMENT_CHANGED or a timeout.
 function Smartbot:ProcessNextInQueue()
-    if self.equipInFlight then return end
+    if self.equipInFlight or InCombatLockdown() then return end
 
     local entry = table.remove(self.equipQueue, 1)
     if not entry then
@@ -1329,6 +1368,42 @@ function Smartbot:LearnStats()
     print(string.format("y=%.1f yhat=%.1f |e|=%.1f maeEWMA=%.1f", y, yhat, err, m and (m.maeEWMA or 0) or 0))
 end
 
+function Smartbot:HealthCheck()
+    local issues = 0
+    local function check(cond, msg)
+        if cond then
+            print(msg .. ": OK")
+        else
+            print(msg .. ": ISSUE")
+            issues = issues + 1
+        end
+    end
+
+    local params = SmartbotDB and SmartbotDB.learnParams
+    check(SmartbotDB and SmartbotDB.schemaVersion, "HC1 DB schema")
+    check(params and type(params.minLengthSec) == "number", "HC1 params")
+    check(self.tooltipHooked, "HC2 tooltip hooks")
+    check(not InCombatLockdown or not InCombatLockdown() or self.activeSegment, "HC3 segment")
+    check(not self.featureTicker, "HC4 sampler stopped")
+    local m = GetCurrentModel and GetCurrentModel()
+    if m then
+        check(m.n == (m.accepted or 0) + (m.rejected or 0), "HC5 model counters")
+    end
+    check(self:EvaluateItemLearned(nil) == nil, "HC6 learned fallback")
+    check(not (InCombatLockdown and InCombatLockdown()) or #self.equipQueue == 0, "HC7 equip queue")
+    check(INVTYPE_SLOTS and type(INVTYPE_SLOTS.INVTYPE_FINGER) == "table", "HC8 ring slots")
+    local model = Model:New()
+    local round = Model.Import(model:Export())
+    check(round and round.featureNames and #round.featureNames == #model.featureNames, "HC9 export/import")
+
+    return issues
+end
+
+function Smartbot:LearnHealth()
+    local n = self:HealthCheck()
+    print("OPEN_ISSUES:", n)
+end
+
 function Smartbot:LearnScore(arg)
     local link
     if arg and arg ~= "" then
@@ -1455,10 +1530,18 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         Smartbot:LearnCombatStart()
     elseif event == "PLAYER_REGEN_ENABLED" then
         Smartbot:LearnCombatEnd()
+        Smartbot:ProcessNextInQueue()
+        if Smartbot.rescanRequested and not Smartbot.debounceHandle and not Smartbot.equipInFlight then
+            Smartbot:RequestRescan()
+        end
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         Smartbot:HandleCombatLogEvent(CombatLogGetCurrentEventInfo())
     elseif event == "UNIT_PET" and ... == "player" then
         Smartbot.currentPetGUID = UnitGUID("pet")
+    elseif event == "UNIT_ENTERED_VEHICLE" and ... == "player" then
+        Smartbot.vehicleGUID = UnitGUID("vehicle")
+    elseif event == "UNIT_EXITED_VEHICLE" and ... == "player" then
+        Smartbot.vehicleGUID = nil
     elseif event == "ZONE_CHANGED_NEW_AREA" or event == "PLAYER_DEAD" or event == "PLAYER_UNGHOST" then
         Smartbot:LearnFlush()
     end
@@ -1473,6 +1556,8 @@ eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 eventFrame:RegisterEvent("UNIT_PET")
+eventFrame:RegisterEvent("UNIT_ENTERED_VEHICLE")
+eventFrame:RegisterEvent("UNIT_EXITED_VEHICLE")
 eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 eventFrame:RegisterEvent("PLAYER_DEAD")
 eventFrame:RegisterEvent("PLAYER_UNGHOST")
@@ -1512,6 +1597,8 @@ SlashCmdList["SMARTBOT"] = function(msg)
             Smartbot:LearnExport()
         elseif sub == "import" then
             Smartbot:LearnImport(arg)
+        elseif sub == "health" then
+            Smartbot:LearnHealth()
         else
             print("Smartbot learn commands:")
             print("/sb learn on - enable learning")
@@ -1521,6 +1608,7 @@ SlashCmdList["SMARTBOT"] = function(msg)
             print("/sb learn score - score hovered item")
             print("/sb learn export - export model")
             print("/sb learn import <data> - import model")
+            print("/sb learn health - run health checks")
         end
     else
         print("Smartbot commands:")

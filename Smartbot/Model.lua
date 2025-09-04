@@ -156,6 +156,9 @@ function Model:Update(x, y, seg, params)
     if seg then
         local dmgNorm = seg.totalDamage / ((seg.avgTargets or 0) > 1 and 150000 or 75000)
         q = clamp01(math.min(1, (seg.activeTime or 0) / 60) * math.min(1, dmgNorm))
+        if (seg.avgTargets or 0) >= 3 and not params.learnAoE then
+            q = q * 0.25
+        end
     end
 
     -- Gradient updates
@@ -169,13 +172,47 @@ function Model:Update(x, y, seg, params)
     self.g2sum0 = self.g2sum0 + g0 * g0
     self.b = self.b - (lr * q / math.sqrt(self.g2sum0 + 1e-6)) * g0
 
+    for i = 1, #self.w do
+        local w = self.w[i]
+        if w then
+            if w > 1000 then w = 1000 elseif w < -1000 then w = -1000 end
+            if i == 1 and not params.allowNegativeWeights and w < 0 then
+                w = 0
+            end
+            self.w[i] = w
+        end
+    end
+
     return yhat, e
+end
+
+-- Returns standardized feature vector; exposed for unit tests.
+function Model:Standardize(x)
+    return standardize(self, x)
+end
+
+-- Estimates change in prediction for a delta feature vector.
+function Model:PredictDelta(delta)
+    local ydelta = 0
+    for i = 1, #delta do
+        local var = self.var[i] or 0
+        local n = self.n
+        local sd = 0
+        if n > 0 then
+            sd = math.sqrt(var / n)
+        end
+        if sd < 1e-6 then sd = 1e-6 end
+        ydelta = ydelta + (self.w[i] or 0) * (delta[i] / sd)
+    end
+    return ydelta
 end
 
 -- Serialises the model into a base64 encoded JSON string with a simple checksum.
 function Model:Export()
+    local fchk = checksum(table.concat(self.featureNames, ','))
     local data = {
         featureNames = self.featureNames,
+        featureChecksum = fchk,
         w = self.w,
         b = self.b,
         mean = self.mean,
@@ -203,6 +240,8 @@ function Model.Import(str)
     if chk ~= checksum(json) then return nil, 'checksum' end
     local tbl, err = json_decode(json)
     if not tbl then return nil, err or 'json' end
+    local fchk = checksum(table.concat(tbl.featureNames or {}, ','))
+    if tbl.featureChecksum and fchk ~= tbl.featureChecksum then return nil, 'features' end
     local m = Model:New()
     for k, v in pairs(tbl) do m[k] = v end
     return m
