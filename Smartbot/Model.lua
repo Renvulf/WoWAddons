@@ -3,12 +3,8 @@ Model.__index = Model
 
 local FEATURE_NAMES = {
     "PrimaryStat","CritRating","HasteRating","MasteryRating","VersatilityRating",
-    "MH_DPS","OH_DPS","ItemLevel","Level","avgTargets"
+    "MH_DPS","OH_DPS","ItemLevel","avgTargets"
 }
-
-local function clamp01(x)
-    if x < 0 then return 0 elseif x > 1 then return 1 else return x end
-end
 
 -- Lightweight Base64 implementation -------------------------------------------------
 -- These helpers operate on plain Lua strings and avoid external dependencies.  They
@@ -82,16 +78,15 @@ end
 function Model:New()
     local o = {
         featureNames = FEATURE_NAMES,
+        A = {},
+        bVec = {},
         w = {},
-        b = 0,
         mean = {},
         var = {},
-        g2sum = {},
-        g2sum0 = 0,
         n = 0,
         maeEWMA = 0,
-        deltaHuber = 300,
-        ridge = 1e-4,
+        ridge = 1e-3,
+        gamma = 0.99,
         accepted = 0,
         rejected = 0,
     }
@@ -116,12 +111,12 @@ end
 
 function Model:Update(x, y, seg, params)
     params = params or {}
-    local lr = params.lr or 0.02
-    local deltaHuber = params.deltaHuber or self.deltaHuber or 300
-    local ridge = params.ridge or self.ridge or 1e-4
+    local gamma = params.gamma or self.gamma or 0.99
+    local ridge = params.ridge or self.ridge or 1e-3
+    self.gamma = gamma
+    self.ridge = ridge
 
     self.n = self.n + 1
-    -- Welford mean/var update
     for i = 1, #x do
         local xi = x[i]
         local mean = self.mean[i] or 0
@@ -133,54 +128,50 @@ function Model:Update(x, y, seg, params)
     end
 
     local xhat = standardize(self, x)
-    -- Prediction
-    local yhat = self.b
-    for i = 1, #xhat do
-        yhat = yhat + (self.w[i] or 0) * xhat[i]
-    end
-    local e = y - yhat
-    local absE = math.abs(e)
-    local huber = math.max(deltaHuber, 2 * self.maeEWMA)
-    if absE > huber then
-        e = huber * (e >= 0 and 1 or -1)
+    local d = #xhat
+
+    for i = 1, d + 1 do
+        self.bVec[i] = (self.bVec[i] or 0) * gamma
+        self.A[i] = self.A[i] or {}
+        for j = 1, d + 1 do
+            self.A[i][j] = (self.A[i][j] or 0) * gamma
+            if i == j then self.A[i][j] = self.A[i][j] + ridge end
+        end
     end
 
-    -- EWMA of MAE
+    local xaug = {}
+    for i = 1, d do xaug[i] = xhat[i] end
+    xaug[d + 1] = 1
+    for i = 1, d + 1 do
+        self.bVec[i] = self.bVec[i] + xaug[i] * y
+        for j = 1, d + 1 do
+            self.A[i][j] = self.A[i][j] + xaug[i] * xaug[j]
+        end
+    end
+
+    self.w = solve(self.A, self.bVec)
+
+    local yhat = 0
+    for i = 1, d do
+        yhat = yhat + (self.w[i] or 0) * xhat[i]
+    end
+    yhat = yhat + (self.w[d + 1] or 0)
+
+    local e = y - yhat
+    local absE = math.abs(e)
     if self.n == 1 then
         self.maeEWMA = absE
     else
         self.maeEWMA = 0.9 * self.maeEWMA + 0.1 * absE
     end
 
-    local q = 1
-    if seg then
-        local dmgNorm = seg.totalDamage / ((seg.avgTargets or 0) > 1 and 150000 or 75000)
-        q = clamp01(math.min(1, (seg.activeTime or 0) / 60) * math.min(1, dmgNorm))
-        if (seg.avgTargets or 0) >= 3 and not params.learnAoE then
-            q = q * 0.25
-        end
-    end
-
-    -- Gradient updates
-    for i = 1, #xhat do
+    for i = 1, d do
         local w = self.w[i] or 0
-        local g = -2 * e * xhat[i] + 2 * ridge * w
-        self.g2sum[i] = (self.g2sum[i] or 0) + g * g
-        self.w[i] = w - (lr * q / math.sqrt(self.g2sum[i] + 1e-6)) * g
-    end
-    local g0 = -2 * e
-    self.g2sum0 = self.g2sum0 + g0 * g0
-    self.b = self.b - (lr * q / math.sqrt(self.g2sum0 + 1e-6)) * g0
-
-    for i = 1, #self.w do
-        local w = self.w[i]
-        if w then
-            if w > 1000 then w = 1000 elseif w < -1000 then w = -1000 end
-            if i == 1 and not params.allowNegativeWeights and w < 0 then
-                w = 0
-            end
-            self.w[i] = w
+        if w > 1000 then w = 1000 elseif w < -1000 then w = -1000 end
+        if i == 1 and not params.allowNegativeWeights and w < 0 then
+            w = 0
         end
+        self.w[i] = w
     end
 
     return yhat, e
@@ -213,16 +204,15 @@ function Model:Export()
     local data = {
         featureNames = self.featureNames,
         featureChecksum = fchk,
+        A = self.A,
+        bVec = self.bVec,
         w = self.w,
-        b = self.b,
         mean = self.mean,
         var = self.var,
-        g2sum = self.g2sum,
-        g2sum0 = self.g2sum0,
         n = self.n,
         maeEWMA = self.maeEWMA,
-        deltaHuber = self.deltaHuber,
         ridge = self.ridge,
+        gamma = self.gamma,
         accepted = self.accepted,
         rejected = self.rejected,
     }

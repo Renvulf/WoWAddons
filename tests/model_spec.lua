@@ -1,9 +1,9 @@
 local Model = dofile("Smartbot/Model.lua")
 
 local m = Model:New()
-local seg = {activeTime=30,totalDamage=10000,avgTargets=1}
-local x = {1,2,3,4,5,6,7,8,9,10}
-local params = {lr=0.02, deltaHuber=300}
+local seg = {activeTime=30,totalDamage=10000,totalHealing=0,avgTargets=1}
+local x = {1,2,3,4,5,6,7,8,9}
+local params = {}
 local yhat1, err1 = m:Update(x, 500, seg, params)
 local n1 = m.n
 local yhat2, err2 = m:Update(x, 600, seg, params)

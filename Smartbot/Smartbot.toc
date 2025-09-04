@@ -3,7 +3,7 @@
 ## Notes: Auto equips upgrades based on custom stat weights.
 ## Author: OpenAI
 ## Version: 1.2
-## SavedVariablesPerCharacter: SmartbotDB
+## SavedVariables: SmartbotDB
 
 Segment.lua
 Features.lua
