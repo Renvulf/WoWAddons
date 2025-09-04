@@ -4,7 +4,7 @@ local U = SW.Util
 SW.Core = {}
 local Core = SW.Core
 
-local state = { }
+local state = {}
 SW.state = state
 
 local defaults = {
@@ -42,7 +42,7 @@ function Core:SpecRole()
 end
 
 function Core:SlashCmd()
-    print("SmartWeaver status: spec="..(state.specID or "?").." role="..(state.role or "?"))")
+    print("SmartWeaver status: spec="..(state.specID or "?").." role="..(state.role or "?"))
     if SW.UI and SW.UI.Open then SW.UI:Open() end
 end
 
