@@ -27,17 +27,22 @@ end
 
 function Core:SpecRole()
     local spec = GetSpecialization()
-    if not spec then return end
+    if not spec then
+        U.log("Spec not ready, retrying")
+        C_Timer.After(2, function() Core:SpecRole() end)
+        return
+    end
     local specID = GetSpecializationInfo(spec)
     local role = GetSpecializationRole(spec)
     local name, realm = UnitName("player"), GetRealmName()
     state.specID = specID
     state.role = role
     state.charKey = name.."-"..realm..":"..specID
+    U.log("SpecRole detected %s %s", tostring(specID), tostring(role))
 end
 
 function Core:SlashCmd()
-    print("SmartWeaver status: spec="..(state.specID or "?").." role="..(state.role or "?"))
+    print("SmartWeaver status: spec="..(state.specID or "?").." role="..(state.role or "?"))")
     if SW.UI and SW.UI.Open then SW.UI:Open() end
 end
 

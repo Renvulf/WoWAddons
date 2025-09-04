@@ -18,6 +18,7 @@ function E:Init()
     f:RegisterEvent("PLAYER_REGEN_DISABLED")
     f:RegisterEvent("PLAYER_REGEN_ENABLED")
     f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+    f:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 end
 
 function E:PLAYER_SPECIALIZATION_CHANGED(unit)
@@ -32,11 +33,16 @@ function E:PLAYER_EQUIPMENT_CHANGED()
     SW.ItemStats:Invalidate()
 end
 
+function E:GET_ITEM_INFO_RECEIVED()
+    SW.ItemStats:Invalidate()
+end
+
 function E:PLAYER_REGEN_DISABLED()
     combat.active=true
     combat.start=GetTime()
     combat.damage=0
     combat.healing=0
+    U.log("Combat started")
 end
 
 function E:PLAYER_REGEN_ENABLED()
@@ -46,6 +52,7 @@ function E:PLAYER_REGEN_ENABLED()
             local dps = combat.damage/dur
             local hps = combat.healing/dur
             SW.Learner:RecordEncounter(dps,hps)
+            U.log("Combat ended: dps=%.1f hps=%.1f", dps, hps)
         end
     end
     combat.active=false

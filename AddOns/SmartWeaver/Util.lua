@@ -8,6 +8,19 @@ function U.log(msg, ...)
     end
 end
 
+function U.warn(msg, ...)
+    print("["..ADDON_NAME.."] "..string.format(msg, ...))
+end
+
+function U.defer(func, delay)
+    delay = delay or 0
+    if InCombatLockdown() then
+        C_Timer.After(1, function() U.defer(func, delay) end)
+    else
+        C_Timer.After(delay, func)
+    end
+end
+
 function U.identity(n)
     local I = {}
     for i=1,n do
