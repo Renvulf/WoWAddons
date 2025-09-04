@@ -2,7 +2,7 @@
 ## Title: SmartWeaver
 ## Notes: Learns stat weights over time and equips upgrades.
 ## Author: OpenAI
-## Version: 0.1
+## Version: 1.0
 ## SavedVariables: SmartWeaverDB
 
 Constants.lua
