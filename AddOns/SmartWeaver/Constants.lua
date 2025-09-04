@@ -4,7 +4,7 @@ local C = {}
 
 C.INTERFACE = 110200
 C.ADDON_NAME = ADDON_NAME
-C.VERSION = "0.1"
+C.VERSION = "1.0"
 C.AUTHOR = "OpenAI"
 C.SAVED_VAR = "SmartWeaverDB"
 

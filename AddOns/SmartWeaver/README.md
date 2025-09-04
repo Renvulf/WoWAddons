@@ -1,6 +1,7 @@
 # SmartWeaver
 
-SmartWeaver learns how your character values stats based on real combat performance and can automatically equip upgrades when you leave combat.
+SmartWeaver learns how your character values stats based on real combat performance
+and can automatically equip upgrades when you leave combat.
 
 ## Features
 - Tracks your DPS or HPS from combat logs.
@@ -11,3 +12,11 @@ SmartWeaver learns how your character values stats based on real combat performa
 - Retail settings panel with options and data export.
 
 All learning happens locally and no data is sent anywhere.
+
+## Usage
+- Type `/sw` to open the settings panel.
+- Enable Auto-equip to allow SmartWeaver to swap gear after combat.
+- Toggle tooltip, exploration, or verbose logging as desired.
+
+## Development harness
+Optional Lua tests live under `DevHarness/` and can be run with a standalone Lua interpreter for offline sanity checks.
