@@ -23,6 +23,12 @@ local statOrder = {
 function IS:Features(link)
     if not link then return end
     if cache[link] then return cache[link] end
+    if not GetItemInfo(link) then
+        local id = tonumber(link:match("item:(%d+)") or "")
+        if id then C_Item.RequestLoadItemDataByID(id) end
+        U.log("Item not cached, requesting %s", link)
+        return
+    end
     local stats = C_Item.GetItemStats(link) or {}
     local f = {}
     local primary = stats[C.PRIMARY_STATS.STRENGTH] or stats[C.PRIMARY_STATS.AGILITY] or stats[C.PRIMARY_STATS.INTELLECT] or 0

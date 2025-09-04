@@ -28,26 +28,27 @@
     "tooltip_overlay",
     "settings_ui",
     "dev_harness",
-    "docs_and_license"
+    "docs_and_license",
+    "perf_guards_and_logging"
   ],
   "files_checksum": {
     "AddOns/SmartWeaver/Constants.lua": "f4d4c7251c020009bd8cdd6208bc18b477ac8104de39a1328ef49de405f67947",
-    "AddOns/SmartWeaver/Core.lua": "2298bcccdfe905f6258529723fdabbf281bcfa7b190da6eb330fcbbd0d15a6df",
+    "AddOns/SmartWeaver/Core.lua": "65048dcdda236a3dbfdebd9cf19eee136db023d323bada5e976dc15d99ed7b7e",
     "AddOns/SmartWeaver/DevHarness/README.md": "fe0e7bd8983b8900a1911c50e9175824deb086cba9c20e3322adb69afe9d2f2d",
     "AddOns/SmartWeaver/DevHarness/test_learner.lua": "42bc5cdff615d528a5b1b965d4be68382cbf416e8e40217c01ced84e60e1492a",
     "AddOns/SmartWeaver/DevHarness/test_scoring.lua": "92f01ad746f09c682a8decabc2b1bd716f37de2a00a240f8259b4f353fb5c2b4",
     "AddOns/SmartWeaver/DevHarness/wow_stubs.lua": "ba4a8a261ee8445b020781819fd4fbb093e7128fdd9a630eec4804da29ea3485",
-    "AddOns/SmartWeaver/Equip.lua": "757599e173a4c51fbe7e15a50635f0cde0cdee86641afc388c9e799c9618436f",
-    "AddOns/SmartWeaver/Events.lua": "532c7a3219d90496312ab6b6cd9a9abddf4dbaa584ed5ceed22b6b2ff733c963",
-    "AddOns/SmartWeaver/ItemStats.lua": "10df27f39a1c05136342f5d797d7c3430f44c4ec05016433f42b74284b4a31b5",
+    "AddOns/SmartWeaver/Equip.lua": "ffbb08a7accf5dd6da1dceec8000975b2e4d6196e0ee63ae8c28f967c58f87eb",
+    "AddOns/SmartWeaver/Events.lua": "71fb7a64045b0900ed2924ebefd0e32239f8ef7a3b038c1bf193394dbcbcfee1",
+    "AddOns/SmartWeaver/ItemStats.lua": "db9d58bbf7d7e4be557e844113d070aa9e6cfc3e8988a2308f9f3a51f62b2c18",
     "AddOns/SmartWeaver/LICENSE.txt": "d831db55645e47ca8e491c5a0e37f1ee744d7b10bf5aa8d50146c795ac0176c0",
-    "AddOns/SmartWeaver/Learner.lua": "937c34e650fc25f12b87a6b4bd7103086889eebd9c866e40aeb34b641eabb16e",
-    "AddOns/SmartWeaver/Queue.lua": "1ebd55bbdddb05542803f3cab8c2d891f8842fd2369e71721496a202b2dae6eb",
+    "AddOns/SmartWeaver/Learner.lua": "8c9291f1fb31a9c33cadf9fba7e019eea679b17da6fa88035acec9e3e3cdfc27",
+    "AddOns/SmartWeaver/Queue.lua": "c0db90c0fe99787a8c6a2b82569c553a4af12cd5773af42f32aa581c1d4ea204",
     "AddOns/SmartWeaver/README.md": "7bba8d02d95c59b21e5743633c09f8c1d07529aeaea7cc4807cc5e363fb8aa94",
     "AddOns/SmartWeaver/Scoring.lua": "4a6833abef64269e3d7362a617543220f580c49bf52f7c13cfc077bb9b6fdd11",
     "AddOns/SmartWeaver/SmartWeaver.toc": "f93406490fef7ee4ef97d78863dadd9e1f1bdb24a031244bfa57c88bf95a4cd4",
     "AddOns/SmartWeaver/Tooltip.lua": "538506ee9a736ae11164dbbc96c84406db9e5d43b0c0644bf77def39007829e8",
     "AddOns/SmartWeaver/UI.lua": "2c50263102e273193c67dc394e81013275de36088c9fcc590609d6a5562fa581",
-    "AddOns/SmartWeaver/Util.lua": "b10126985f5f523d683985f37899058294f440d2cc628ffed4ead74fdfb7c530"
+    "AddOns/SmartWeaver/Util.lua": "0683c5cdd6f974fa19362afb33d3cd9f1f08ccd989f8cfcd53449c6eb81464dc"
   }
 }
