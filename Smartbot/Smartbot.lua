@@ -18,6 +18,7 @@ local Segment = SmartbotSegment
 local Features = SmartbotFeatures
 local FeatureSampler = Features and Features.Sampler
 local Model = SmartbotModel
+local GetCurrentModel
 Smartbot.playerGUID = nil
 Smartbot.currentPetGUID = nil
 Smartbot.vehicleGUID = nil
@@ -518,7 +519,7 @@ local function GetCurrentWeights()
     return weights
 end
 
-local function GetCurrentModel()
+function GetCurrentModel()
     local specID = GetCurrentSpec()
     if not specID then return nil end
     local role = GetSpecializationRole and GetSpecialization and GetSpecializationRole(GetSpecialization()) or "NONE"

@@ -1,7 +1,10 @@
 local Segment = {}
+Segment.__index = Segment
 
+-- Creates a new combat segment starting at startTime.
+-- Each instance tracks cumulative damage/healing and target counts.
 function Segment:New(startTime)
-    return {
+    local seg = {
         segStart = startTime or 0,
         segEnd = nil,
         totalDamage = 0,
@@ -12,15 +15,27 @@ function Segment:New(startTime)
         lastEventTime = nil,
         targetTimes = {},
         targetSum = 0,
+        features = nil,
+        avgTargets = 0,
+        dps = 0,
+        hps = 0,
     }
+    return setmetatable(seg, Segment)
 end
 
-local function Count(table)
+local function Count(tbl)
     local n = 0
-    for _ in pairs(table) do n = n + 1 end
+    for _ in pairs(tbl) do
+        n = n + 1
+    end
     return n
 end
 
+-- Records a combat log event for this segment.
+-- timestamp: event time from CombatLogGetCurrentEventInfo().
+-- destGUID: target GUID of the event.
+-- amount: damage or healing amount.
+-- isHeal: true when the event is a heal.
 function Segment:AddEvent(timestamp, destGUID, amount, isHeal)
     self.events = self.events + 1
     if isHeal then
@@ -32,7 +47,9 @@ function Segment:AddEvent(timestamp, destGUID, amount, isHeal)
 
     if self.lastEventTime then
         local dt = timestamp - self.lastEventTime
-        if dt > 3 then dt = 3 end
+        if dt > 3 then
+            dt = 3
+        end
         if dt > 0 then
             self.activeTime = self.activeTime + dt
         end
@@ -49,8 +66,9 @@ function Segment:AddEvent(timestamp, destGUID, amount, isHeal)
     self.targetSum = self.targetSum + Count(tt)
 end
 
+-- Finalizes the segment and computes summary stats.
 function Segment:Finish(endTime)
-    self.segEnd = endTime or GetTime and GetTime() or 0
+    self.segEnd = endTime or (GetTime and GetTime() or 0)
     if self.events > 0 then
         self.avgTargets = self.targetSum / self.events
     else
