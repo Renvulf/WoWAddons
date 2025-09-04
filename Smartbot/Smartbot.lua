@@ -16,12 +16,14 @@ Smartbot.failedUpgrades = {}
 
 local Segment = SmartbotSegment
 local FeatureSampler = SmartbotFeatureSampler
+local Model = SmartbotModel
 Smartbot.playerGUID = nil
 Smartbot.currentPetGUID = nil
 Smartbot.activeSegment = nil
 Smartbot.lastSegment = nil
 Smartbot.featureSampler = nil
 Smartbot.featureTicker = nil
+Smartbot.lastYHat = nil
 
 -- API references with fallbacks for different game versions.
 -- In Dragonflight (and later) most item API functions moved under C_Item.
@@ -238,6 +240,9 @@ function Smartbot:LearnCombatEnd()
     self.activeSegment:Finish(GetTime())
     self:StopFeatureSampling()
     self.lastSegment = self.activeSegment
+    if SmartbotDB.learnEnabled then
+        self:LearnProcessSegment(self.lastSegment)
+    end
     self.activeSegment = nil
 end
 
@@ -245,6 +250,25 @@ function Smartbot:LearnFlush()
     if self.activeSegment then
         self:LearnCombatEnd()
     end
+end
+
+function Smartbot:LearnProcessSegment(seg)
+    if not seg or not SmartbotDB.learnEnabled then return end
+    local params = SmartbotDB.learnParams or {}
+    local duration = (seg.segEnd or 0) - (seg.segStart or 0)
+    if duration < (params.minLengthSec or 0) or seg.events < (params.minEvents or 0)
+        or (seg.activeTime or 0) < 1 or (seg.totalDamage or 0) <= 0 then
+        local m = GetCurrentModel()
+        if m then m.rejected = (m.rejected or 0) + 1 end
+        return
+    end
+    if not seg.features then return end
+    local m = GetCurrentModel()
+    if not m then return end
+    local y = seg.totalDamage / seg.activeTime
+    m.accepted = (m.accepted or 0) + 1
+    local yhat = m:Update(seg.features, y, seg, params)
+    self.lastYHat = yhat
 end
 
 function Smartbot:HandleCombatLogEvent(...)
@@ -409,6 +433,23 @@ local function GetCurrentWeights()
     return weights
 end
 
+local function GetCurrentModel()
+    local specID = GetCurrentSpec()
+    if not specID then return nil end
+    SmartbotDB.models = SmartbotDB.models or {}
+    local m = SmartbotDB.models[specID]
+    if m then
+        if getmetatable(m) ~= Model then
+            setmetatable(m, Model)
+        end
+    else
+        m = Model:New()
+        m.deltaHuber = SmartbotDB.learnParams and SmartbotDB.learnParams.deltaHuber or 300
+        SmartbotDB.models[specID] = m
+    end
+    return m
+end
+
 -- Evaluates an item link and returns a score based on stat weights and item level.
 function Smartbot:EvaluateItem(link)
     if not link or not GetItemStatsFunc then return 0 end
@@ -423,6 +464,68 @@ function Smartbot:EvaluateItem(link)
         end
     end
     return score or 0
+end
+
+function Smartbot:EvaluateItemLearned(link, slot)
+    if not (SmartbotDB and SmartbotDB.learnEnabled) then return nil end
+    local model = GetCurrentModel()
+    local params = SmartbotDB.learnParams or {}
+    if not model or model.n < (params.minSamples or 15) then return nil end
+    if not link or not GetItemStatsFunc then return nil end
+    local stats = GetItemStatsFunc(link)
+    if type(stats) ~= "table" then return nil end
+    local currentLink = slot and GetInventoryItemLink("player", slot) or nil
+    local currentStats = currentLink and GetItemStatsFunc(currentLink) or {}
+    local delta = {0,0,0,0,0,0,0,0,0,0}
+
+    if GetSpecialization and GetSpecializationInfo then
+        local specIndex = GetSpecialization()
+        if specIndex then
+            local _,_,_,_,_,primary = GetSpecializationInfo(specIndex)
+            local key
+            if primary == LE_UNIT_STAT_STRENGTH then key = "ITEM_MOD_STRENGTH_SHORT" end
+            if primary == LE_UNIT_STAT_AGILITY then key = "ITEM_MOD_AGILITY_SHORT" end
+            if primary == LE_UNIT_STAT_INTELLECT then key = "ITEM_MOD_INTELLECT_SHORT" end
+            if key then
+                delta[1] = (stats[key] or 0) - (currentStats[key] or 0)
+            end
+        end
+    end
+
+    delta[2] = (stats["ITEM_MOD_CRIT_RATING_SHORT"] or 0) - (currentStats["ITEM_MOD_CRIT_RATING_SHORT"] or 0)
+    delta[3] = (stats["ITEM_MOD_HASTE_RATING_SHORT"] or 0) - (currentStats["ITEM_MOD_HASTE_RATING_SHORT"] or 0)
+    delta[4] = (stats["ITEM_MOD_MASTERY_RATING_SHORT"] or 0) - (currentStats["ITEM_MOD_MASTERY_RATING_SHORT"] or 0)
+    delta[5] = (stats["ITEM_MOD_VERSATILITY"] or 0) - (currentStats["ITEM_MOD_VERSATILITY"] or 0)
+
+    local dps = (stats["ITEM_MOD_DAMAGE_PER_SECOND_SHORT"] or 0) - (currentStats["ITEM_MOD_DAMAGE_PER_SECOND_SHORT"] or 0)
+    if slot == (INVSLOT_MAINHAND or 16) then
+        delta[6] = dps
+    elseif slot == (INVSLOT_OFFHAND or 17) then
+        delta[7] = dps
+    else
+        local equipLoc = select(9, GetItemInfo(link))
+        if equipLoc == "INVTYPE_2HWEAPON" or equipLoc == "INVTYPE_WEAPON" or equipLoc == "INVTYPE_WEAPONMAINHAND" or equipLoc == "INVTYPE_RANGED" or equipLoc == "INVTYPE_RANGEDRIGHT" then
+            delta[6] = dps
+        elseif equipLoc == "INVTYPE_WEAPONOFFHAND" then
+            delta[7] = dps
+        end
+    end
+
+    local itemLevel = select(4, GetItemInfo(link)) or 0
+    local currentLevel = currentLink and (select(4, GetItemInfo(currentLink)) or 0) or 0
+    delta[8] = itemLevel - currentLevel
+
+    local ydelta = 0
+    for i=1,10 do
+        local sd = 0
+        if model.n > 0 then
+            sd = math.sqrt((model.var[i] or 0) / model.n)
+        end
+        if sd < 1e-6 then sd = 1e-6 end
+        local dHat = delta[i] / sd
+        ydelta = ydelta + (model.w[i] or 0) * dHat
+    end
+    return ydelta
 end
 
 -- Determines if the player can equip the provided item link.
@@ -537,6 +640,20 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
     end
     if not ensureEquippedSlotCached(slot1) then return end
     if slot2 and not ensureEquippedSlotCached(slot2) then return end
+    local learned1 = slot1 and self:EvaluateItemLearned(itemLink, slot1) or nil
+    local learned2 = slot2 and self:EvaluateItemLearned(itemLink, slot2) or nil
+    if learned1 or learned2 then
+        tooltip:AddLine(" ")
+        tooltip:AddLine("|cfffe6100Smartbot Gear|r")
+        if learned1 then
+            tooltip:AddLine(string.format("  Slot 1 ΔDPS: %.1f", learned1))
+        end
+        if learned2 then
+            tooltip:AddLine(string.format("  Slot 2 ΔDPS: %.1f", learned2))
+        end
+        tooltip:Show()
+        return
+    end
 
     local candidateScore = Smartbot:EvaluateItem(itemLink)
 
@@ -793,8 +910,10 @@ function Smartbot:ScanBags(force)
                     local candidateScore = self:EvaluateItem(itemLink)
 
                     if slot2 and equipLoc == "INVTYPE_FINGER" then
-                        local delta1 = candidateScore - currentScores[slot1]
-                        local delta2 = candidateScore - currentScores[slot2]
+                        local ldelta1 = self:EvaluateItemLearned(itemLink, slot1)
+                        local ldelta2 = self:EvaluateItemLearned(itemLink, slot2)
+                        local delta1 = ldelta1 or (candidateScore - currentScores[slot1])
+                        local delta2 = ldelta2 or (candidateScore - currentScores[slot2])
                         if ringCandidates[slot1] and ringCandidates[slot1].delta >= delta1 then delta1 = -math.huge end
                         if ringCandidates[slot2] and ringCandidates[slot2].delta >= delta2 then delta2 = -math.huge end
                         local targetSlot, delta
@@ -807,8 +926,10 @@ function Smartbot:ScanBags(force)
                             ringCandidates[targetSlot] = {bag=bag, slot=slot, targetSlot=targetSlot, link=itemLink, delta=delta}
                         end
                     elseif slot2 and equipLoc == "INVTYPE_TRINKET" then
-                        local delta1 = candidateScore - currentScores[slot1]
-                        local delta2 = candidateScore - currentScores[slot2]
+                        local ldelta1 = self:EvaluateItemLearned(itemLink, slot1)
+                        local ldelta2 = self:EvaluateItemLearned(itemLink, slot2)
+                        local delta1 = ldelta1 or (candidateScore - currentScores[slot1])
+                        local delta2 = ldelta2 or (candidateScore - currentScores[slot2])
                         if trinketCandidates[slot1] and trinketCandidates[slot1].delta >= delta1 then delta1 = -math.huge end
                         if trinketCandidates[slot2] and trinketCandidates[slot2].delta >= delta2 then delta2 = -math.huge end
                         local targetSlot, delta
@@ -823,7 +944,8 @@ function Smartbot:ScanBags(force)
                     elseif slot2 then
                         if not twoHandSelected then
                             for _, invSlot in ipairs({slot1, slot2}) do
-                                local delta = candidateScore - currentScores[invSlot]
+                                local ldelta = self:EvaluateItemLearned(itemLink, invSlot)
+                                local delta = ldelta or (candidateScore - currentScores[invSlot])
                                 if delta > 0 and (not bestBySlot[invSlot] or delta > bestBySlot[invSlot].delta) then
                                     bestBySlot[invSlot] = {bag=bag, slot=slot, targetSlot=invSlot, link=itemLink, delta=delta}
                                 end
@@ -831,7 +953,8 @@ function Smartbot:ScanBags(force)
                         end
                     else
                         if isTwoHand then
-                            local delta = candidateScore - currentScores[INVSLOT_MAINHAND]
+                            local ldelta = self:EvaluateItemLearned(itemLink, INVSLOT_MAINHAND)
+                            local delta = ldelta or (candidateScore - currentScores[INVSLOT_MAINHAND])
                             if delta > 0 then
                                 twoHandSelected = true
                                 bestBySlot[INVSLOT_MAINHAND] = {bag=bag, slot=slot, targetSlot=slot1, link=itemLink, delta=delta}
@@ -846,7 +969,8 @@ function Smartbot:ScanBags(force)
                                     currentScore = self:EvaluateItem(GetInventoryItemLink("player", slot1)) or 0
                                     currentScores[slot1] = currentScore
                                 end
-                                local delta = candidateScore - currentScore
+                                local ldelta = self:EvaluateItemLearned(itemLink, slot1)
+                                local delta = ldelta or (candidateScore - currentScore)
                                 if delta > 0 and (not bestBySlot[slot1] or delta > bestBySlot[slot1].delta) then
                                     bestBySlot[slot1] = {bag=bag, slot=slot, targetSlot=slot1, link=itemLink, delta=delta}
                                 end
@@ -1033,15 +1157,21 @@ function Smartbot:CreateOptions()
         SmartbotDB.learnEnabled = self:GetChecked()
     end)
 
-    -- Reset button is wired in a later stage.  For now keep it disabled so
-    -- users can see where the control will live without interacting with it.
+    -- Reset button for clearing the learned model for the current spec.
     local learnReset = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     learnReset:SetSize(140, 22)
     learnReset:SetPoint("LEFT", learnEnabled, "RIGHT", 10, 0)
     learnReset:SetText("Reset learning")
-    learnReset:Disable()
+    learnReset:SetScript("OnClick", function()
+        Smartbot:LearnReset()
+        panel.refresh()
+    end)
 
     panel.labels = {}
+    local modelStats = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    modelStats:SetPoint("TOPLEFT", learnEnabled, "BOTTOMLEFT", 0, -40)
+    modelStats:SetJustifyH("LEFT")
+    panel.modelStats = modelStats
     panel.editBoxes = {}
 
     -- Create controls for every stat up front.  Their visibility and positions
@@ -1122,6 +1252,25 @@ function Smartbot:CreateOptions()
         autoEquip:SetChecked(SmartbotDB.autoEquip)
         includeTrinkets:SetChecked(SmartbotDB.includeTrinkets)
         showAllStats:SetChecked(SmartbotDB.showAllStats)
+
+        local model = GetCurrentModel()
+        if model and model.n > 0 then
+            local lines = {}
+            table.insert(lines, string.format("Samples: %d (accepted %d / rejected %d)", model.n, model.accepted or 0, model.rejected or 0))
+            table.insert(lines, string.format("maeEWMA: %.1f", model.maeEWMA or 0))
+            local order = {}
+            for i=1,#model.featureNames do order[i]=i end
+            table.sort(order, function(a,b) return math.abs(model.w[a] or 0) > math.abs(model.w[b] or 0) end)
+            for i=1,math.min(5,#order) do
+                local idx = order[i]
+                local mean = model.mean[idx] or 0
+                local var = model.var[idx] and (model.var[idx]/model.n) or 0
+                table.insert(lines, string.format("%s: %.3f (mean %.1f var %.1f)", model.featureNames[idx], model.w[idx] or 0, mean, var))
+            end
+            modelStats:SetText(table.concat(lines, "\n"))
+        else
+            modelStats:SetText("No learning data")
+        end
     end
     panel:SetScript("OnShow", panel.refresh)
 
