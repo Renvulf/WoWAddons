@@ -10,3 +10,4 @@
   - Error: `E: The repository 'http://archive.ubuntu.com/ubuntu noble InRelease' is not signed.` and other 403 Forbidden errors.
   - Files: tests/*, Smartbot/Smartbot.lua
   - Next steps: Fix apt repository access or provide pre-installed Lua interpreter to run tests and /sb learn health.
+- Another attempt to install Lua via apt-get update failed with 403 Forbidden, leaving tests unrun.

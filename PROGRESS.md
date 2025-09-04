@@ -24,3 +24,4 @@ DONE_REFINE:R10 - Added developer health check command. (Smartbot/Smartbot.lua)
 GATED_PRINTS - Added learnVerbose flag and logout timer cleanup. (Smartbot/Smartbot.lua)
 BLOCKER: Missing Lua interpreter; cannot execute self-tests or /sb learn health to finalize.
 BLOCKER: Apt repository 403 prevents installing Lua interpreter; tests and health check remain unrun.
+CI_INSTALLED: .github/workflows/lua-tests.yml - Added CI workflow and local spec runner (scripts/run_specs.lua, README.md).
