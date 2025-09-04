@@ -15,10 +15,13 @@ Smartbot.debounceHandle = nil
 Smartbot.failedUpgrades = {}
 
 local Segment = SmartbotSegment
+local FeatureSampler = SmartbotFeatureSampler
 Smartbot.playerGUID = nil
 Smartbot.currentPetGUID = nil
 Smartbot.activeSegment = nil
 Smartbot.lastSegment = nil
+Smartbot.featureSampler = nil
+Smartbot.featureTicker = nil
 
 -- API references with fallbacks for different game versions.
 -- In Dragonflight (and later) most item API functions moved under C_Item.
@@ -197,15 +200,43 @@ local DAMAGE_EVENTS = {
     DAMAGE_SPLIT = true,
 }
 
+function Smartbot:StartFeatureSampling()
+    if self.featureTicker and self.featureTicker.Cancel then
+        self.featureTicker:Cancel()
+    end
+    self.featureSampler = FeatureSampler:New()
+    if C_Timer and C_Timer.NewTicker then
+        self.featureTicker = C_Timer.NewTicker(1, function()
+            if self.featureSampler then
+                self.featureSampler:AddSample()
+            end
+        end)
+    end
+end
+
+function Smartbot:StopFeatureSampling()
+    if self.featureTicker and self.featureTicker.Cancel then
+        self.featureTicker:Cancel()
+        self.featureTicker = nil
+    end
+    if self.featureSampler and self.activeSegment then
+        local vec = self.featureSampler:Average(self.activeSegment.avgTargets or 0)
+        self.activeSegment.features = vec
+    end
+    self.featureSampler = nil
+end
+
 function Smartbot:LearnCombatStart()
     self.playerGUID = UnitGUID("player")
     self.currentPetGUID = UnitGUID("pet")
     self.activeSegment = Segment:New(GetTime())
+    self:StartFeatureSampling()
 end
 
 function Smartbot:LearnCombatEnd()
     if not self.activeSegment then return end
     self.activeSegment:Finish(GetTime())
+    self:StopFeatureSampling()
     self.lastSegment = self.activeSegment
     self.activeSegment = nil
 end
