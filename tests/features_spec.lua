@@ -34,7 +34,8 @@ function UnitLevel(unit) return 9 end
 function UnitDamage(unit) return 0,0,0,0 end
 function UnitAttackSpeed(unit) return 1,1 end
 
-local Sampler = dofile("Smartbot/Features.lua")
+local Features = dofile("Smartbot/Features.lua")
+local Sampler = Features.Sampler
 local s = Sampler:New()
 s:AddSample()
 s:AddSample()

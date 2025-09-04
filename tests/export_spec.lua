@@ -2,8 +2,8 @@ local Model = dofile("Smartbot/Model.lua")
 
 local m1 = Model:New()
 m1.w = {1,2,3,4,5,6,7,8,9,10}
-m1.mean = {10,9,8,7,6,5,4,3,2,1}
-m1.var = {1,1,1,1,1,1,1,1,1,1}
+m1.mean = {10,9,8,7,6,5,4,3,2}
+m1.var = {1,1,1,1,1,1,1,1,1}
 m1.n = 5
 local data = m1:Export()
 assert(type(data) == "string" and #data > 0, "export string")

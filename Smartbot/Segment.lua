@@ -5,7 +5,9 @@ function Segment:New(startTime)
         segStart = startTime or 0,
         segEnd = nil,
         totalDamage = 0,
+        totalHealing = 0,
         events = 0,
+        healingEvents = 0,
         activeTime = 0,
         lastEventTime = nil,
         targetTimes = {},
@@ -19,9 +21,14 @@ local function Count(table)
     return n
 end
 
-function Segment:AddEvent(timestamp, destGUID, amount)
+function Segment:AddEvent(timestamp, destGUID, amount, isHeal)
     self.events = self.events + 1
-    self.totalDamage = self.totalDamage + (amount or 0)
+    if isHeal then
+        self.healingEvents = (self.healingEvents or 0) + 1
+        self.totalHealing = (self.totalHealing or 0) + (amount or 0)
+    else
+        self.totalDamage = self.totalDamage + (amount or 0)
+    end
 
     if self.lastEventTime then
         local dt = timestamp - self.lastEventTime
@@ -48,6 +55,16 @@ function Segment:Finish(endTime)
         self.avgTargets = self.targetSum / self.events
     else
         self.avgTargets = 0
+    end
+    if self.features then
+        self.features[#self.features + 1] = self.avgTargets
+    end
+    if (self.activeTime or 0) > 0 then
+        self.dps = self.totalDamage / self.activeTime
+        self.hps = self.totalHealing / self.activeTime
+    else
+        self.dps = 0
+        self.hps = 0
     end
     return self
 end

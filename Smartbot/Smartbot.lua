@@ -15,7 +15,8 @@ Smartbot.debounceHandle = nil
 Smartbot.failedUpgrades = {}
 
 local Segment = SmartbotSegment
-local FeatureSampler = SmartbotFeatureSampler
+local Features = SmartbotFeatures
+local FeatureSampler = Features and Features.Sampler
 local Model = SmartbotModel
 Smartbot.playerGUID = nil
 Smartbot.currentPetGUID = nil
@@ -145,19 +146,18 @@ local DEFAULT_LEARN_PARAMS = {
 
 local function ValidateModel(m)
     if type(m) ~= "table" then return Model:New() end
-    if type(m.featureNames) ~= "table" or #m.featureNames ~= 10 then
+    if type(m.featureNames) ~= "table" or #m.featureNames ~= 9 then
         return Model:New()
     end
+    m.A = m.A or {}
+    m.bVec = m.bVec or {}
     m.w = m.w or {}
-    m.b = m.b or 0
     m.mean = m.mean or {}
     m.var = m.var or {}
-    m.g2sum = m.g2sum or {}
-    m.g2sum0 = m.g2sum0 or 0
     m.n = m.n or 0
     m.maeEWMA = m.maeEWMA or 0
-    m.deltaHuber = m.deltaHuber or 300
-    m.ridge = m.ridge or 1e-4
+    m.ridge = m.ridge or 1e-3
+    m.gamma = m.gamma or 0.99
     m.accepted = m.accepted or 0
     m.rejected = m.rejected or 0
     return m
@@ -197,8 +197,21 @@ local function MigrateDB()
         SmartbotDB.learnVerbose = false
     end
 
-    for spec, m in pairs(SmartbotDB.models) do
-        SmartbotDB.models[spec] = ValidateModel(m)
+    if SmartbotDB.models then
+        local updated = {}
+        for spec, m in pairs(SmartbotDB.models) do
+            if type(spec) ~= "string" or not spec:find("|") then
+                local role = "NONE"
+                if GetSpecializationInfoByID then
+                    local _, _, _, _, _, roleStr = GetSpecializationInfoByID(spec)
+                    role = roleStr or role
+                end
+                updated[tostring(spec) .. "|" .. role] = ValidateModel(m)
+            else
+                updated[spec] = ValidateModel(m)
+            end
+        end
+        SmartbotDB.models = updated
     end
     SmartbotDB.modelsVersion = MODEL_SCHEMA_VERSION
 end
@@ -242,6 +255,11 @@ local DAMAGE_EVENTS = {
     DAMAGE_SPLIT = true,
 }
 
+local HEAL_EVENTS = {
+    SPELL_HEAL = true,
+    SPELL_PERIODIC_HEAL = true,
+}
+
 function Smartbot:StartFeatureSampling()
     if self.featureTicker and self.featureTicker.Cancel then
         self.featureTicker:Cancel()
@@ -260,10 +278,6 @@ function Smartbot:StopFeatureSampling()
     if self.featureTicker and self.featureTicker.Cancel then
         self.featureTicker:Cancel()
         self.featureTicker = nil
-    end
-    if self.featureSampler and self.activeSegment then
-        local vec = self.featureSampler:Average(self.activeSegment.avgTargets or 0)
-        self.activeSegment.features = vec
     end
     self.featureSampler = nil
 end
@@ -284,6 +298,9 @@ function Smartbot:LearnCombatStart()
     self.currentPetGUID = UnitGUID("pet")
     self.vehicleGUID = UnitGUID("vehicle")
     self.activeSegment = Segment:New(GetTime())
+    if Features and Features.BuildEquippedVector then
+        self.activeSegment.features = Features.BuildEquippedVector()
+    end
     self:StartFeatureSampling()
 end
 
@@ -309,15 +326,23 @@ function Smartbot:LearnProcessSegment(seg)
     local params = SmartbotDB.learnParams or {}
     local duration = (seg.segEnd or 0) - (seg.segStart or 0)
     if duration < (params.minLengthSec or 0) or seg.events < (params.minEvents or 0)
-        or (seg.activeTime or 0) < 1 or (seg.totalDamage or 0) <= 0 then
+        or (seg.activeTime or 0) < 1 then
         local m = GetCurrentModel()
         if m then m.rejected = (m.rejected or 0) + 1 end
         return
     end
     if not seg.features then return end
+    local role = GetSpecializationRole and GetSpecialization and GetSpecializationRole(GetSpecialization()) or "NONE"
     local m = GetCurrentModel()
     if not m then return end
-    local y = seg.totalDamage / seg.activeTime
+    local y
+    if role == "HEALER" then
+        if (seg.totalHealing or 0) <= 0 then m.rejected = (m.rejected or 0) + 1 return end
+        y = seg.hps or (seg.totalHealing / seg.activeTime)
+    else
+        if (seg.totalDamage or 0) <= 0 then m.rejected = (m.rejected or 0) + 1 return end
+        y = seg.dps or (seg.totalDamage / seg.activeTime)
+    end
     m.accepted = (m.accepted or 0) + 1
     local yhat = m:Update(seg.features, y, seg, params)
     self.lastYHat = yhat
@@ -326,16 +351,24 @@ end
 function Smartbot:HandleCombatLogEvent(...)
     if not self.activeSegment then return end
     local timestamp, subevent, _, srcGUID, _, _, _, dstGUID, _, dstFlags = ...
-    if not DAMAGE_EVENTS[subevent] then return end
+    local isDamage = DAMAGE_EVENTS[subevent]
+    local isHeal = HEAL_EVENTS[subevent]
+    if not isDamage and not isHeal then return end
     if srcGUID ~= self.playerGUID and srcGUID ~= self.currentPetGUID and srcGUID ~= self.vehicleGUID then return end
-    if bit.band(dstFlags, COMBATLOG_OBJECT_REACTION_HOSTILE) == 0 then return end
-    local amount
-    if subevent == "SWING_DAMAGE" then
-        amount = select(12, ...)
+    if isDamage then
+        if bit.band(dstFlags, COMBATLOG_OBJECT_REACTION_HOSTILE) == 0 then return end
+        local amount
+        if subevent == "SWING_DAMAGE" then
+            amount = select(12, ...)
+        else
+            amount = select(15, ...)
+        end
+        self.activeSegment:AddEvent(timestamp, dstGUID, amount or 0, false)
     else
-        amount = select(15, ...)
+        if bit.band(dstFlags, COMBATLOG_OBJECT_REACTION_FRIENDLY) == 0 then return end
+        local amount = select(15, ...)
+        self.activeSegment:AddEvent(timestamp, dstGUID, amount or 0, true)
     end
-    self.activeSegment:AddEvent(timestamp, dstGUID, amount or 0)
 end
 
 -- Returns whether the current player can dual wield weapons.  Some classes
@@ -488,16 +521,17 @@ end
 local function GetCurrentModel()
     local specID = GetCurrentSpec()
     if not specID then return nil end
+    local role = GetSpecializationRole and GetSpecialization and GetSpecializationRole(GetSpecialization()) or "NONE"
     SmartbotDB.models = SmartbotDB.models or {}
-    local m = SmartbotDB.models[specID]
+    local key = tostring(specID) .. "|" .. role
+    local m = SmartbotDB.models[key]
     if m then
         if getmetatable(m) ~= Model then
             setmetatable(m, Model)
         end
     else
         m = Model:New()
-        m.deltaHuber = SmartbotDB.learnParams and SmartbotDB.learnParams.deltaHuber or 300
-        SmartbotDB.models[specID] = m
+        SmartbotDB.models[key] = m
     end
     return m
 end
@@ -528,7 +562,7 @@ function Smartbot:EvaluateItemLearned(link, slot)
     if type(stats) ~= "table" then return nil end
     local currentLink = slot and GetInventoryItemLink("player", slot) or nil
     local currentStats = currentLink and GetItemStatsFunc(currentLink) or {}
-    local delta = {0,0,0,0,0,0,0,0,0,0}
+    local delta = {0,0,0,0,0,0,0,0,0}
 
     if GetSpecialization and GetSpecializationInfo then
         local specIndex = GetSpecialization()
@@ -694,7 +728,9 @@ function Smartbot:AddOrUpdateTooltip(tooltip, itemLink)
         local best = math.max(learned1 or -math.huge, learned2 or -math.huge)
         tooltip:AddLine(" ")
         tooltip:AddLine("|cfffe6100Smartbot Gear|r")
-        tooltip:AddLine(string.format("  Learned ΔDPS: %+.1f (model n=%d)", best, model and model.n or 0))
+        local role = GetSpecializationRole and GetSpecialization and GetSpecializationRole(GetSpecialization()) or "DAMAGER"
+        local label = (role == "HEALER") and "ΔHPS" or "ΔDPS"
+        tooltip:AddLine(string.format("  Learned %s: %+.1f (model n=%d)", label, best, model and model.n or 0))
         tooltip:Show()
         return
     elseif model and model.n < (params.minSamples or 15) then
@@ -1303,8 +1339,10 @@ function Smartbot:CreateOptions()
         showAllStats:SetChecked(SmartbotDB.showAllStats)
 
         local model = GetCurrentModel()
+        local role = GetSpecializationRole and GetSpecialization and GetSpecializationRole(GetSpecialization()) or "NONE"
         if model and model.n > 0 then
             local lines = {}
+            table.insert(lines, string.format("Role: %s", role))
             table.insert(lines, string.format("Samples: %d (accepted %d / rejected %d)", model.n, model.accepted or 0, model.rejected or 0))
             table.insert(lines, string.format("maeEWMA: %.1f", model.maeEWMA or 0))
             local order = {}
@@ -1318,7 +1356,7 @@ function Smartbot:CreateOptions()
             end
             modelStats:SetText(table.concat(lines, "\n"))
         else
-            modelStats:SetText("No learning data")
+            modelStats:SetText(string.format("Role: %s\nNo learning data", role))
         end
     end
     panel:SetScript("OnShow", panel.refresh)
@@ -1434,11 +1472,13 @@ function Smartbot:LearnScore(arg)
     local slot1, slot2 = self:GetValidSlots(link)
     local d1 = slot1 and self:EvaluateItemLearned(link, slot1)
     local d2 = slot2 and self:EvaluateItemLearned(link, slot2)
+    local role = GetSpecializationRole and GetSpecialization and GetSpecializationRole(GetSpecialization()) or "DAMAGER"
+    local label = (role == "HEALER") and "ΔHPS" or "ΔDPS"
     if d1 then
-        print(string.format("slot %d ΔDPS %.1f", slot1, d1))
+        print(string.format("slot %d %s %.1f", slot1, label, d1))
     end
     if d2 then
-        print(string.format("slot %d ΔDPS %.1f", slot2, d2))
+        print(string.format("slot %d %s %.1f", slot2, label, d2))
     end
     if not d1 and not d2 then
         print("Smartbot: model not ready")

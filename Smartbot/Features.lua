@@ -1,3 +1,10 @@
+local Features = {}
+
+--[[
+Sampler retained for diagnostics.  It snapshots live combat ratings and primary
+stats which may fluctuate due to temporary buffs.  Learning uses the stable
+equipped-item vector from BuildEquippedVector instead.
+--]]
 local Sampler = {}
 Sampler.__index = Sampler
 
@@ -85,6 +92,61 @@ function Sampler:Average(avgTargets)
     return avg
 end
 
+-- Builds the feature vector from equipped items at pull start.  The vector is
+-- stable across combat since it ignores temporary buffs.
+function Features.BuildEquippedVector()
+    local vec = {0,0,0,0,0,0,0,0}
+    if not GetItemStatsFunc or not GetInventoryItemLink then return vec end
+
+    local primaryKey
+    if GetSpecialization and GetSpecializationInfo then
+        local specIndex = GetSpecialization()
+        if specIndex then
+            local _,_,_,_,_,primary = GetSpecializationInfo(specIndex)
+            if primary == LE_UNIT_STAT_STRENGTH then primaryKey = "ITEM_MOD_STRENGTH_SHORT" end
+            if primary == LE_UNIT_STAT_AGILITY then primaryKey = "ITEM_MOD_AGILITY_SHORT" end
+            if primary == LE_UNIT_STAT_INTELLECT then primaryKey = "ITEM_MOD_INTELLECT_SHORT" end
+        end
+    end
+
+    local ilvlSum, ilvlCount = 0, 0
+    for slot = 1, 17 do
+        if slot ~= (INVSLOT_BODY or 4) and slot ~= (INVSLOT_TABARD or 19) then
+            local link = GetInventoryItemLink("player", slot)
+            if link then
+                local stats = GetItemStatsFunc(link)
+                if stats then
+                    if primaryKey then vec[1] = vec[1] + (stats[primaryKey] or 0) end
+                    vec[2] = vec[2] + (stats["ITEM_MOD_CRIT_RATING_SHORT"] or 0)
+                    vec[3] = vec[3] + (stats["ITEM_MOD_HASTE_RATING_SHORT"] or 0)
+                    vec[4] = vec[4] + (stats["ITEM_MOD_MASTERY_RATING_SHORT"] or 0)
+                    vec[5] = vec[5] + (stats["ITEM_MOD_VERSATILITY"] or 0)
+                    local dps = stats["ITEM_MOD_DAMAGE_PER_SECOND_SHORT"] or 0
+                    if slot == (INVSLOT_MAINHAND or 16) then
+                        vec[6] = dps
+                    elseif slot == (INVSLOT_OFFHAND or 17) then
+                        vec[7] = dps
+                    end
+                end
+                local ilvl = GetDetailedItemLevelInfo and (select(1, GetDetailedItemLevelInfo(link))) or nil
+                if ilvl then
+                    ilvlSum = ilvlSum + ilvl
+                    ilvlCount = ilvlCount + 1
+                end
+            end
+        end
+    end
+    if ilvlCount > 0 then
+        vec[8] = ilvlSum / ilvlCount
+    elseif GetAverageItemLevel then
+        vec[8] = select(2, GetAverageItemLevel()) or 0
+    end
+    return vec
+end
+
+Features.Sampler = Sampler
+
+SmartbotFeatures = Features
 SmartbotFeatureSampler = Sampler
-return Sampler
+return Features
 
