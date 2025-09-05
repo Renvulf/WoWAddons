@@ -10,6 +10,9 @@ local Model = SmartbotModel
 -- forward declaration
 local GetCurrentModel
 
+-- constants
+local MIN_SAMPLES = 20
+
 -- SavedVariables
 SmartbotDB = SmartbotDB or {}
 SmartbotDB.models = SmartbotDB.models or {}
@@ -167,6 +170,70 @@ function Smartbot:OnCombatLog()
     end
 end
 
+-- scoring helpers
+local INVTYPE_TO_SLOTS = {
+    INVTYPE_HEAD = {1},
+    INVTYPE_NECK = {2},
+    INVTYPE_SHOULDER = {3},
+    INVTYPE_CLOAK = {15},
+    INVTYPE_CHEST = {5},
+    INVTYPE_ROBE = {5},
+    INVTYPE_WRIST = {9},
+    INVTYPE_HAND = {10},
+    INVTYPE_WAIST = {6},
+    INVTYPE_LEGS = {7},
+    INVTYPE_FEET = {8},
+    INVTYPE_FINGER = {11, 12},
+    INVTYPE_TRINKET = {13, 14},
+    INVTYPE_WEAPON = {16, 17},
+    INVTYPE_2HWEAPON = {16},
+    INVTYPE_WEAPONMAINHAND = {16},
+    INVTYPE_WEAPONOFFHAND = {17},
+    INVTYPE_SHIELD = {17},
+    INVTYPE_HOLDABLE = {17},
+    INVTYPE_RANGED = {16},
+    INVTYPE_RANGEDRIGHT = {16},
+}
+
+function Smartbot:PredictScore(vec)
+    local model = GetCurrentModel and GetCurrentModel()
+    if not model then return 0 end
+    local w = model:Weights()
+    local s = 0
+    for i = 1, #vec do
+        s = s + (w[i] or 0) * vec[i]
+    end
+    return s
+end
+
+function Smartbot:ItemDelta(link)
+    local slots = nil
+    local equipLoc = select(9, GetItemInfo(link))
+    if equipLoc then
+        slots = INVTYPE_TO_SLOTS[equipLoc]
+    end
+    if not slots then return end
+    local itemVec = Features.BuildItemVector(link)
+    local itemScore = self:PredictScore(itemVec)
+    local bestDelta
+    local baseScore
+    for _, slot in ipairs(slots) do
+        local eqLink = GetInventoryItemLink and GetInventoryItemLink("player", slot) or nil
+        local eqScore = 0
+        if eqLink then
+            local eqVec = Features.BuildItemVector(eqLink)
+            eqScore = self:PredictScore(eqVec)
+        end
+        local delta = itemScore - eqScore
+        if not bestDelta or delta > bestDelta then
+            bestDelta = delta
+            baseScore = eqScore
+        end
+    end
+    return bestDelta, baseScore
+end
+
+-- event frame
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_REGEN_DISABLED")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -193,6 +260,34 @@ function GetCurrentModel(context)
         SmartbotDB.models[key] = Smartbot.model:Export()
     end
     return Smartbot.model
+end
+
+-- tooltip overlay
+local function TooltipHook(tooltip)
+    local _, link = tooltip:GetItem()
+    if not link then return end
+    local model = GetCurrentModel and GetCurrentModel()
+    if not model then return end
+    local samples = model.rls and model.rls.n or 0
+    if samples < MIN_SAMPLES then
+        tooltip:AddLine(string.format("Smartbot: training (%d)", samples))
+        return
+    end
+    local delta, base = Smartbot:ItemDelta(link)
+    if not delta then
+        tooltip:AddLine("Smartbot: no data")
+        return
+    end
+    local denom = math.abs(base)
+    if denom < 1e-9 then denom = 1 end
+    local pct = (delta / denom) * 100
+    local role = Smartbot:GetPlayerRole()
+    local label = role == "HEALER" and "HPS" or "DPS"
+    tooltip:AddLine(string.format("Smartbot: %+0.1f%% est. (%s)", pct, label))
+end
+
+if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall then
+    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, TooltipHook)
 end
 
 _G.Smartbot = Smartbot
