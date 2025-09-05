@@ -17,13 +17,14 @@
   ],
   "completed": [
     "repair_segment_class_and_forward_decls",
-    "equip_snapshot_features"
+    "equip_snapshot_features",
+    "combat_logger_dps_hps"
   ],
   "files_checksum": {
     "Smartbot/Segment.lua": "e1210747e397ee040dd0501c54824b8f7a7ecc1d5dab42e80ffa3e47d7e0db22",
     "Smartbot/Features.lua": "8bdc5a332a263404c931b9e143187a00dc3a7c2ddd0af0098981ca0e16c6c74f",
     "Smartbot/Model.lua": "a0800e7bce6bf812a1de6efba1b93bacc1254f53a8b5e2bc98a2b95dd245ec04",
-    "Smartbot/Smartbot.lua": "db9eed52f4bdcab3c6501a88d5a3b2710d7816a237cc4190091eb26f678d6a75",
+    "Smartbot/Smartbot.lua": "655f19eb333965b7a301bda9c148320fac87b5499dd66d6003c64879d263fa9f",
     "Smartbot/Smartbot.toc": "9a361980239a62eea5b5ec67ae9faa52d2b0b3b1171458be7a94dd7e05abc15e",
     "tests/segment_spec.lua": "83c225ba83d1cc750c59fb867b781fb471f4195421977111483cef69b74193ec"
   }
