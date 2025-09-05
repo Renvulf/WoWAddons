@@ -1,9 +1,0 @@
-## Interface: 110000
-## Title: Smartbot
-## Notes: Learns stat weights and auto-equips upgrades
-## SavedVariables: SmartbotDB
-
-Segment.lua
-Features.lua
-Model.lua
-Smartbot.lua
