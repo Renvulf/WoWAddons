@@ -1,7 +1,4 @@
--- Model.lua - simple model with outlier handling for Smartbot
-
-local Model = {}
-Model.__index = Model
+-- Model.lua - recursive least squares model for Smartbot
 
 local Outlier = {}
 Outlier.__index = Outlier
@@ -55,49 +52,167 @@ function Outlier:IsOutlier(r)
     return dist > 3.5 * self.mad
 end
 
-function Model:New()
+local ModelRLS = {}
+ModelRLS.__index = ModelRLS
+
+function ModelRLS:New(lambda, gamma)
     local o = {
-        w = {},
+        lambda = lambda or 1,
+        gamma = gamma or 0.99,
+        A = nil,
+        b = nil,
+        w = nil,
+        dim = 0,
         n = 0,
         outlier = Outlier:New(50),
     }
-    return setmetatable(o, Model)
+    return setmetatable(o, ModelRLS)
 end
 
-function Model:Predict(vec)
+function ModelRLS:Ensure(dim)
+    if self.A then return end
+    self.dim = dim
+    self.A = {}
+    self.b = {}
+    self.w = {}
+    for i = 1, dim do
+        self.A[i] = {}
+        for j = 1, dim do
+            self.A[i][j] = 0
+        end
+        self.b[i] = 0
+        self.w[i] = 0
+    end
+end
+function ModelRLS:Predict(x)
     local s = 0
-    for i = 1, #vec do
-        s = s + (self.w[i] or 0) * vec[i]
+    for i = 1, #x do
+        s = s + (self.w[i] or 0) * x[i]
     end
     return s
 end
 
-function Model:Update(x, y, weight)
+local function cholesky(A)
+    local n = #A
+    local L = {}
+    for i = 1, n do
+        L[i] = {}
+        for j = 1, i do
+            local sum = 0
+            for k = 1, j - 1 do
+                sum = sum + L[i][k] * L[j][k]
+            end
+            if i == j then
+                local v = A[i][i] - sum
+                if v <= 0 then
+                    return nil
+                end
+                L[i][j] = math.sqrt(v)
+            else
+                L[i][j] = (A[i][j] - sum) / L[j][j]
+            end
+        end
+    end
+    return L
+end
+
+local function cholSolve(A, b)
+    local L = cholesky(A)
+    if not L then return nil end
+    local n = #A
+    local y = {}
+    for i = 1, n do
+        local sum = 0
+        for k = 1, i - 1 do
+            sum = sum + L[i][k] * y[k]
+        end
+        y[i] = (b[i] - sum) / L[i][i]
+    end
+    local x = {}
+    for i = n, 1, -1 do
+        local sum = 0
+        for k = i + 1, n do
+            sum = sum + L[k][i] * x[k]
+        end
+        x[i] = (y[i] - sum) / L[i][i]
+    end
+    return x
+end
+function ModelRLS:Update(x, y, weight)
+    weight = weight or 1
+    self:Ensure(#x)
     local pred = self:Predict(x)
     local r = y - pred
     self.outlier:Add(r)
     if self.outlier:IsOutlier(r) then
         return false
     end
-    self.n = self.n + (weight or 1)
+    self.n = self.n + weight
+    local n = self.dim
+    local gamma = self.gamma
+    for i = 1, n do
+        self.b[i] = gamma * self.b[i] + weight * x[i] * y
+        for j = 1, n do
+            self.A[i][j] = gamma * self.A[i][j] + weight * x[i] * x[j]
+        end
+        self.A[i][i] = self.A[i][i] + self.lambda
+    end
+    local w = cholSolve(self.A, self.b)
+    if w then
+        for i = 1, #w do
+            local v = w[i]
+            if v ~= v or v == math.huge or v == -math.huge then
+                w[i] = 0
+            elseif v > 100 then
+                w[i] = 100
+            elseif v < -100 then
+                w[i] = -100
+            end
+        end
+        self.w = w
+    end
     return true
 end
 
-function Model:Export()
+function ModelRLS:Export()
+    local tA = {}
+    if self.A then
+        for i = 1, #self.A do
+            tA[i] = {}
+            for j = 1, #self.A[i] do
+                tA[i][j] = self.A[i][j]
+            end
+        end
+    end
+    local tb = {}
+    if self.b then
+        for i = 1, #self.b do tb[i] = self.b[i] end
+    end
+    local tw = {}
+    if self.w then
+        for i = 1, #self.w do tw[i] = self.w[i] end
+    end
     return {
-        w = self.w,
+        lambda = self.lambda,
+        gamma = self.gamma,
+        A = tA,
+        b = tb,
+        w = tw,
         n = self.n,
-        outlier = {
-            residuals = self.outlier.residuals,
-        },
+        outlier = {residuals = self.outlier.residuals},
     }
 end
 
-function Model.Import(t)
-    local m = Model:New()
+function ModelRLS.Import(t)
+    local m = ModelRLS:New(t and t.lambda or nil, t and t.gamma or nil)
     if type(t) == "table" then
-        m.w = t.w or {}
+        m.A = t.A
+        m.b = t.b
+        m.w = t.w
         m.n = t.n or 0
+        if m.A then
+            m.dim = #m.A
+        end
         if t.outlier and t.outlier.residuals then
             for _, v in ipairs(t.outlier.residuals) do
                 m.outlier:Add(v)
@@ -107,5 +222,5 @@ function Model.Import(t)
     return m
 end
 
-SmartbotModel = Model
-return Model
+SmartbotModel = ModelRLS
+return ModelRLS

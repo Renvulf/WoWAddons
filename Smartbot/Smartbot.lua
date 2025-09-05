@@ -5,6 +5,7 @@ Smartbot.name = "Smartbot"
 
 local Segment = SmartbotSegment
 local Features = SmartbotFeatures
+local Model = SmartbotModel
 
 -- forward declaration
 local GetCurrentModel
@@ -139,7 +140,10 @@ frame:SetScript("OnEvent", function(_, event)
 end)
 
 function GetCurrentModel()
-    return nil
+    if not Smartbot.model then
+        Smartbot.model = Model:New()
+    end
+    return Smartbot.model
 end
 
 _G.Smartbot = Smartbot
