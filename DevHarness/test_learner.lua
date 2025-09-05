@@ -1,8 +1,8 @@
 -- test_learner.lua - validates learning blend behaviour
 
 dofile("DevHarness/wow_stubs.lua")
-local Features = dofile("Smartbot/Features.lua")
-local Model = dofile("Smartbot/Model.lua")
+local Features = dofile("Interface/AddOns/Smartbot/Features.lua")
+local Model = dofile("Interface/AddOns/Smartbot/Model.lua")
 
 local m = Model:New()
 local dim = #Features.FEATURE_ORDER
