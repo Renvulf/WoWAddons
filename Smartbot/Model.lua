@@ -1,5 +1,6 @@
--- Model.lua - recursive least squares model for Smartbot
+-- Model.lua - learning models for Smartbot
 
+-- Outlier tracker using rolling median/MAD
 local Outlier = {}
 Outlier.__index = Outlier
 
@@ -52,6 +53,7 @@ function Outlier:IsOutlier(r)
     return dist > 3.5 * self.mad
 end
 
+-- Recursive Least Squares model
 local ModelRLS = {}
 ModelRLS.__index = ModelRLS
 
@@ -84,6 +86,7 @@ function ModelRLS:Ensure(dim)
         self.w[i] = 0
     end
 end
+
 function ModelRLS:Predict(x)
     local s = 0
     for i = 1, #x do
@@ -138,6 +141,7 @@ local function cholSolve(A, b)
     end
     return x
 end
+
 function ModelRLS:Update(x, y, weight)
     weight = weight or 1
     self:Ensure(#x)
@@ -222,5 +226,134 @@ function ModelRLS.Import(t)
     return m
 end
 
+-- Pairwise delta model using robust regression
+local ModelDelta = {}
+ModelDelta.__index = ModelDelta
+
+function ModelDelta:New(lambda)
+    local o = {
+        lambda = lambda or 1,
+        A = nil,
+        b = nil,
+        w = nil,
+        dim = 0,
+        n = 0,
+        outlier = Outlier:New(50),
+    }
+    return setmetatable(o, ModelDelta)
+end
+
+function ModelDelta:Ensure(dim)
+    if self.A then return end
+    self.dim = dim
+    self.A = {}
+    self.b = {}
+    self.w = {}
+    for i = 1, dim do
+        self.A[i] = {}
+        for j = 1, dim do
+            self.A[i][j] = 0
+        end
+        self.b[i] = 0
+        self.w[i] = 0
+    end
+end
+
+function ModelDelta:Predict(x)
+    local s = 0
+    for i = 1, #x do
+        s = s + (self.w[i] or 0) * x[i]
+    end
+    return s
+end
+
+function ModelDelta:Update(x, y)
+    self:Ensure(#x)
+    local pred = self:Predict(x)
+    local r = y - pred
+    self.outlier:Add(r)
+    local scale = self.outlier.mad
+    local c = 1.5 * scale
+    local weight = 1
+    if scale > 0 and math.abs(r) > c then
+        weight = c / math.abs(r)
+    end
+    self.n = self.n + weight
+    local n = self.dim
+    for i = 1, n do
+        self.b[i] = self.b[i] + weight * x[i] * y
+        for j = 1, n do
+            self.A[i][j] = self.A[i][j] + weight * x[i] * x[j]
+        end
+        self.A[i][i] = self.A[i][i] + self.lambda
+    end
+    local w = cholSolve(self.A, self.b)
+    if w then
+        for i = 1, #w do
+            local v = w[i]
+            if v ~= v or v == math.huge or v == -math.huge then
+                w[i] = 0
+            elseif v > 100 then
+                w[i] = 100
+            elseif v < -100 then
+                w[i] = -100
+            end
+        end
+        self.w = w
+    end
+    return true
+end
+
+function ModelDelta:Export()
+    local tA = {}
+    if self.A then
+        for i = 1, #self.A do
+            tA[i] = {}
+            for j = 1, #self.A[i] do
+                tA[i][j] = self.A[i][j]
+            end
+        end
+    end
+    local tb = {}
+    if self.b then
+        for i = 1, #self.b do tb[i] = self.b[i] end
+    end
+    local tw = {}
+    if self.w then
+        for i = 1, #self.w do tw[i] = self.w[i] end
+    end
+    return {
+        lambda = self.lambda,
+        A = tA,
+        b = tb,
+        w = tw,
+        n = self.n,
+        outlier = {residuals = self.outlier.residuals},
+    }
+end
+
+function ModelDelta.Import(t)
+    local m = ModelDelta:New(t and t.lambda or nil)
+    if type(t) == "table" then
+        m.A = t.A
+        m.b = t.b
+        m.w = t.w
+        m.n = t.n or 0
+        if m.A then
+            m.dim = #m.A
+        end
+        if t.outlier and t.outlier.residuals then
+            for _, v in ipairs(t.outlier.residuals) do
+                m.outlier:Add(v)
+            end
+        end
+    end
+    return m
+end
+
+-- Expose models
+SmartbotModelRLS = ModelRLS
+SmartbotModelDelta = ModelDelta
 SmartbotModel = ModelRLS
+
 return ModelRLS
