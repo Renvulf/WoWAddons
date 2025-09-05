@@ -7,8 +7,9 @@ local Segment = SmartbotSegment
 local Features = SmartbotFeatures
 local Model = SmartbotModel
 
--- forward declaration
+-- forward declarations
 local GetCurrentModel
+local optionsPanel
 
 -- constants
 local MIN_SAMPLES = 20
@@ -17,8 +18,18 @@ local MIN_SAMPLES = 20
 SmartbotDB = SmartbotDB or {}
 SmartbotDB.models = SmartbotDB.models or {}
 SmartbotDB.history = SmartbotDB.history or {}
-SmartbotDB.settings = SmartbotDB.settings or { autoEquip = true, tooltip = true }
+SmartbotDB.settings = SmartbotDB.settings or {}
+local defaults = {enabled=true, autoEquip=true, tooltip=true, delta=true, verbose=false}
+for k,v in pairs(defaults) do
+    if SmartbotDB.settings[k] == nil then SmartbotDB.settings[k] = v end
+end
 Smartbot.settings = SmartbotDB.settings
+
+function Smartbot:Debug(...)
+    if self.settings.verbose then
+        print("|cff00ff00Smartbot:|r", ...)
+    end
+end
 
 local currentSegment
 local playerGUID
@@ -87,7 +98,23 @@ function Smartbot:MakeModelKey(context)
     return table.concat({guid, specID, role, context}, ":")
 end
 
+function Smartbot:RefreshOptionsStats()
+    if not optionsPanel or not optionsPanel:IsShown() then return end
+    local context = self:BuildContextBucket()
+    local role = self:GetPlayerRole()
+    local model = GetCurrentModel and GetCurrentModel(context)
+    local rlsN = model and model.rls and model.rls.n or 0
+    local deltaN = model and model.delta and model.delta.n or 0
+    local alpha = model and model.alpha or 1
+    local rlsMAD = model and model.rls and model.rls.outlier and model.rls.outlier.mad or 0
+    local deltaMAD = model and model.delta and model.delta.outlier and model.delta.outlier.mad or 0
+    optionsPanel.stats:SetText(string.format(
+        "Context: %s\nRole: %s\nRLS n=%d MAD=%.2f\nDelta n=%d MAD=%.2f\nBlend α=%.2f",
+        context, role, rlsN, rlsMAD, deltaN, deltaMAD, alpha))
+end
+
 function Smartbot:OnCombatStart()
+    if not self.settings.enabled then return end
     playerGUID = UnitGUID and UnitGUID("player") or nil
     local now = GetTime and GetTime() or 0
     currentSegment = Segment:New(now)
@@ -96,6 +123,7 @@ function Smartbot:OnCombatStart()
 end
 
 function Smartbot:OnCombatEnd()
+    if not self.settings.enabled then return end
     if currentSegment then
         currentSegment:Finish(GetTime and GetTime() or 0)
         self.lastTargets = 0.8 * (self.lastTargets or 1) + 0.2 * currentSegment.avgTargets
@@ -113,7 +141,7 @@ function Smartbot:OnCombatEnd()
                     dx[i] = v
                     if v ~= 0 then changed = true end
                 end
-                if changed then
+                if changed and self.settings.delta then
                     local dy = target - prevTarget
                     model:UpdateDelta(dx, dy)
                 end
@@ -134,11 +162,13 @@ function Smartbot:OnCombatEnd()
         if #hist > 50 then table.remove(hist, 1) end
         currentSegment = nil
     end
+    self:RefreshOptionsStats()
     self:EvaluateUpgrades()
     self:ProcessEquipQueue()
 end
 
 function Smartbot:OnCombatLog()
+    if not self.settings.enabled then return end
     if not currentSegment then return end
     local info = {CombatLogGetCurrentEventInfo()}
     local timestamp = info[1]
@@ -261,6 +291,7 @@ function Smartbot:ItemDelta(link)
 end
 
 function Smartbot:EvaluateUpgrades()
+    if not self.settings.enabled then return end
     if not self.settings.autoEquip then return end
     if InCombatLockdown and InCombatLockdown() then return end
     if GetTime and self.nextScan and GetTime() < self.nextScan then return end
@@ -324,6 +355,7 @@ function Smartbot:CanEquipNow()
 end
 
 function Smartbot:ProcessEquipQueue()
+    if not self.settings.enabled then return end
     if not self.settings.autoEquip then return end
     if not self.equipQueue or #self.equipQueue == 0 then return end
     if not self:CanEquipNow() then
@@ -342,12 +374,59 @@ function Smartbot:ProcessEquipQueue()
     end
 end
 
+function Smartbot:CreateOptionsPanel()
+    if optionsPanel then return end
+    optionsPanel = CreateFrame("Frame")
+    optionsPanel.name = "Smartbot"
+    local title = optionsPanel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Smartbot")
+
+    local y = -40
+    local function Check(label, key)
+        local cb = CreateFrame("CheckButton", nil, optionsPanel, "InterfaceOptionsCheckButtonTemplate")
+        cb:SetPoint("TOPLEFT", 16, y)
+        cb.Text:SetText(label)
+        cb:SetChecked(Smartbot.settings[key])
+        cb:SetScript("OnClick", function(self) Smartbot.settings[key] = self:GetChecked() end)
+        y = y - 30
+        return cb
+    end
+    Check("Enable", "enabled")
+    Check("Auto-equip", "autoEquip")
+    Check("Tooltip", "tooltip")
+    Check("Delta learner", "delta")
+    Check("Verbose", "verbose")
+
+    local stats = optionsPanel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    stats:SetPoint("TOPLEFT", 16, y - 10)
+    stats:SetText("")
+    optionsPanel.stats = stats
+    optionsPanel:SetScript("OnShow", function() Smartbot:RefreshOptionsStats() end)
+
+    if InterfaceOptions_AddCategory then
+        InterfaceOptions_AddCategory(optionsPanel)
+    end
+
+    SLASH_SMARTBOT1 = "/smartbot"
+    SlashCmdList.SMARTBOT = function()
+        Smartbot:CreateOptionsPanel()
+        if Settings and Settings.OpenToCategory then
+            Settings.OpenToCategory(optionsPanel)
+        elseif InterfaceOptionsFrame_OpenToCategory then
+            InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+            InterfaceOptionsFrame_OpenToCategory(optionsPanel)
+        end
+    end
+end
+
 -- event frame
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_REGEN_DISABLED")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
 frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+frame:RegisterEvent("ADDON_LOADED")
 frame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_REGEN_DISABLED" then
         Smartbot:OnCombatStart()
@@ -359,6 +438,11 @@ frame:SetScript("OnEvent", function(_, event, ...)
         Smartbot.pendingScan = false
         Smartbot:EvaluateUpgrades()
         Smartbot:ProcessEquipQueue()
+    elseif event == "ADDON_LOADED" then
+        local addon = ...
+        if addon == Smartbot.name then
+            Smartbot:CreateOptionsPanel()
+        end
     end
 end)
 
@@ -378,6 +462,7 @@ end
 
 -- tooltip overlay
 local function TooltipHook(tooltip)
+    if not Smartbot.settings.enabled or not Smartbot.settings.tooltip then return end
     local _, link = tooltip:GetItem()
     if not link then return end
     local model = GetCurrentModel and GetCurrentModel()

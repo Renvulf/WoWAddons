@@ -24,13 +24,14 @@
     "delta_pairwise_model",
     "blended_weights_and_persistence",
     "tooltip_overlay",
-    "retail_safe_equip_queue"
+    "retail_safe_equip_queue",
+    "ui_minimum"
   ],
   "files_checksum": {
     "Smartbot/Segment.lua": "7a98d21723a3ff31be5c7c40f049767d85cc28ded5ff103c563bc2b56f9cd37b",
     "Smartbot/Features.lua": "8bdc5a332a263404c931b9e143187a00dc3a7c2ddd0af0098981ca0e16c6c74f",
     "Smartbot/Model.lua": "f4f528b456bf7b338921c136413ae44a98e63fda2a4c131bd56b9bd783a5d7a2",
-    "Smartbot/Smartbot.lua": "68d82b7e403a06cfa451f43a41f19e79eaf65613028bca4aac3c298d6727a3fd",
+    "Smartbot/Smartbot.lua": "38fc8843753d2bb5181503d754ebb4ff6ebb9b2ead42f2e9a2d915383bce97d3",
     "Smartbot/Smartbot.toc": "9a361980239a62eea5b5ec67ae9faa52d2b0b3b1171458be7a94dd7e05abc15e",
     "tests/segment_spec.lua": "83c225ba83d1cc750c59fb867b781fb471f4195421977111483cef69b74193ec"
   }
