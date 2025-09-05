@@ -325,17 +325,17 @@ function Smartbot:EvaluateUpgrades()
                         local slotList = INVTYPE_TO_SLOTS[equipLoc]
                         if slotList then
                             for _, invSlot in ipairs(slotList) do
+                                local skip = false
                                 if equipLoc == "INVTYPE_FINGER" or equipLoc == "INVTYPE_TRINKET" then
                                     local other = (invSlot == 11 and 12) or (invSlot == 12 and 11) or (invSlot == 13 and 14) or (invSlot == 14 and 13)
                                     local otherLink = GetInventoryItemLink and GetInventoryItemLink("player", other)
                                     if otherLink and GetItemInfoInstant(otherLink) == GetItemInfoInstant(link) then
-                                        goto continue_slot
+                                        skip = true
                                     end
                                 end
-                                if not best[invSlot] or delta > best[invSlot].delta then
+                                if not skip and (not best[invSlot] or delta > best[invSlot].delta) then
                                     best[invSlot] = { bag = bag, slot = slot, invSlot = invSlot, link = link, delta = delta }
                                 end
-                                ::continue_slot::
                             end
                         end
                     else
