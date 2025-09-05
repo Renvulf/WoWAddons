@@ -1,4 +1,4 @@
-local Segment = dofile("Smartbot/Segment.lua")
+local Segment = dofile("Interface/AddOns/Smartbot/Segment.lua")
 
 local seg = Segment:New(0)
 seg:AddEvent(0, "A", 100, false)

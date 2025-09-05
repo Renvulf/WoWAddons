@@ -1,8 +1,8 @@
 -- test_scoring.lua - validates score monotonicity
 
 dofile("DevHarness/wow_stubs.lua")
-local Features = dofile("Smartbot/Features.lua")
-local Model = dofile("Smartbot/Model.lua")
+local Features = dofile("Interface/AddOns/Smartbot/Features.lua")
+local Model = dofile("Interface/AddOns/Smartbot/Model.lua")
 
 -- create two items and place one in inventory
 StubItem("base", {ITEM_MOD_INTELLECT_SHORT = 10}, 100, "INVTYPE_HEAD")
