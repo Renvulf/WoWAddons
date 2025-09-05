@@ -17,12 +17,17 @@ local MIN_SAMPLES = 20
 SmartbotDB = SmartbotDB or {}
 SmartbotDB.models = SmartbotDB.models or {}
 SmartbotDB.history = SmartbotDB.history or {}
+SmartbotDB.settings = SmartbotDB.settings or { autoEquip = true, tooltip = true }
+Smartbot.settings = SmartbotDB.settings
 
 local currentSegment
 local playerGUID
 Smartbot.lastTargets = Smartbot.lastTargets or 1
 Smartbot.prevSegment = Smartbot.prevSegment or nil
 Smartbot.currentKey = Smartbot.currentKey or nil
+Smartbot.equipQueue = Smartbot.equipQueue or {}
+Smartbot.pendingScan = Smartbot.pendingScan or false
+Smartbot.nextScan = Smartbot.nextScan or 0
 
 local LUST_NAMES = {
     ["Time Warp"] = true,
@@ -129,6 +134,8 @@ function Smartbot:OnCombatEnd()
         if #hist > 50 then table.remove(hist, 1) end
         currentSegment = nil
     end
+    self:EvaluateUpgrades()
+    self:ProcessEquipQueue()
 end
 
 function Smartbot:OnCombatLog()
@@ -195,9 +202,27 @@ local INVTYPE_TO_SLOTS = {
     INVTYPE_RANGEDRIGHT = {16},
 }
 
+local function HeuristicScore(vec, role)
+    local prim = (vec[1] or 0) + (vec[2] or 0) + (vec[3] or 0)
+    local ilvl = vec[15] or 0
+    local stam = vec[4] or 0
+    local score = prim + 0.1 * ilvl
+    if role == "TANK" then
+        score = score + 0.05 * stam
+    end
+    return score
+end
+
 function Smartbot:PredictScore(vec)
     local model = GetCurrentModel and GetCurrentModel()
-    if not model then return 0 end
+    local role = self:GetPlayerRole()
+    if not model then
+        return HeuristicScore(vec, role)
+    end
+    local samples = model.rls and model.rls.n or 0
+    if samples < MIN_SAMPLES then
+        return HeuristicScore(vec, role)
+    end
     local w = model:Weights()
     local s = 0
     for i = 1, #vec do
@@ -207,16 +232,12 @@ function Smartbot:PredictScore(vec)
 end
 
 function Smartbot:ItemDelta(link)
-    local slots = nil
     local equipLoc = select(9, GetItemInfo(link))
-    if equipLoc then
-        slots = INVTYPE_TO_SLOTS[equipLoc]
-    end
+    local slots = equipLoc and INVTYPE_TO_SLOTS[equipLoc] or nil
     if not slots then return end
     local itemVec = Features.BuildItemVector(link)
     local itemScore = self:PredictScore(itemVec)
     local bestDelta
-    local baseScore
     for _, slot in ipairs(slots) do
         local eqLink = GetInventoryItemLink and GetInventoryItemLink("player", slot) or nil
         local eqScore = 0
@@ -224,13 +245,101 @@ function Smartbot:ItemDelta(link)
             local eqVec = Features.BuildItemVector(eqLink)
             eqScore = self:PredictScore(eqVec)
         end
+        if equipLoc == "INVTYPE_2HWEAPON" and slot == 16 then
+            local off = GetInventoryItemLink and GetInventoryItemLink("player", 17) or nil
+            if off then
+                local offVec = Features.BuildItemVector(off)
+                eqScore = eqScore + self:PredictScore(offVec)
+            end
+        end
         local delta = itemScore - eqScore
         if not bestDelta or delta > bestDelta then
             bestDelta = delta
-            baseScore = eqScore
         end
     end
-    return bestDelta, baseScore
+    return bestDelta
+end
+
+function Smartbot:EvaluateUpgrades()
+    if not self.settings.autoEquip then return end
+    if InCombatLockdown and InCombatLockdown() then return end
+    if GetTime and self.nextScan and GetTime() < self.nextScan then return end
+    self.nextScan = GetTime and (GetTime() + 1) or nil
+    local best = {}
+    local needInfo = false
+    for bag = 0, 4 do
+        local slots = C_Container and C_Container.GetContainerNumSlots and C_Container.GetContainerNumSlots(bag) or 0
+        for slot = 1, slots do
+            local link = C_Container and C_Container.GetContainerItemLink and C_Container.GetContainerItemLink(bag, slot) or nil
+            if link then
+                if not GetItemInfo(link) then
+                    needInfo = true
+                else
+                    local delta = self:ItemDelta(link)
+                    if delta and delta > 0 then
+                        local equipLoc = select(9, GetItemInfo(link))
+                        local slotList = INVTYPE_TO_SLOTS[equipLoc]
+                        if slotList then
+                            for _, invSlot in ipairs(slotList) do
+                                if equipLoc == "INVTYPE_FINGER" or equipLoc == "INVTYPE_TRINKET" then
+                                    local other = (invSlot == 11 and 12) or (invSlot == 12 and 11) or (invSlot == 13 and 14) or (invSlot == 14 and 13)
+                                    local otherLink = GetInventoryItemLink and GetInventoryItemLink("player", other)
+                                    if otherLink and GetItemInfoInstant(otherLink) == GetItemInfoInstant(link) then
+                                        goto continue_slot
+                                    end
+                                end
+                                if not best[invSlot] or delta > best[invSlot].delta then
+                                    best[invSlot] = { bag = bag, slot = slot, invSlot = invSlot, link = link, delta = delta }
+                                end
+                                ::continue_slot::
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if needInfo then
+        self.pendingScan = true
+    end
+    self.equipQueue = {}
+    for _, v in pairs(best) do
+        self.equipQueue[#self.equipQueue + 1] = v
+    end
+end
+
+function Smartbot:CanEquipNow()
+    if InCombatLockdown and InCombatLockdown() then return false end
+    if UnitCastingInfo and UnitCastingInfo("player") then return false end
+    if UnitChannelInfo and UnitChannelInfo("player") then return false end
+    if GetCursorInfo and GetCursorInfo() then return false end
+    if GetSpellCooldown then
+        local start, dur = GetSpellCooldown(61304)
+        if start and dur and dur > 0 then
+            local remain = start + dur - (GetTime and GetTime() or 0)
+            if remain > 0 then return false end
+        end
+    end
+    return true
+end
+
+function Smartbot:ProcessEquipQueue()
+    if not self.settings.autoEquip then return end
+    if not self.equipQueue or #self.equipQueue == 0 then return end
+    if not self:CanEquipNow() then
+        if C_Timer and C_Timer.After then
+            C_Timer.After(1, function() Smartbot:ProcessEquipQueue() end)
+        end
+        return
+    end
+    local item = table.remove(self.equipQueue, 1)
+    if item and C_Container and C_Container.PickupContainerItem and EquipCursorItem then
+        C_Container.PickupContainerItem(item.bag, item.slot)
+        EquipCursorItem(item.invSlot)
+    end
+    if #self.equipQueue > 0 and C_Timer and C_Timer.After then
+        C_Timer.After(0.5, function() Smartbot:ProcessEquipQueue() end)
+    end
 end
 
 -- event frame
@@ -238,13 +347,18 @@ local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_REGEN_DISABLED")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-frame:SetScript("OnEvent", function(_, event)
+frame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+frame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_REGEN_DISABLED" then
         Smartbot:OnCombatStart()
     elseif event == "PLAYER_REGEN_ENABLED" then
         Smartbot:OnCombatEnd()
     elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
         Smartbot:OnCombatLog()
+    elseif event == "GET_ITEM_INFO_RECEIVED" and Smartbot.pendingScan then
+        Smartbot.pendingScan = false
+        Smartbot:EvaluateUpgrades()
+        Smartbot:ProcessEquipQueue()
     end
 end)
 
@@ -273,11 +387,14 @@ local function TooltipHook(tooltip)
         tooltip:AddLine(string.format("Smartbot: training (%d)", samples))
         return
     end
-    local delta, base = Smartbot:ItemDelta(link)
+    local delta = Smartbot:ItemDelta(link)
     if not delta then
         tooltip:AddLine("Smartbot: no data")
         return
     end
+    local eqLink = select(2, tooltip:GetItem())
+    local baseVec = Features.BuildItemVector(eqLink)
+    local base = Smartbot:PredictScore(baseVec)
     local denom = math.abs(base)
     if denom < 1e-9 then denom = 1 end
     local pct = (delta / denom) * 100
