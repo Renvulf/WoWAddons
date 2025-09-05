@@ -351,9 +351,94 @@ function ModelDelta.Import(t)
     return m
 end
 
+-- Blended model wrapper
+local ModelBlend = {}
+ModelBlend.__index = ModelBlend
+
+function ModelBlend:New()
+    local o = {
+        rls = ModelRLS:New(),
+        delta = ModelDelta:New(),
+        alpha = 1,
+        R_rls = 0,
+        R_delta = 0,
+    }
+    return setmetatable(o, ModelBlend)
+end
+
+function ModelBlend:RecalcAlpha()
+    local r1 = self.R_rls or 0
+    local r2 = self.R_delta or 0
+    if r1 + r2 > 0 then
+        self.alpha = r1 / (r1 + r2)
+    else
+        self.alpha = 1
+    end
+end
+
+function ModelBlend:Predict(x)
+    local wr = self.rls.w or {}
+    local wd = self.delta.w or {}
+    local a = self.alpha or 1
+    local s = 0
+    for i = 1, #x do
+        local w = a * (wr[i] or 0) + (1 - a) * (wd[i] or 0)
+        s = s + w * x[i]
+    end
+    return s
+end
+
+function ModelBlend:Weights()
+    local wr = self.rls.w or {}
+    local wd = self.delta.w or {}
+    local a = self.alpha or 1
+    local n = math.max(#wr, #wd)
+    local w = {}
+    for i = 1, n do
+        w[i] = a * (wr[i] or 0) + (1 - a) * (wd[i] or 0)
+    end
+    return w
+end
+
+function ModelBlend:Update(x, y, weight)
+    self.rls:Update(x, y, weight)
+    self.R_rls = self.rls.n / (1 + self.rls.outlier.mad)
+    self:RecalcAlpha()
+end
+
+function ModelBlend:UpdateDelta(dx, dy)
+    if self.delta:Update(dx, dy) then
+        self.R_delta = self.delta.n / (1 + self.delta.outlier.mad)
+        self:RecalcAlpha()
+    end
+end
+
+function ModelBlend:Export()
+    return {
+        rls = self.rls:Export(),
+        delta = self.delta:Export(),
+        alpha = self.alpha,
+        R_rls = self.R_rls,
+        R_delta = self.R_delta,
+    }
+end
+
+function ModelBlend.Import(t)
+    local m = ModelBlend:New()
+    if type(t) == "table" then
+        if t.rls then m.rls = ModelRLS.Import(t.rls) end
+        if t.delta then m.delta = ModelDelta.Import(t.delta) end
+        m.alpha = t.alpha or 1
+        m.R_rls = t.R_rls or 0
+        m.R_delta = t.R_delta or 0
+        m:RecalcAlpha()
+    end
+    return m
+end
+
 -- Expose models
 SmartbotModelRLS = ModelRLS
 SmartbotModelDelta = ModelDelta
-SmartbotModel = ModelRLS
+SmartbotModel = ModelBlend
 
-return ModelRLS
+return ModelBlend

@@ -12,10 +12,14 @@ local GetCurrentModel
 
 -- SavedVariables
 SmartbotDB = SmartbotDB or {}
+SmartbotDB.models = SmartbotDB.models or {}
+SmartbotDB.history = SmartbotDB.history or {}
 
 local currentSegment
 local playerGUID
 Smartbot.lastTargets = Smartbot.lastTargets or 1
+Smartbot.prevSegment = Smartbot.prevSegment or nil
+Smartbot.currentKey = Smartbot.currentKey or nil
 
 local LUST_NAMES = {
     ["Time Warp"] = true,
@@ -64,6 +68,17 @@ function Smartbot:GetPlayerRole()
     return "DAMAGER"
 end
 
+function Smartbot:MakeModelKey(context)
+    local guid = UnitGUID and UnitGUID("player") or "player"
+    local specIndex = GetSpecialization and GetSpecialization() or nil
+    local specID = 0
+    if specIndex and GetSpecializationInfo then
+        specID = select(1, GetSpecializationInfo(specIndex)) or 0
+    end
+    local role = self:GetPlayerRole()
+    return table.concat({guid, specID, role, context}, ":")
+end
+
 function Smartbot:OnCombatStart()
     playerGUID = UnitGUID and UnitGUID("player") or nil
     local now = GetTime and GetTime() or 0
@@ -76,12 +91,39 @@ function Smartbot:OnCombatEnd()
     if currentSegment then
         currentSegment:Finish(GetTime and GetTime() or 0)
         self.lastTargets = 0.8 * (self.lastTargets or 1) + 0.2 * currentSegment.avgTargets
-        local model = GetCurrentModel and GetCurrentModel()
+        local model = GetCurrentModel and GetCurrentModel(currentSegment.context)
         if model and currentSegment.features then
             local role = self:GetPlayerRole()
             local target = role == "HEALER" and currentSegment.hps or currentSegment.dps
             model:Update(currentSegment.features, target, currentSegment.weight)
+            if self.prevSegment and self.prevSegment.context == currentSegment.context then
+                local prevTarget = role == "HEALER" and self.prevSegment.hps or self.prevSegment.dps
+                local dx = {}
+                local changed = false
+                for i = 1, #currentSegment.features do
+                    local v = (currentSegment.features[i] or 0) - (self.prevSegment.features[i] or 0)
+                    dx[i] = v
+                    if v ~= 0 then changed = true end
+                end
+                if changed then
+                    local dy = target - prevTarget
+                    model:UpdateDelta(dx, dy)
+                end
+            end
+            if self.currentKey then
+                SmartbotDB.models[self.currentKey] = model:Export()
+            end
         end
+        local summary = {
+            context = currentSegment.context,
+            features = currentSegment.features,
+            dps = currentSegment.dps,
+            hps = currentSegment.hps,
+        }
+        self.prevSegment = summary
+        local hist = SmartbotDB.history
+        hist[#hist + 1] = summary
+        if #hist > 50 then table.remove(hist, 1) end
         currentSegment = nil
     end
 end
@@ -139,9 +181,16 @@ frame:SetScript("OnEvent", function(_, event)
     end
 end)
 
-function GetCurrentModel()
-    if not Smartbot.model then
+function GetCurrentModel(context)
+    context = context or Smartbot:BuildContextBucket()
+    local key = Smartbot:MakeModelKey(context)
+    Smartbot.currentKey = key
+    local data = SmartbotDB.models[key]
+    if data then
+        Smartbot.model = Model.Import(data)
+    else
         Smartbot.model = Model:New()
+        SmartbotDB.models[key] = Smartbot.model:Export()
     end
     return Smartbot.model
 end
