@@ -291,10 +291,22 @@ function Smartbot:ItemDelta(link)
 end
 
 function Smartbot:EvaluateUpgrades()
-    if not self.settings.enabled then return end
-    if not self.settings.autoEquip then return end
-    if InCombatLockdown and InCombatLockdown() then return end
-    if GetTime and self.nextScan and GetTime() < self.nextScan then return end
+    if not self.settings.enabled then
+        self:Debug("Evaluate skipped: disabled")
+        return
+    end
+    if not self.settings.autoEquip then
+        self:Debug("Evaluate skipped: autoEquip off")
+        return
+    end
+    if InCombatLockdown and InCombatLockdown() then
+        self:Debug("Evaluate skipped: in combat")
+        return
+    end
+    if GetTime and self.nextScan and GetTime() < self.nextScan then
+        self:Debug("Evaluate throttled")
+        return
+    end
     self.nextScan = GetTime and (GetTime() + 1) or nil
     local best = {}
     local needInfo = false
@@ -305,6 +317,7 @@ function Smartbot:EvaluateUpgrades()
             if link then
                 if not GetItemInfo(link) then
                     needInfo = true
+                    self:Debug("Awaiting item info", link)
                 else
                     local delta = self:ItemDelta(link)
                     if delta and delta > 0 then
@@ -325,6 +338,8 @@ function Smartbot:EvaluateUpgrades()
                                 ::continue_slot::
                             end
                         end
+                    else
+                        self:Debug("No upgrade", link, delta)
                     end
                 end
             end
@@ -340,15 +355,30 @@ function Smartbot:EvaluateUpgrades()
 end
 
 function Smartbot:CanEquipNow()
-    if InCombatLockdown and InCombatLockdown() then return false end
-    if UnitCastingInfo and UnitCastingInfo("player") then return false end
-    if UnitChannelInfo and UnitChannelInfo("player") then return false end
-    if GetCursorInfo and GetCursorInfo() then return false end
+    if InCombatLockdown and InCombatLockdown() then
+        self:Debug("Cannot equip: in combat")
+        return false
+    end
+    if UnitCastingInfo and UnitCastingInfo("player") then
+        self:Debug("Cannot equip: casting")
+        return false
+    end
+    if UnitChannelInfo and UnitChannelInfo("player") then
+        self:Debug("Cannot equip: channeling")
+        return false
+    end
+    if GetCursorInfo and GetCursorInfo() then
+        self:Debug("Cannot equip: cursor busy")
+        return false
+    end
     if GetSpellCooldown then
         local start, dur = GetSpellCooldown(61304)
         if start and dur and dur > 0 then
             local remain = start + dur - (GetTime and GetTime() or 0)
-            if remain > 0 then return false end
+            if remain > 0 then
+                self:Debug("Cannot equip: GCD")
+                return false
+            end
         end
     end
     return true
