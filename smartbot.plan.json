@@ -49,21 +49,21 @@
     {
       "id": 10,
       "name": "Polish: docs, schema migrator, logging, final cleanup",
-      "status": "pending"
+      "status": "complete"
     }
   ],
   "file_checksums": {
     "Smartbot/Smartbot.toc": "9fcc6f19b9f7350a92c0ec66e39763e7e355342b32992ea2eca0b9fadeed32ea",
-    "Smartbot/Core.lua": "d3e00bea5fdb69eeaa5a89edbd209396317dfb2c97fb69fe4c57a11440bf9c35",
+    "Smartbot/Core.lua": "29c1ef94aba70dfb0733d5a789969e0529595d720a2b51774b31982fc9fcd653",
     "Smartbot/Logger.lua": "fab85d15b7129059aeaf30a0017ef636ebe814016c9587f61564f5d24ed74c14",
-    "README.md": "ddad343a07f0ea93b1da2207c899e3e5d40a2706bd4a0124c1add2e5f258d891",
+    "README.md": "ba5602551e24079bce46dfa305c2aac9c6ec0efd76762b8674e62f9bf3b221b8",
     "LICENSE": "731683113662b881f8b6ad6fa743c5d8bd9eb488ec2011104e384665cd1d6443",
     "THIRD_PARTY_NOTICES.md": "cab8b2aa1202c7604dcea720b3fabf10c8356d57c0c694ade8675302c5d7235d",
     "Smartbot/API.lua": "13642e0bca3c3e6e1c857deae14e26e33f55f9eec1c2d02fcdea325c1d2d8553",
     "Smartbot/APIMap.lua": "b28b96638707be52d0115bc5166b95a1a15c63febcee48bb9d92bc9637760ce4",
     "Smartbot/.cache/retail_api_map.json": "ba32b2adf30b3f7245ac9be836ca983a1192972208a194ce4a275bde680fc6c2",
     "Smartbot/tools/build_rgar.py": "4b0f48638e5ccf858c606298ef743995acadf1c6419732861735ae2c0971647c",
-    "Smartbot/HEALTH.md": "5633cd53a3b6dbf53c7dfd274f820c65f3b4141d60ac84c02d00d144915fe319",
+    "Smartbot/HEALTH.md": "104ab4b52e405b544b681563c00319fe90f092d1e360d2288ed1a981e9ff41a4",
     "Smartbot/ClassSpecRules.lua": "4e0f7a81b8169776d3111f151fee3568c5bba7eb7d49c43faa896fd6ec8974aa",
     "Smartbot/ItemScore.lua": "6553a3548a8232f1f598b664bd17b74b792d9af0dd2ad109cf202ac9f3600072",
     "Smartbot/tools/extract_rules.py": "04dea0aee02c0958ce9489d0c2aab3ad1f9e694d0cadee8f08e24e550e485776",
@@ -72,7 +72,7 @@
     "Smartbot/Options.lua": "beeb771db650c5cdd361d69a98f948561dc37358807368a56d2ddbd4a55dcf9a",
     "Smartbot/DetailsBridge.lua": "11b750acb6a7728f2a2a438a919a03ad6111ae6fa8e141921bd8271ef79e08d2",
     "Smartbot/Model.lua": "02be963ce1d153a7eb4c450ccbcfaa61eae8f911149af7b33be000288f1e0ce6",
-    "Smartbot/HEALTHCHECK.lua": "ef80579ba18b4d641927098a750f6fe07aa8527c14b0030ab68225dd82a6b981"
+    "Smartbot/HEALTHCHECK.lua": "d4b5d7cf99f7b96f0f0e8bfed9f6723da1dfc36c1e22baf865564dc96263e1d7"
   },
-  "next_run_focus": "Polish: docs, schema migrator, logging, final cleanup"
+  "next_run_focus": "All tasks complete"
 }

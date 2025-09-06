@@ -1,6 +1,8 @@
 local addonName, Smartbot = ...
 _G.Smartbot = Smartbot
 
+Smartbot.SCHEMA_VERSION = 1
+
 local API = Smartbot.API
 local CreateFrame = API:Resolve('CreateFrame') or CreateFrame
 local InCombatLockdown = API:Resolve('InCombatLockdown') or InCombatLockdown
@@ -13,6 +15,7 @@ local equipQueue = {}
 
 Smartbot.db = SmartbotDB or {}
 local defaults = {
+    version = Smartbot.SCHEMA_VERSION,
     profile = {
         autoEquip = false,
         minDelta = 10,
@@ -31,6 +34,14 @@ local function copyDefaults(dst, src)
             dst[k] = v
         end
     end
+end
+
+local function migrate(db, old)
+    old = old or 0
+    if old < 1 then
+        -- initial version
+    end
+    db.version = Smartbot.SCHEMA_VERSION
 end
 
 local function processQueue()
@@ -67,6 +78,10 @@ local function onAddonLoaded(name)
     if name ~= addonName then return end
     SmartbotDB = SmartbotDB or {}
     Smartbot.db = SmartbotDB
+    local prev = Smartbot.db.version or 0
+    if prev < Smartbot.SCHEMA_VERSION then
+        migrate(Smartbot.db, prev)
+    end
     copyDefaults(Smartbot.db, defaults)
 end
 
