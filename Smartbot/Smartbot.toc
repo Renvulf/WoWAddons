@@ -4,15 +4,14 @@
 ## Version: 0.1.0
 ## SavedVariables: SmartbotDB
 
-APIMap.lua
-API.lua
 Core.lua
 Logger.lua
+API.lua
 ClassSpecRules.lua
 ItemScore.lua
 Equip.lua
-DetailsBridge.lua
 Model.lua
+DetailsBridge.lua
 Tooltip.lua
 Options.lua
 HEALTHCHECK.lua

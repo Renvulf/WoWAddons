@@ -23,26 +23,21 @@ local requiredAPIs = {
 function Health:CheckAPIs()
     for _, sym in ipairs(requiredAPIs) do
         local obj = API:Resolve(sym)
-        if not obj then
-            if Smartbot.Logger then
-                Smartbot.Logger:Log('ERROR', 'Missing API', sym)
-            end
-        else
-            local map = Smartbot.APIMap and Smartbot.APIMap[sym]
-            if map and Smartbot.rgar and Smartbot.rgar.choices then
-                local choice = Smartbot.rgar.choices[sym]
-                if choice and map[1] and choice ~= map[1].name then
-                    if Smartbot.Logger then
-                        Smartbot.Logger:Log('INFO', 'Fallback API', sym, choice)
-                    end
-                end
-            end
+        if not obj and Smartbot.Logger then
+            Smartbot.Logger:Log('ERROR', 'Missing API', sym)
         end
     end
 end
 
 function Health:CheckInterface()
-    local game = tonumber(select(4, GetBuildInfo())) or 0
+    local build = select(4, GetBuildInfo())
+    local game = tonumber(build)
+    if not game then
+        game = 0
+        if Smartbot.Logger then
+            Smartbot.Logger:Log('WARN', 'Invalid build info', tostring(build))
+        end
+    end
     if Smartbot.interface and game ~= Smartbot.interface then
         if Smartbot.Logger then
             Smartbot.Logger:Log('WARN', 'Interface mismatch', game, Smartbot.interface)
@@ -64,11 +59,35 @@ function Health:CheckDBVersion()
     end
 end
 
+function Health:CheckAPIIntegrity()
+    assert(type(Smartbot.API.GetItemStatsSafe) == 'function', 'Missing Smartbot.API.GetItemStatsSafe')
+    if debug and debug.getupvalue then
+        for name, mod in pairs(Smartbot) do
+            if type(mod) == 'table' then
+                for fname, fn in pairs(mod) do
+                    if type(fn) == 'function' then
+                        local i = 1
+                        while true do
+                            local up, _ = debug.getupvalue(fn, i)
+                            if not up then break end
+                            if up == 'GetItemStats' then
+                                error('Forbidden upvalue GetItemStats in '..name..'.'..fname)
+                            end
+                            i = i + 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 function Health:Verify()
     self:CheckLoadOrder()
     self:CheckAPIs()
     self:CheckInterface()
     self:CheckDBVersion()
+    self:CheckAPIIntegrity()
 end
 
 if hooksecurefunc then

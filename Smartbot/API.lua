@@ -1,36 +1,46 @@
 local addonName, Smartbot = ...
 Smartbot = Smartbot or {}
 Smartbot.API = Smartbot.API or {}
-Smartbot.rgar = Smartbot.rgar or { choices = {} }
 
 local API = Smartbot.API
-local map = Smartbot.APIMap or {}
 
 local function resolvePath(name)
     local node = _G
     for part in string.gmatch(name, "[^%.]+") do
         node = node and node[part]
-        if not node then return nil end
     end
     return node
 end
 
-function API:Resolve(symbol)
-    local candidates = map[symbol]
-    if candidates then
-        table.sort(candidates, function(a, b) return (a.confidence or 0) > (b.confidence or 0) end)
-        for _, entry in ipairs(candidates) do
-            local obj = resolvePath(entry.name)
-            if obj ~= nil then
-                Smartbot.rgar.choices[symbol] = entry.name
-                return obj
-            end
+function API.Resolve(_, symbol)
+    return resolvePath(symbol)
+end
+
+local function API_GetItemStats(itemLink)
+    local func = _G.GetItemStats
+    if type(func) ~= "function" and C_Item then
+        func = C_Item.GetItemStats
+    end
+    if type(func) == "function" then
+        local ok, stats = pcall(func, itemLink)
+        if ok and type(stats) == "table" then
+            return stats
         end
     end
-    local fallback = resolvePath(symbol)
-    if fallback ~= nil then
-        Smartbot.rgar.choices[symbol] = symbol
-        return fallback
-    end
-    return nil
+    return {}
 end
+
+function API.GetItemStatsSafe(itemLink)
+    if type(itemLink) ~= "string" then return {} end
+    return API_GetItemStats(itemLink)
+end
+
+function API.IsOutOfCombat()
+    return not InCombatLockdown()
+end
+
+function API.IsSafeToEquip()
+    return API.IsOutOfCombat()
+end
+
+return API

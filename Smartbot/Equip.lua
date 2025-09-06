@@ -18,6 +18,10 @@ local GetContainerItemLink = (C_Container and C_Container.GetContainerItemLink) 
 
 local ItemScore = Smartbot.ItemScore
 
+local function isValidLink(link)
+    return type(link) == 'string' and string.find(link, '|Hitem:')
+end
+
 local slots = {
     HEAD = {GetInventorySlotInfo('HeadSlot')},
     NECK = {GetInventorySlotInfo('NeckSlot')},
@@ -65,7 +69,7 @@ local lastEquipTime = {}
 
 local function getEquippedScore(slot)
     local link = GetInventoryItemLink('player', slot)
-    if link and ItemScore:IsAllowed(link) then
+    if isValidLink(link) and ItemScore:IsAllowed(link) then
         return ItemScore:GetScore(link), link
     end
     return 0, link
@@ -162,7 +166,7 @@ function Equip:Scan()
         local slotsCount = GetContainerNumSlots(bag) or 0
         for slot = 1, slotsCount do
             local link = GetContainerItemLink(bag, slot)
-            if link and ItemScore:IsAllowed(link) then
+            if isValidLink(link) and ItemScore:IsAllowed(link) then
                 local _, _, _, equipLoc = GetItemInfoInstant(link)
                 local group = invTypeToSlots[equipLoc]
                 if group then
@@ -179,7 +183,8 @@ function Equip:Scan()
             end
         end
     end
-    if GetInventoryItemLink('player', slots.OFFHAND[1]) == nil and GetInventoryItemLink('player', slots.MAINHAND[1]) and select(4, GetItemInfoInstant(GetInventoryItemLink('player', slots.MAINHAND[1]))) == 'INVTYPE_2HWEAPON' then
+    local mhLink = GetInventoryItemLink('player', slots.MAINHAND[1])
+    if GetInventoryItemLink('player', slots.OFFHAND[1]) == nil and isValidLink(mhLink) and select(4, GetItemInfoInstant(mhLink)) == 'INVTYPE_2HWEAPON' then
         if #oneHand >= 2 then
             evaluateOneHandCandidates(oneHand)
         end
