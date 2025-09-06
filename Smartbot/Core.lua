@@ -1,6 +1,13 @@
 local addonName, Smartbot = ...
 _G.Smartbot = Smartbot
 
+local API = Smartbot.API
+local CreateFrame = API:Resolve('CreateFrame') or CreateFrame
+local InCombatLockdown = API:Resolve('InCombatLockdown') or InCombatLockdown
+local UnitAffectingCombat = API:Resolve('UnitAffectingCombat') or UnitAffectingCombat
+local EquipItemByName = API:Resolve('EquipItemByName') or EquipItemByName
+local C_Timer_After = API:Resolve('C_Timer.After') or (C_Timer and C_Timer.After)
+
 local eventFrame = CreateFrame("Frame")
 local equipQueue = {}
 
@@ -39,7 +46,7 @@ local function processQueue()
         end
     end
     if #equipQueue > 0 then
-        C_Timer.After(0.5, processQueue)
+        C_Timer_After(0.5, processQueue)
     end
 end
 
