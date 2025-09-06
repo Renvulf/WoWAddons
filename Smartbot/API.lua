@@ -1,7 +1,6 @@
 local addonName, Smartbot = ...
 Smartbot = Smartbot or {}
 Smartbot.API = Smartbot.API or {}
-
 local API = Smartbot.API
 
 local function resolvePath(name)
@@ -16,46 +15,27 @@ function API.Resolve(_, symbol)
     return resolvePath(symbol)
 end
 
-local resolvedGetItemStats
-local warnedMissingGetItemStats
+local warned
 
-local function resolveGetItemStats()
-    if resolvedGetItemStats ~= nil then return resolvedGetItemStats end
-
-    local func = _G and _G.GetItemStats
-    if type(func) ~= "function" and C_Item and type(C_Item.GetItemStats) == "function" then
-        func = function(itemLink)
-            return C_Item.GetItemStats(itemLink)
+function API.GetItemStatsSafe(itemLink)
+    if type(itemLink) ~= "string" then return {} end
+    local API_GetItemStats = _G and _G.GetItemStats
+    if type(API_GetItemStats) ~= "function" and C_Item and type(C_Item.GetItemStats) == "function" then
+        API_GetItemStats = function(link)
+            return C_Item.GetItemStats(link)
         end
     end
-
-    if type(func) == "function" then
-        resolvedGetItemStats = func
-    else
-        resolvedGetItemStats = false
-        if not warnedMissingGetItemStats and Smartbot.Logger then
-            Smartbot.Logger:Log('WARN', 'GetItemStats unavailable')
-            warnedMissingGetItemStats = true
-        end
-    end
-
-    return resolvedGetItemStats
-end
-
-local function API_GetItemStats(itemLink)
-    local func = resolveGetItemStats()
-    if func then
-        local ok, stats = pcall(func, itemLink)
-        if ok and type(stats) == 'table' then
+    if type(API_GetItemStats) == "function" then
+        local ok, stats = pcall(API_GetItemStats, itemLink)
+        if ok and type(stats) == "table" then
             return stats
         end
     end
+    if not warned and Smartbot.Logger then
+        Smartbot.Logger:Log('WARN', 'GetItemStats unavailable')
+        warned = true
+    end
     return {}
-end
-
-function API.GetItemStatsSafe(itemLink)
-    if type(itemLink) ~= 'string' then return {} end
-    return API_GetItemStats(itemLink)
 end
 
 function API.IsOutOfCombat()

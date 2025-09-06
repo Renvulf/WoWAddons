@@ -3,12 +3,15 @@ Smartbot.ItemScore = Smartbot.ItemScore or {}
 local ItemScore = Smartbot.ItemScore
 
 local API = Smartbot.API
-local API_GetItemStats = Smartbot.API.GetItemStatsSafe
 local GetItemInfoInstant = API:Resolve('GetItemInfoInstant') or (C_Item and C_Item.GetItemInfoInstant)
 local UnitClass = API:Resolve('UnitClass') or UnitClass
 local GetSpecialization = API:Resolve('GetSpecialization') or GetSpecialization
 
 local ClassSpecRules = Smartbot.ClassSpecRules or {}
+
+local function GetStats(link)
+    return Smartbot.API.GetItemStatsSafe(link)
+end
 
 -- Weapon and armor type mappings derived from ZygorGuidesViewer/Code-Retail/Item-DataTables.lua (MIT License)
 local weaponTypeMap = {
@@ -65,7 +68,7 @@ function ItemScore:GetScore(itemLink)
         end
         return 0
     end
-    local stats = API_GetItemStats(itemLink) or {}
+    local stats = GetStats(itemLink) or {}
     local class, spec = getPlayerSpec()
     local weights = (Smartbot.db.weights[class] and Smartbot.db.weights[class][spec]) or {}
     local score = 0
