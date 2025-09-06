@@ -1,7 +1,8 @@
 local addonName, Smartbot = ...
 Smartbot = Smartbot or {}
 Smartbot.API = Smartbot.API or {}
-local API = Smartbot.API
+
+local warned
 
 local function resolvePath(name)
     local node = _G
@@ -11,13 +12,11 @@ local function resolvePath(name)
     return node
 end
 
-function API.Resolve(_, symbol)
+function Smartbot.API.Resolve(_, symbol)
     return resolvePath(symbol)
 end
 
-local warned
-
-function API.GetItemStatsSafe(itemLink)
+function Smartbot.API.GetItemStatsSafe(itemLink)
     if type(itemLink) ~= "string" then return {} end
     local API_GetItemStats = _G and _G.GetItemStats
     if type(API_GetItemStats) ~= "function" and C_Item and type(C_Item.GetItemStats) == "function" then
@@ -38,12 +37,13 @@ function API.GetItemStatsSafe(itemLink)
     return {}
 end
 
-function API.IsOutOfCombat()
+function Smartbot.API.IsOutOfCombat()
     return not InCombatLockdown()
 end
 
-function API.IsSafeToEquip()
-    return API.IsOutOfCombat()
+function Smartbot.API.IsSafeToEquip()
+    return not InCombatLockdown() and not UnitAffectingCombat('player')
 end
 
-return API
+return Smartbot.API
+

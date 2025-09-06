@@ -2,12 +2,11 @@ local addonName, Smartbot = ...
 Smartbot.Model = Smartbot.Model or {}
 local Model = Smartbot.Model
 
-local API = Smartbot.API
-local CreateFrame = API:Resolve('CreateFrame') or CreateFrame
-local UnitClass = API:Resolve('UnitClass') or UnitClass
-local GetSpecialization = API:Resolve('GetSpecialization') or GetSpecialization
-local GetInventoryItemLink = API:Resolve('GetInventoryItemLink') or GetInventoryItemLink
-local GetTime = API:Resolve('GetTime') or GetTime
+local CreateFrame = CreateFrame
+local UnitClass = UnitClass
+local GetSpecialization = GetSpecialization
+local GetInventoryItemLink = GetInventoryItemLink
+local GetTime = GetTime
 
 local DetailsBridge = Smartbot.DetailsBridge
 

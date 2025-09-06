@@ -102,15 +102,3 @@ end)
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-
-SLASH_SMARTBOT1 = "/smartbot"
-SlashCmdList.SMARTBOT = function(msg)
-    if Smartbot.Options and Smartbot.Options:HandleSlash(msg) then
-        return
-    end
-    if Smartbot.Logger then
-        Smartbot.Logger:Log('INFO', 'Command:', msg or '')
-    else
-        print('Smartbot:', msg)
-    end
-end

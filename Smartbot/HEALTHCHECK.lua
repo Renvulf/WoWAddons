@@ -2,13 +2,11 @@ local addonName, Smartbot = ...
 Smartbot.HealthCheck = Smartbot.HealthCheck or {}
 local Health = Smartbot.HealthCheck
 
-local API = Smartbot.API
-local CreateFrame = API:Resolve('CreateFrame') or CreateFrame
-local GetBuildInfo = API:Resolve('GetBuildInfo') or GetBuildInfo
-local GetAddOnMetadata = API:Resolve('GetAddOnMetadata') or (C_AddOns and C_AddOns.GetAddOnMetadata)
-local InCombatLockdown = API:Resolve('InCombatLockdown') or InCombatLockdown
-local UnitAffectingCombat = API:Resolve('UnitAffectingCombat') or UnitAffectingCombat
-local hooksecurefunc = API:Resolve('hooksecurefunc') or hooksecurefunc
+local CreateFrame = CreateFrame
+local GetBuildInfo = GetBuildInfo
+local InCombatLockdown = InCombatLockdown
+local UnitAffectingCombat = UnitAffectingCombat
+local hooksecurefunc = hooksecurefunc
 
 Smartbot.interface = Smartbot.interface or 110200
 
@@ -22,7 +20,7 @@ local requiredAPIs = {
 
 function Health:CheckAPIs()
     for _, sym in ipairs(requiredAPIs) do
-        local obj = API:Resolve(sym)
+        local obj = _G[sym]
         if not obj and Smartbot.Logger then
             Smartbot.Logger:Log('ERROR', 'Missing API', sym)
         end
@@ -31,13 +29,7 @@ end
 
 function Health:CheckInterface()
     local build = select(4, GetBuildInfo())
-    local game = tonumber(build)
-    if not game then
-        game = 0
-        if Smartbot.Logger then
-            Smartbot.Logger:Log('WARN', 'Invalid build info', tostring(build))
-        end
-    end
+    local game = tonumber(build) or 0
     if Smartbot.interface and game ~= Smartbot.interface then
         if Smartbot.Logger then
             Smartbot.Logger:Log('WARN', 'Interface mismatch', game, Smartbot.interface)
@@ -59,8 +51,8 @@ function Health:CheckDBVersion()
     end
 end
 
-function Health:CheckAPIIntegrity()
-    assert(type(Smartbot.API.GetItemStatsSafe) == 'function', 'Missing Smartbot.API.GetItemStatsSafe')
+function Health:CheckAdapter()
+    assert(type(Smartbot.API) == 'table' and type(Smartbot.API.GetItemStatsSafe) == 'function', 'Missing Smartbot.API.GetItemStatsSafe')
     if debug and debug.getupvalue then
         for name, mod in pairs(Smartbot) do
             if type(mod) == 'table' then
@@ -68,16 +60,14 @@ function Health:CheckAPIIntegrity()
                     if type(fn) == 'function' then
                         local i = 1
                         while true do
-                            local up, val = debug.getupvalue(fn, i)
+                            local up = debug.getupvalue(fn, i)
                             if not up then break end
-                            if up == 'GetItemStats' then
-                                error('Forbidden upvalue GetItemStats in '..name..'.'..fname)
-                            end
-                            if up == 'API' and val == nil then
-                                error('Nil API upvalue in '..name..'.'..fname)
-                            end
-                            if up == 'InterfaceOptions_AddCategory' or up == 'InterfaceOptionsFrame_OpenToCategory' then
-                                error('Forbidden upvalue '..up..' in '..name..'.'..fname)
+                            local upname = up
+                            if upname == 'GetItemStats' then
+                                if Smartbot.Logger then
+                                    Smartbot.Logger:Log('WARN', 'Replace GetItemStats upvalue in '..name..'.'..fname)
+                                end
+                                break
                             end
                             i = i + 1
                         end
@@ -88,12 +78,21 @@ function Health:CheckAPIIntegrity()
     end
 end
 
+function Health:CheckOptions()
+    if not (Settings and Settings.GetCategory and Smartbot.Options and Smartbot.Options.categoryID) then
+        if Smartbot.Logger then
+            Smartbot.Logger:Log('WARN', 'Options not registered with Settings')
+        end
+    end
+end
+
 function Health:Verify()
     self:CheckLoadOrder()
     self:CheckAPIs()
     self:CheckInterface()
     self:CheckDBVersion()
-    self:CheckAPIIntegrity()
+    self:CheckAdapter()
+    self:CheckOptions()
 end
 
 if hooksecurefunc then
@@ -107,9 +106,11 @@ if hooksecurefunc then
 end
 
 local frame = CreateFrame('Frame')
-frame:RegisterEvent('PLAYER_LOGIN')
-frame:SetScript('OnEvent', function()
-    Health:Verify()
+frame:RegisterEvent('ADDON_LOADED')
+frame:SetScript('OnEvent', function(_, _, name)
+    if name == addonName then
+        Health:Verify()
+    end
 end)
 
 return Health

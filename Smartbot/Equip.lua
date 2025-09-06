@@ -2,19 +2,17 @@ local addonName, Smartbot = ...
 Smartbot.Equip = Smartbot.Equip or {}
 local Equip = Smartbot.Equip
 
-local API = Smartbot.API
+local CreateFrame = CreateFrame
+local InCombatLockdown = InCombatLockdown
+local GetInventoryItemLink = GetInventoryItemLink
+local GetInventorySlotInfo = GetInventorySlotInfo
+local GetItemInfoInstant = _G.GetItemInfoInstant or (C_Item and C_Item.GetItemInfoInstant)
+local GetTime = GetTime
+local UnitAffectingCombat = UnitAffectingCombat
 
-local CreateFrame = API:Resolve('CreateFrame') or CreateFrame
-local InCombatLockdown = API:Resolve('InCombatLockdown') or InCombatLockdown
-local GetInventoryItemLink = API:Resolve('GetInventoryItemLink') or GetInventoryItemLink
-local GetInventorySlotInfo = API:Resolve('GetInventorySlotInfo') or GetInventorySlotInfo
-local GetItemInfoInstant = API:Resolve('GetItemInfoInstant') or (C_Item and C_Item.GetItemInfoInstant)
-local GetTime = API:Resolve('GetTime') or GetTime
-local UnitAffectingCombat = API:Resolve('UnitAffectingCombat') or UnitAffectingCombat
-
-local C_Container = API:Resolve('C_Container') or C_Container
-local GetContainerNumSlots = (C_Container and C_Container.GetContainerNumSlots) or API:Resolve('GetContainerNumSlots')
-local GetContainerItemLink = (C_Container and C_Container.GetContainerItemLink) or API:Resolve('GetContainerItemLink')
+local C_Container = C_Container
+local GetContainerNumSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+local GetContainerItemLink = (C_Container and C_Container.GetContainerItemLink) or GetContainerItemLink
 
 local ItemScore = Smartbot.ItemScore
 
@@ -108,9 +106,9 @@ local function shouldEquip(slot)
 end
 
 local function queueUpgrade(itemLink, slot)
-    if not itemLink or not slot then return end
+    if not isValidLink(itemLink) or not slot then return end
     if not Equip:Validate(itemLink, slot) then return end
-    if InCombatLockdown() or UnitAffectingCombat('player') then return end
+    if not Smartbot.API.IsOutOfCombat() or UnitAffectingCombat('player') then return end
     if not shouldEquip(slot) then return end
     Smartbot:QueueEquip(itemLink, slot)
 end
