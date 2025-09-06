@@ -1,77 +1,35 @@
 {
   "interface": 110200,
   "tasks": [
-    {
-      "id": 1,
-      "name": "Bootstrap project (toc, Core, Logger, README, LICENSE, THIRD_PARTY_NOTICES)",
-      "status": "complete"
-    },
-    {
-      "id": 2,
-      "name": "Build RGAR: scan references \u2192 Smartbot/.cache/retail_api_map.json",
-      "status": "complete"
-    },
-    {
-      "id": 3,
-      "name": "ClassSpecRules + ItemScore scaffolding (from Zygor Retail logic \u2192 normalized)",
-      "status": "complete"
-    },
-    {
-      "id": 4,
-      "name": "Equip pipeline with OOC queue, min-delta damping, and slot coupling",
-      "status": "complete"
-    },
-    {
-      "id": 5,
-      "name": "Tooltip integration via RGAR runtime adapter",
-      "status": "complete"
-    },
-    {
-      "id": 6,
-      "name": "Settings UI and `/smartbot` commands",
-      "status": "complete"
-    },
-    {
-      "id": 7,
-      "name": "DetailsBridge + fallback internal meter",
-      "status": "complete"
-    },
-    {
-      "id": 8,
-      "name": "Online learner (Model.lua) + persistence + quality gates",
-      "status": "complete"
-    },
-    {
-      "id": 9,
-      "name": "Health checks (HEALTHCHECK.lua) + HEALTH.md; auto-fix obvious issues",
-      "status": "complete"
-    },
-    {
-      "id": 10,
-      "name": "Polish: docs, schema migrator, logging, final cleanup",
-      "status": "complete"
-    }
+    {"id": 1, "name": "Bootstrap project (toc, Core, Logger, README, LICENSE, THIRD_PARTY_NOTICES)", "status": "complete"},
+    {"id": 2, "name": "Create API.lua, remove any APIMap.lua, update references", "status": "complete"},
+    {"id": 3, "name": "ClassSpecRules + ItemScore scaffolding (from Zygor Retail → normalized)", "status": "complete"},
+    {"id": 4, "name": "Equip pipeline with OOC queue, min-delta, slot coupling", "status": "complete"},
+    {"id": 5, "name": "Tooltip integration (Retail-safe guarded pattern)", "status": "complete"},
+    {"id": 6, "name": "Settings UI and `/smartbot`", "status": "complete"},
+    {"id": 7, "name": "DetailsBridge + internal meter fallback", "status": "complete"},
+    {"id": 8, "name": "Online learner + persistence + quality gates", "status": "complete"},
+    {"id": 9, "name": "Health checks + HEALTH.md; auto-fix obvious issues", "status": "complete"},
+    {"id": 10, "name": "Polish: docs, schema migrator, logging, final cleanup", "status": "complete"}
   ],
   "file_checksums": {
-    "Smartbot/Smartbot.toc": "9fcc6f19b9f7350a92c0ec66e39763e7e355342b32992ea2eca0b9fadeed32ea",
+    "Smartbot/Smartbot.toc": "55d50cdf752646ef57c49ed11ab99c480a841cc8f56be4052486d87e34228a03",
     "Smartbot/Core.lua": "29c1ef94aba70dfb0733d5a789969e0529595d720a2b51774b31982fc9fcd653",
     "Smartbot/Logger.lua": "fab85d15b7129059aeaf30a0017ef636ebe814016c9587f61564f5d24ed74c14",
     "README.md": "ba5602551e24079bce46dfa305c2aac9c6ec0efd76762b8674e62f9bf3b221b8",
     "LICENSE": "731683113662b881f8b6ad6fa743c5d8bd9eb488ec2011104e384665cd1d6443",
     "THIRD_PARTY_NOTICES.md": "cab8b2aa1202c7604dcea720b3fabf10c8356d57c0c694ade8675302c5d7235d",
-    "Smartbot/API.lua": "13642e0bca3c3e6e1c857deae14e26e33f55f9eec1c2d02fcdea325c1d2d8553",
-    "Smartbot/.cache/retail_api_map.json": "ba32b2adf30b3f7245ac9be836ca983a1192972208a194ce4a275bde680fc6c2",
-    "Smartbot/tools/build_rgar.py": "4b0f48638e5ccf858c606298ef743995acadf1c6419732861735ae2c0971647c",
-    "Smartbot/HEALTH.md": "104ab4b52e405b544b681563c00319fe90f092d1e360d2288ed1a981e9ff41a4",
+    "Smartbot/API.lua": "904850de59a51977b84f0d0c9dfd582b223a4b53f2b110cbda914a16b431a21e",
+    "Smartbot/HEALTH.md": "1225771c2135e7d2d1d3d6d9a606ec2f35f8f9a397360c774ef34d3a40a60718",
     "Smartbot/ClassSpecRules.lua": "4e0f7a81b8169776d3111f151fee3568c5bba7eb7d49c43faa896fd6ec8974aa",
-    "Smartbot/ItemScore.lua": "6553a3548a8232f1f598b664bd17b74b792d9af0dd2ad109cf202ac9f3600072",
+    "Smartbot/ItemScore.lua": "8af0086ac8c475617c4a571a6a8373d6b6d2aee39b12b9b5253216982ac2a205",
     "Smartbot/tools/extract_rules.py": "04dea0aee02c0958ce9489d0c2aab3ad1f9e694d0cadee8f08e24e550e485776",
-    "Smartbot/Equip.lua": "8dd66379e63e28e741a889ca742ba58931d9a0f9721b4df1068c54e5a7365ac9",
+    "Smartbot/Equip.lua": "ac851daf642e74b51e9f45799bfde60bb46dd549d66b911979beca51ead907ec",
     "Smartbot/Tooltip.lua": "33b896ed1b87aa401e15021ac25fab57e9e0e4e09649b8dbc7f02fa6189f6c81",
     "Smartbot/Options.lua": "beeb771db650c5cdd361d69a98f948561dc37358807368a56d2ddbd4a55dcf9a",
     "Smartbot/DetailsBridge.lua": "11b750acb6a7728f2a2a438a919a03ad6111ae6fa8e141921bd8271ef79e08d2",
-    "Smartbot/Model.lua": "02be963ce1d153a7eb4c450ccbcfaa61eae8f911149af7b33be000288f1e0ce6",
-    "Smartbot/HEALTHCHECK.lua": "d4b5d7cf99f7b96f0f0e8bfed9f6723da1dfc36c1e22baf865564dc96263e1d7"
+    "Smartbot/Model.lua": "d53ddd38072658f6f316b6229085e6019efc290daf15e092ad93a7cb644935b4",
+    "Smartbot/HEALTHCHECK.lua": "97fd4fd1e63b58c5f68d7c2b199a7940e73da76766918a970492eb4ee74203d6"
   },
   "next_run_focus": "All tasks complete"
 }
