@@ -1,13 +1,11 @@
 local addonName, Smartbot = ...
 Smartbot.Tooltip = Smartbot.Tooltip or {}
 local Tooltip = Smartbot.Tooltip
-
-local API = Smartbot.API
 local ItemScore = Smartbot.ItemScore
 local Equip = Smartbot.Equip
 
-local AddTooltipPostCall = API:Resolve('TooltipDataProcessor.AddTooltipPostCall')
-local GetItemInfoInstant = API:Resolve('GetItemInfoInstant') or (C_Item and C_Item.GetItemInfoInstant)
+local AddTooltipPostCall = TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall
+local GetItemInfoInstant = _G.GetItemInfoInstant or (C_Item and C_Item.GetItemInfoInstant)
 
 local function formatDelta(delta)
     if delta > 0 then
@@ -61,8 +59,8 @@ end
 if AddTooltipPostCall and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Item then
     AddTooltipPostCall(Enum.TooltipDataType.Item, handleTooltip)
 else
-    local GameTooltip = API:Resolve('GameTooltip') or GameTooltip
-    local HasScript = API:Resolve('HasScript') or (GameTooltip and GameTooltip.HasScript)
+    local GameTooltip = GameTooltip
+    local HasScript = GameTooltip and GameTooltip.HasScript
     if GameTooltip and GameTooltip.HookScript and HasScript and GameTooltip:HasScript('OnTooltipSetItem') then
         GameTooltip:HookScript('OnTooltipSetItem', handleTooltip)
     end

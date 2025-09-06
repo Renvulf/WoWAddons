@@ -2,10 +2,9 @@ local addonName, Smartbot = ...
 Smartbot.ItemScore = Smartbot.ItemScore or {}
 local ItemScore = Smartbot.ItemScore
 
-local API = Smartbot.API
-local GetItemInfoInstant = API:Resolve('GetItemInfoInstant') or (C_Item and C_Item.GetItemInfoInstant)
-local UnitClass = API:Resolve('UnitClass') or UnitClass
-local GetSpecialization = API:Resolve('GetSpecialization') or GetSpecialization
+local GetItemInfoInstant = _G.GetItemInfoInstant or (C_Item and C_Item.GetItemInfoInstant)
+local UnitClass = _G.UnitClass
+local GetSpecialization = _G.GetSpecialization
 
 local ClassSpecRules = Smartbot.ClassSpecRules or {}
 

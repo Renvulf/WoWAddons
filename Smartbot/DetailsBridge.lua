@@ -2,16 +2,15 @@ local addonName, Smartbot = ...
 Smartbot.DetailsBridge = Smartbot.DetailsBridge or {}
 local Bridge = Smartbot.DetailsBridge
 
-local API = Smartbot.API
-local Details = API:Resolve('Details')
-local CreateFrame = API:Resolve('CreateFrame') or CreateFrame
-local UnitGUID = API:Resolve('UnitGUID') or UnitGUID
-local UnitName = API:Resolve('UnitName') or UnitName
-local GetTime = API:Resolve('GetTime') or GetTime
-local CombatLogGetCurrentEventInfo = API:Resolve('CombatLogGetCurrentEventInfo') or CombatLogGetCurrentEventInfo
+local Details = _G.Details
+local CreateFrame = CreateFrame
+local UnitGUID = UnitGUID
+local UnitName = UnitName
+local GetTime = GetTime
+local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo
 
-local DETAILS_ATTRIBUTE_DAMAGE = API:Resolve('DETAILS_ATTRIBUTE_DAMAGE') or 1
-local DETAILS_ATTRIBUTE_HEAL = API:Resolve('DETAILS_ATTRIBUTE_HEAL') or 2
+local DETAILS_ATTRIBUTE_DAMAGE = _G.DETAILS_ATTRIBUTE_DAMAGE or 1
+local DETAILS_ATTRIBUTE_HEAL = _G.DETAILS_ATTRIBUTE_HEAL or 2
 
 Bridge.fallback = {
     active = false,
@@ -24,12 +23,12 @@ Bridge.fallback = {
 }
 
 function Bridge:IsAvailable()
-    return Details ~= nil and type(API:Resolve('Details.GetCurrentCombat')) == 'function'
+    return Details ~= nil and type(Details.GetCurrentCombat) == 'function'
 end
 
 local function getDetailsMetrics()
     if not Bridge:IsAvailable() then return nil end
-    local GetCurrentCombat = API:Resolve('Details.GetCurrentCombat')
+    local GetCurrentCombat = Details.GetCurrentCombat
     local combat = GetCurrentCombat and GetCurrentCombat(Details)
     if not combat or type(combat.GetCombatTime) ~= 'function' then return nil end
     local combatTime = combat:GetCombatTime()

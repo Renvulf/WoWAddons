@@ -41,15 +41,15 @@ function Options:ResetWeights()
 end
 
 function Options:Build()
+    if not Smartbot.db then return end
     if panel then return panel end
     panel = CreateFrame('Frame')
-    panel.name = addonName
 
     if Settings_RegisterCanvasLayoutCategory and Settings_RegisterAddOnCategory then
         local category = Settings_RegisterCanvasLayoutCategory(panel, addonName)
-        category.ID = addonName
         Settings_RegisterAddOnCategory(category)
         panel.categoryID = category.ID
+        Options.categoryID = category.ID
     else
         if Smartbot.Logger then
             Smartbot.Logger:Log('WARN', 'Settings API unavailable')
@@ -114,8 +114,10 @@ end
 
 function Options:Open()
     Options:Build()
-    if Settings_OpenToCategory and panel.categoryID then
-        Settings_OpenToCategory(panel.categoryID)
+    if Settings_OpenToCategory and Options.categoryID then
+        Settings_OpenToCategory(Options.categoryID)
+    elseif Settings and SettingsPanel then
+        SettingsPanel:Show()
     end
 end
 
@@ -129,18 +131,28 @@ function Options:HandleSlash(msg)
         Options:Open()
         return true
     elseif msg == 'auto' then
-        Smartbot.db.profile.autoEquip = not Smartbot.db.profile.autoEquip
-        local state = Smartbot.db.profile.autoEquip and 'ON' or 'OFF'
-        if Smartbot.Logger then
-            Smartbot.Logger:Log('INFO', 'AutoEquip', state)
-        else
-            print('Smartbot auto-equip', state)
+        if Smartbot.db and Smartbot.db.profile then
+            Smartbot.db.profile.autoEquip = not Smartbot.db.profile.autoEquip
+            local state = Smartbot.db.profile.autoEquip and 'ON' or 'OFF'
+            if Smartbot.Logger then
+                Smartbot.Logger:Log('INFO', 'AutoEquip', state)
+            else
+                print('Smartbot auto-equip', state)
+            end
         end
         return true
     elseif msg == 'reset' then
         Options:ResetWeights()
         return true
     end
-    return false
+    Options:Open()
+    return true
+end
+
+SLASH_SMARTBOT1 = '/smartbot'
+SlashCmdList.SMARTBOT = function(msg)
+    if not Options:HandleSlash(msg) then
+        Options:Open()
+    end
 end
 
