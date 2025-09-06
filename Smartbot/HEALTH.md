@@ -6,6 +6,7 @@
 - Tooltip score deltas integrated via RGAR runtime adapter
 - Settings UI and /smartbot commands available
 - DetailsBridge with fallback internal meter operational
+- Online learner with per-spec weights and persistence active
 
 ## Next Steps
-- Online learner (Model.lua) + persistence + quality gates
+- Health checks (HEALTHCHECK.lua) + HEALTH.md; auto-fix obvious issues
