@@ -16,14 +16,37 @@ function API.Resolve(_, symbol)
     return resolvePath(symbol)
 end
 
-local function API_GetItemStats(itemLink)
-    local func = _G.GetItemStats
-    if type(func) ~= "function" and C_Item then
-        func = C_Item.GetItemStats
+local resolvedGetItemStats
+local warnedMissingGetItemStats
+
+local function resolveGetItemStats()
+    if resolvedGetItemStats ~= nil then return resolvedGetItemStats end
+
+    local func = _G and _G.GetItemStats
+    if type(func) ~= "function" and C_Item and type(C_Item.GetItemStats) == "function" then
+        func = function(itemLink)
+            return C_Item.GetItemStats(itemLink)
+        end
     end
+
     if type(func) == "function" then
+        resolvedGetItemStats = func
+    else
+        resolvedGetItemStats = false
+        if not warnedMissingGetItemStats and Smartbot.Logger then
+            Smartbot.Logger:Log('WARN', 'GetItemStats unavailable')
+            warnedMissingGetItemStats = true
+        end
+    end
+
+    return resolvedGetItemStats
+end
+
+local function API_GetItemStats(itemLink)
+    local func = resolveGetItemStats()
+    if func then
         local ok, stats = pcall(func, itemLink)
-        if ok and type(stats) == "table" then
+        if ok and type(stats) == 'table' then
             return stats
         end
     end
@@ -31,7 +54,7 @@ local function API_GetItemStats(itemLink)
 end
 
 function API.GetItemStatsSafe(itemLink)
-    if type(itemLink) ~= "string" then return {} end
+    if type(itemLink) ~= 'string' then return {} end
     return API_GetItemStats(itemLink)
 end
 
