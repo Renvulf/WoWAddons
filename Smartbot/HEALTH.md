@@ -7,6 +7,7 @@
 - Settings UI and /smartbot commands available
 - DetailsBridge with fallback internal meter operational
 - Online learner with per-spec weights and persistence active
+- Health checks validating API availability, interface version, load order and combat safety in place
 
 ## Next Steps
-- Health checks (HEALTHCHECK.lua) + HEALTH.md; auto-fix obvious issues
+- Polish: docs, schema migrator, logging, final cleanup

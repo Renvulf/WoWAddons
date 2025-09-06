@@ -44,7 +44,7 @@
     {
       "id": 9,
       "name": "Health checks (HEALTHCHECK.lua) + HEALTH.md; auto-fix obvious issues",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "id": 10,
@@ -53,7 +53,7 @@
     }
   ],
   "file_checksums": {
-    "Smartbot/Smartbot.toc": "280839205cc173f46ca6eca1e1183a68b84284061cd4fd304ff606468cb4ea91",
+    "Smartbot/Smartbot.toc": "9fcc6f19b9f7350a92c0ec66e39763e7e355342b32992ea2eca0b9fadeed32ea",
     "Smartbot/Core.lua": "d3e00bea5fdb69eeaa5a89edbd209396317dfb2c97fb69fe4c57a11440bf9c35",
     "Smartbot/Logger.lua": "fab85d15b7129059aeaf30a0017ef636ebe814016c9587f61564f5d24ed74c14",
     "README.md": "ddad343a07f0ea93b1da2207c899e3e5d40a2706bd4a0124c1add2e5f258d891",
@@ -63,7 +63,7 @@
     "Smartbot/APIMap.lua": "b28b96638707be52d0115bc5166b95a1a15c63febcee48bb9d92bc9637760ce4",
     "Smartbot/.cache/retail_api_map.json": "ba32b2adf30b3f7245ac9be836ca983a1192972208a194ce4a275bde680fc6c2",
     "Smartbot/tools/build_rgar.py": "4b0f48638e5ccf858c606298ef743995acadf1c6419732861735ae2c0971647c",
-    "Smartbot/HEALTH.md": "6b50da48f0d37b51d067bb2adce741e616cde4addf7c964a2fa20c997c9efe78",
+    "Smartbot/HEALTH.md": "5633cd53a3b6dbf53c7dfd274f820c65f3b4141d60ac84c02d00d144915fe319",
     "Smartbot/ClassSpecRules.lua": "4e0f7a81b8169776d3111f151fee3568c5bba7eb7d49c43faa896fd6ec8974aa",
     "Smartbot/ItemScore.lua": "6553a3548a8232f1f598b664bd17b74b792d9af0dd2ad109cf202ac9f3600072",
     "Smartbot/tools/extract_rules.py": "04dea0aee02c0958ce9489d0c2aab3ad1f9e694d0cadee8f08e24e550e485776",
@@ -71,7 +71,8 @@
     "Smartbot/Tooltip.lua": "33b896ed1b87aa401e15021ac25fab57e9e0e4e09649b8dbc7f02fa6189f6c81",
     "Smartbot/Options.lua": "beeb771db650c5cdd361d69a98f948561dc37358807368a56d2ddbd4a55dcf9a",
     "Smartbot/DetailsBridge.lua": "11b750acb6a7728f2a2a438a919a03ad6111ae6fa8e141921bd8271ef79e08d2",
-    "Smartbot/Model.lua": "02be963ce1d153a7eb4c450ccbcfaa61eae8f911149af7b33be000288f1e0ce6"
+    "Smartbot/Model.lua": "02be963ce1d153a7eb4c450ccbcfaa61eae8f911149af7b33be000288f1e0ce6",
+    "Smartbot/HEALTHCHECK.lua": "ef80579ba18b4d641927098a750f6fe07aa8527c14b0030ab68225dd82a6b981"
   },
-  "next_run_focus": "Health checks (HEALTHCHECK.lua) + HEALTH.md; auto-fix obvious issues"
+  "next_run_focus": "Polish: docs, schema migrator, logging, final cleanup"
 }
