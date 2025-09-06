@@ -3,8 +3,7 @@ Smartbot.ItemScore = Smartbot.ItemScore or {}
 local ItemScore = Smartbot.ItemScore
 
 local API = Smartbot.API
-
-local GetItemStats = API:Resolve('GetItemStats') or GetItemStats
+local API_GetItemStats = Smartbot.API.GetItemStatsSafe
 local GetItemInfoInstant = API:Resolve('GetItemInfoInstant') or (C_Item and C_Item.GetItemInfoInstant)
 local UnitClass = API:Resolve('UnitClass') or UnitClass
 local GetSpecialization = API:Resolve('GetSpecialization') or GetSpecialization
@@ -58,7 +57,15 @@ function ItemScore:IsAllowed(itemLink)
 end
 
 function ItemScore:GetScore(itemLink)
-    local stats = GetItemStats(itemLink) or {}
+    if type(itemLink) ~= 'string' or not string.find(itemLink, "|Hitem:") then
+        ItemScore.invalidLog = ItemScore.invalidLog or {}
+        if not ItemScore.invalidLog[itemLink] and Smartbot.Logger then
+            Smartbot.Logger:Log('WARN', 'Invalid itemLink', tostring(itemLink))
+            ItemScore.invalidLog[itemLink] = true
+        end
+        return 0
+    end
+    local stats = API_GetItemStats(itemLink) or {}
     local class, spec = getPlayerSpec()
     local weights = (Smartbot.db.weights[class] and Smartbot.db.weights[class][spec]) or {}
     local score = 0
