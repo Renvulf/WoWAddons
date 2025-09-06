@@ -56,10 +56,19 @@ function Health:CheckLoadOrder()
     end
 end
 
+function Health:CheckDBVersion()
+    if Smartbot.db and Smartbot.SCHEMA_VERSION and Smartbot.db.version ~= Smartbot.SCHEMA_VERSION then
+        if Smartbot.Logger then
+            Smartbot.Logger:Log('ERROR', 'DB schema mismatch', Smartbot.db.version or "nil", Smartbot.SCHEMA_VERSION)
+        end
+    end
+end
+
 function Health:Verify()
     self:CheckLoadOrder()
     self:CheckAPIs()
     self:CheckInterface()
+    self:CheckDBVersion()
 end
 
 if hooksecurefunc then
@@ -79,4 +88,3 @@ frame:SetScript('OnEvent', function()
 end)
 
 return Health
-
