@@ -59,6 +59,8 @@ local invTypeToSlots = {
     INVTYPE_THROWN = slots.MAINHAND,
 }
 
+Equip.invTypeToSlots = invTypeToSlots
+
 local lastEquipTime = {}
 
 local function getEquippedScore(slot)
@@ -68,6 +70,8 @@ local function getEquippedScore(slot)
     end
     return 0, link
 end
+
+Equip.GetEquippedScore = getEquippedScore
 
 function Equip:Validate(itemLink, slot)
     local _, _, _, equipLoc = GetItemInfoInstant(itemLink)
