@@ -39,9 +39,13 @@ local function processQueue()
     if entry then
         local item, slot = entry.item, entry.slot
         if item then
-            local ok, err = pcall(EquipItemByName, item, slot)
-            if not ok and Smartbot.Logger then
-                Smartbot.Logger:Log("WARN", "Equip failed", item, err)
+            if Smartbot.Equip and Smartbot.Equip.Validate and not Smartbot.Equip:Validate(item, slot) then
+                -- skip invalid or outdated entry
+            else
+                local ok, err = pcall(EquipItemByName, item, slot)
+                if not ok and Smartbot.Logger then
+                    Smartbot.Logger:Log("WARN", "Equip failed", item, err)
+                end
             end
         end
     end

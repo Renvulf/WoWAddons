@@ -10,3 +10,4 @@ Core.lua
 Logger.lua
 ClassSpecRules.lua
 ItemScore.lua
+Equip.lua

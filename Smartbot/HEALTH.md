@@ -1,8 +1,8 @@
 # Smartbot Health
 
 ## Status
-- RGAR map generated from reference addons
-- API adapter resolving Retail functions
+- Core, logger, RGAR map, class/spec rules and item scoring ready
+- Equip pipeline with OOC queue, min-delta damping, and slot coupling active
 
 ## Next Steps
-- Implement ClassSpecRules and ItemScore scaffolding
+- Integrate tooltip score deltas via RGAR runtime adapter

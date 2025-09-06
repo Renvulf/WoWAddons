@@ -19,7 +19,7 @@
     {
       "id": 4,
       "name": "Equip pipeline with OOC queue, min-delta damping, and slot coupling",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "id": 5,
@@ -53,8 +53,8 @@
     }
   ],
   "file_checksums": {
-    "Smartbot/Smartbot.toc": "9cba5c67b54dd14e5ab7479c50a1927f60467d5ad800ab2a545cca800786da92",
-    "Smartbot/Core.lua": "40f4ba9eabb166056ba31b8e9b14342741f85768f4d955dabaec343feac4c255",
+    "Smartbot/Smartbot.toc": "b160ddb640211b4e61b8f18bf62079877487786d13cb55bbf9b4d365dcd9b3c5",
+    "Smartbot/Core.lua": "61e30e7b2ec9d32ecb88d1c92d3c4d11e1551069520f7bee290966b68d11ea42",
     "Smartbot/Logger.lua": "fab85d15b7129059aeaf30a0017ef636ebe814016c9587f61564f5d24ed74c14",
     "README.md": "327da4aa6f3e745803654d0192afce85f903055259c3d61ddb12cf3d4847a72c",
     "LICENSE": "731683113662b881f8b6ad6fa743c5d8bd9eb488ec2011104e384665cd1d6443",
@@ -63,10 +63,11 @@
     "Smartbot/APIMap.lua": "b28b96638707be52d0115bc5166b95a1a15c63febcee48bb9d92bc9637760ce4",
     "Smartbot/.cache/retail_api_map.json": "ba32b2adf30b3f7245ac9be836ca983a1192972208a194ce4a275bde680fc6c2",
     "Smartbot/tools/build_rgar.py": "4b0f48638e5ccf858c606298ef743995acadf1c6419732861735ae2c0971647c",
-    "Smartbot/HEALTH.md": "98050d0ec0d29c00fc0b74f09ba370235a0240a88ade2323c9b29e5dc12cbf3d",
+    "Smartbot/HEALTH.md": "3b8a574afe6d5c97a4e6ed6b309fe8e422d810efe1ee772411099bd3d248d46e",
     "Smartbot/ClassSpecRules.lua": "4e0f7a81b8169776d3111f151fee3568c5bba7eb7d49c43faa896fd6ec8974aa",
     "Smartbot/ItemScore.lua": "6553a3548a8232f1f598b664bd17b74b792d9af0dd2ad109cf202ac9f3600072",
-    "Smartbot/tools/extract_rules.py": "04dea0aee02c0958ce9489d0c2aab3ad1f9e694d0cadee8f08e24e550e485776"
+    "Smartbot/tools/extract_rules.py": "04dea0aee02c0958ce9489d0c2aab3ad1f9e694d0cadee8f08e24e550e485776",
+    "Smartbot/Equip.lua": "465f7804478461d457a4e14e733f25b972d49eb3ee705579d874afb0500723b9"
   },
-  "next_run_focus": "Equip pipeline with OOC queue, min-delta damping, and slot coupling"
+  "next_run_focus": "Tooltip integration via RGAR runtime adapter"
 }
