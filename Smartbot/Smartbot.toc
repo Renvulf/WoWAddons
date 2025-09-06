@@ -8,3 +8,5 @@ APIMap.lua
 API.lua
 Core.lua
 Logger.lua
+ClassSpecRules.lua
+ItemScore.lua
