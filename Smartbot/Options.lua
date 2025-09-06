@@ -9,12 +9,20 @@ local InterfaceOptionsFrame_OpenToCategory = API:Resolve('InterfaceOptionsFrame_
 local Settings_RegisterCanvasLayoutCategory = API:Resolve('Settings.RegisterCanvasLayoutCategory')
 local Settings_RegisterAddOnCategory = API:Resolve('Settings.RegisterAddOnCategory')
 local Settings_OpenToCategory = API:Resolve('Settings.OpenToCategory')
+local UnitClass = API:Resolve('UnitClass') or UnitClass
+local GetSpecialization = API:Resolve('GetSpecialization') or GetSpecialization
 
 local panel
 
+local function getCurrentWeights()
+    local class = select(2, UnitClass('player'))
+    local spec = GetSpecialization() or 0
+    return (Smartbot.db and Smartbot.db.weights and Smartbot.db.weights[class] and Smartbot.db.weights[class][spec]) or {}
+end
+
 local function updateWeightText()
     if not panel or not panel.weightText then return end
-    local weights = (Smartbot.db and Smartbot.db.weights) or {}
+    local weights = getCurrentWeights()
     local parts = {}
     for stat, v in pairs(weights) do
         table.insert(parts, stat .. '=' .. string.format('%.2f', v))
@@ -25,6 +33,7 @@ end
 function Options:ResetWeights()
     if Smartbot.db then
         Smartbot.db.weights = {}
+        Smartbot.db.modelMeta = {}
         updateWeightText()
         if Smartbot.Logger then
             Smartbot.Logger:Log('INFO', 'Weights reset')

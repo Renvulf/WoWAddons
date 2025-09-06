@@ -19,6 +19,7 @@ local defaults = {
         verbosity = 1,
     },
     weights = {},
+    modelMeta = {},
 }
 
 local function copyDefaults(dst, src)

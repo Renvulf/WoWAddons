@@ -12,5 +12,6 @@ ClassSpecRules.lua
 ItemScore.lua
 Equip.lua
 DetailsBridge.lua
+Model.lua
 Tooltip.lua
 Options.lua
