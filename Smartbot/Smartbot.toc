@@ -4,5 +4,7 @@
 ## Version: 0.1.0
 ## SavedVariables: SmartbotDB
 
+APIMap.lua
+API.lua
 Core.lua
 Logger.lua
