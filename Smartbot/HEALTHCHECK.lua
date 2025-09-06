@@ -29,7 +29,7 @@ end
 
 function Health:CheckInterface()
     local build = select(4, GetBuildInfo())
-    local game = tonumber(build) or 0
+    local game = tonumber(build, 10) or 0
     if Smartbot.interface and game ~= Smartbot.interface then
         if Smartbot.Logger then
             Smartbot.Logger:Log('WARN', 'Interface mismatch', game, Smartbot.interface)

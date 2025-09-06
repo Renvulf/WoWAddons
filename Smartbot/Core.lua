@@ -4,7 +4,6 @@ _G.Smartbot = Smartbot
 Smartbot.SCHEMA_VERSION = 1
 
 local CreateFrame = CreateFrame
-local InCombatLockdown = InCombatLockdown
 local UnitAffectingCombat = UnitAffectingCombat
 local EquipItemByName = EquipItemByName
 local C_Timer_After = C_Timer and C_Timer.After
@@ -42,7 +41,7 @@ local function migrate(db, old)
 end
 
 local function processQueue()
-    if InCombatLockdown() or UnitAffectingCombat("player") then return end
+    if not (Smartbot.API and Smartbot.API.IsOutOfCombat and Smartbot.API.IsOutOfCombat()) or UnitAffectingCombat("player") then return end
     if #equipQueue == 0 then return end
     local entry = table.remove(equipQueue, 1)
     if entry then
@@ -66,7 +65,7 @@ end
 function Smartbot:QueueEquip(item, slot)
     if not item then return end
     table.insert(equipQueue, {item = item, slot = slot})
-    if not InCombatLockdown() then
+    if Smartbot.API and Smartbot.API.IsOutOfCombat and Smartbot.API.IsOutOfCombat() then
         processQueue()
     end
 end

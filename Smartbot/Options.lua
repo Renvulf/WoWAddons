@@ -46,7 +46,7 @@ function Options:Build()
     panel = CreateFrame('Frame')
 
     if Settings_RegisterCanvasLayoutCategory and Settings_RegisterAddOnCategory then
-        local category = Settings_RegisterCanvasLayoutCategory(panel, addonName)
+        local category = Settings_RegisterCanvasLayoutCategory(panel, 'Smartbot')
         Settings_RegisterAddOnCategory(category)
         panel.categoryID = category.ID
         Options.categoryID = category.ID
