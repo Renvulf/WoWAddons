@@ -7,7 +7,7 @@
 - Settings UI registered through Retail Settings API and /smartbot opens it
 - DetailsBridge with fallback internal meter operational
 - Online learner with per-spec weights and persistence active
-- Health checks validating API availability, interface version, load order, combat safety, DB schema version, adapter usage and Settings registration in place
+- Health checks validate API availability, interface version, load order, combat safety, DB schema version, adapter usage and Settings registration; warns on stray GetItemStats locals
 
 ## Next Steps
 - None
