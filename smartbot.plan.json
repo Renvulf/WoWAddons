@@ -29,7 +29,7 @@
     {
       "id": 6,
       "name": "Settings UI and `/smartbot` commands",
-      "status": "pending"
+      "status": "complete"
     },
     {
       "id": 7,
@@ -53,8 +53,8 @@
     }
   ],
   "file_checksums": {
-    "Smartbot/Smartbot.toc": "c82a6116b74285a8fc5778617df48fd8a543766fe6435c31245c08505e410180",
-    "Smartbot/Core.lua": "61e30e7b2ec9d32ecb88d1c92d3c4d11e1551069520f7bee290966b68d11ea42",
+    "Smartbot/Smartbot.toc": "1b94444a1a9d903c924daf85c8da9ddd314076c3a20865547c6cb049caa9ef24",
+    "Smartbot/Core.lua": "888986f2cfeb0d235a0a9b0add363670971f4091d13b90a36a1ca1391e1ff143",
     "Smartbot/Logger.lua": "fab85d15b7129059aeaf30a0017ef636ebe814016c9587f61564f5d24ed74c14",
     "README.md": "327da4aa6f3e745803654d0192afce85f903055259c3d61ddb12cf3d4847a72c",
     "LICENSE": "731683113662b881f8b6ad6fa743c5d8bd9eb488ec2011104e384665cd1d6443",
@@ -63,12 +63,13 @@
     "Smartbot/APIMap.lua": "b28b96638707be52d0115bc5166b95a1a15c63febcee48bb9d92bc9637760ce4",
     "Smartbot/.cache/retail_api_map.json": "ba32b2adf30b3f7245ac9be836ca983a1192972208a194ce4a275bde680fc6c2",
     "Smartbot/tools/build_rgar.py": "4b0f48638e5ccf858c606298ef743995acadf1c6419732861735ae2c0971647c",
-    "Smartbot/HEALTH.md": "8cca6f224d70915563db67081e41ad55c555f556848e7387f993f64757e1ffdd",
+    "Smartbot/HEALTH.md": "6564f6847883e3f87d39fa1ad8db3abf871131b25f1f7e0379da56986a755d45",
     "Smartbot/ClassSpecRules.lua": "4e0f7a81b8169776d3111f151fee3568c5bba7eb7d49c43faa896fd6ec8974aa",
     "Smartbot/ItemScore.lua": "6553a3548a8232f1f598b664bd17b74b792d9af0dd2ad109cf202ac9f3600072",
     "Smartbot/tools/extract_rules.py": "04dea0aee02c0958ce9489d0c2aab3ad1f9e694d0cadee8f08e24e550e485776",
     "Smartbot/Equip.lua": "8dd66379e63e28e741a889ca742ba58931d9a0f9721b4df1068c54e5a7365ac9",
-    "Smartbot/Tooltip.lua": "33b896ed1b87aa401e15021ac25fab57e9e0e4e09649b8dbc7f02fa6189f6c81"
+    "Smartbot/Tooltip.lua": "33b896ed1b87aa401e15021ac25fab57e9e0e4e09649b8dbc7f02fa6189f6c81",
+    "Smartbot/Options.lua": "5ca22c67f80e006ec4af1b96b0065662a2b9b31fe7c1c9ed3a2e73abc3f9e9cf"
   },
-  "next_run_focus": "Settings UI and `/smartbot` commands"
+  "next_run_focus": "DetailsBridge + fallback internal meter"
 }
