@@ -1,0 +1,8 @@
+## Interface: 110200
+## Title: Smartbot
+## Notes: Learns stat weights and equips upgrades automatically
+## Version: 0.1.0
+## SavedVariables: SmartbotDB
+
+Core.lua
+Logger.lua
