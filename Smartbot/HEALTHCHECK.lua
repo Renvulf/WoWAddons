@@ -68,10 +68,16 @@ function Health:CheckAPIIntegrity()
                     if type(fn) == 'function' then
                         local i = 1
                         while true do
-                            local up, _ = debug.getupvalue(fn, i)
+                            local up, val = debug.getupvalue(fn, i)
                             if not up then break end
                             if up == 'GetItemStats' then
                                 error('Forbidden upvalue GetItemStats in '..name..'.'..fname)
+                            end
+                            if up == 'API' and val == nil then
+                                error('Nil API upvalue in '..name..'.'..fname)
+                            end
+                            if up == 'InterfaceOptions_AddCategory' or up == 'InterfaceOptionsFrame_OpenToCategory' then
+                                error('Forbidden upvalue '..up..' in '..name..'.'..fname)
                             end
                             i = i + 1
                         end

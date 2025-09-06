@@ -7,7 +7,6 @@ local CreateFrame = API:Resolve('CreateFrame') or CreateFrame
 local UnitClass = API:Resolve('UnitClass') or UnitClass
 local GetSpecialization = API:Resolve('GetSpecialization') or GetSpecialization
 local GetInventoryItemLink = API:Resolve('GetInventoryItemLink') or GetInventoryItemLink
-local API_GetItemStats = Smartbot.API.GetItemStatsSafe
 local GetTime = API:Resolve('GetTime') or GetTime
 
 local DetailsBridge = Smartbot.DetailsBridge
@@ -21,12 +20,16 @@ local function currentKey()
     return class, spec
 end
 
+local function GetStats(link)
+    return Smartbot.API.GetItemStatsSafe(link)
+end
+
 local function collectFeatures()
     local stats = {}
     for slot = 1, 17 do
         local link = GetInventoryItemLink('player', slot)
         if link then
-            local istats = API_GetItemStats(link)
+            local istats = GetStats(link)
             if istats then
                 for stat, val in pairs(istats) do
                     stats[stat] = (stats[stat] or 0) + val

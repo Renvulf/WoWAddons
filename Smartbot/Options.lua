@@ -2,15 +2,12 @@ local addonName, Smartbot = ...
 Smartbot.Options = Smartbot.Options or {}
 local Options = Smartbot.Options
 
-local API = Smartbot.API
-local CreateFrame = API:Resolve('CreateFrame') or CreateFrame
-local InterfaceOptions_AddCategory = API:Resolve('InterfaceOptions_AddCategory')
-local InterfaceOptionsFrame_OpenToCategory = API:Resolve('InterfaceOptionsFrame_OpenToCategory')
-local Settings_RegisterCanvasLayoutCategory = API:Resolve('Settings.RegisterCanvasLayoutCategory')
-local Settings_RegisterAddOnCategory = API:Resolve('Settings.RegisterAddOnCategory')
-local Settings_OpenToCategory = API:Resolve('Settings.OpenToCategory')
-local UnitClass = API:Resolve('UnitClass') or UnitClass
-local GetSpecialization = API:Resolve('GetSpecialization') or GetSpecialization
+local CreateFrame = CreateFrame
+local Settings_RegisterCanvasLayoutCategory = Settings and Settings.RegisterCanvasLayoutCategory
+local Settings_RegisterAddOnCategory = Settings and Settings.RegisterAddOnCategory
+local Settings_OpenToCategory = Settings and Settings.OpenToCategory
+local UnitClass = UnitClass
+local GetSpecialization = GetSpecialization
 
 local panel
 
@@ -53,8 +50,10 @@ function Options:Build()
         category.ID = addonName
         Settings_RegisterAddOnCategory(category)
         panel.categoryID = category.ID
-    elseif InterfaceOptions_AddCategory then
-        InterfaceOptions_AddCategory(panel)
+    else
+        if Smartbot.Logger then
+            Smartbot.Logger:Log('WARN', 'Settings API unavailable')
+        end
     end
 
     local title = panel:CreateFontString(nil, 'ARTWORK', 'GameFontNormalLarge')
@@ -117,8 +116,6 @@ function Options:Open()
     Options:Build()
     if Settings_OpenToCategory and panel.categoryID then
         Settings_OpenToCategory(panel.categoryID)
-    elseif InterfaceOptionsFrame_OpenToCategory then
-        InterfaceOptionsFrame_OpenToCategory(panel)
     end
 end
 
@@ -146,10 +143,4 @@ function Options:HandleSlash(msg)
     end
     return false
 end
-
-local initFrame = CreateFrame('Frame')
-initFrame:RegisterEvent('PLAYER_LOGIN')
-initFrame:SetScript('OnEvent', function()
-    Options:Build()
-end)
 

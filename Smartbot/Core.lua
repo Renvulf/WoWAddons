@@ -3,17 +3,14 @@ _G.Smartbot = Smartbot
 
 Smartbot.SCHEMA_VERSION = 1
 
-local API = Smartbot.API
-local CreateFrame = API:Resolve('CreateFrame') or CreateFrame
-local InCombatLockdown = API:Resolve('InCombatLockdown') or InCombatLockdown
-local UnitAffectingCombat = API:Resolve('UnitAffectingCombat') or UnitAffectingCombat
-local EquipItemByName = API:Resolve('EquipItemByName') or EquipItemByName
-local C_Timer_After = API:Resolve('C_Timer.After') or (C_Timer and C_Timer.After)
+local CreateFrame = CreateFrame
+local InCombatLockdown = InCombatLockdown
+local UnitAffectingCombat = UnitAffectingCombat
+local EquipItemByName = EquipItemByName
+local C_Timer_After = C_Timer and C_Timer.After
 
 local eventFrame = CreateFrame("Frame")
 local equipQueue = {}
-
-Smartbot.db = SmartbotDB or {}
 local defaults = {
     version = Smartbot.SCHEMA_VERSION,
     profile = {
@@ -83,6 +80,9 @@ local function onAddonLoaded(name)
         migrate(Smartbot.db, prev)
     end
     copyDefaults(Smartbot.db, defaults)
+    if Smartbot.Options and Smartbot.Options.Build then
+        Smartbot.Options.Build()
+    end
 end
 
 local function onPlayerLogin()
