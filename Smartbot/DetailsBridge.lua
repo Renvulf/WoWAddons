@@ -1,90 +1,22 @@
 local addonName, Smartbot = ...
 Smartbot.DetailsBridge = Smartbot.DetailsBridge or {}
-local Bridge = Smartbot.DetailsBridge
 
-local Details = _G.Details
-local CreateFrame = CreateFrame
-local UnitGUID = UnitGUID
-local UnitName = UnitName
-local GetTime = GetTime
-local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo
-
-local DETAILS_ATTRIBUTE_DAMAGE = _G.DETAILS_ATTRIBUTE_DAMAGE or 1
-local DETAILS_ATTRIBUTE_HEAL = _G.DETAILS_ATTRIBUTE_HEAL or 2
-
-Bridge.fallback = {
-    active = false,
-    start = 0,
-    damage = 0,
-    heal = 0,
-    lastDps = 0,
-    lastHps = 0,
-    guid = nil,
-}
-
-function Bridge:IsAvailable()
-    return Details ~= nil and type(Details.GetCurrentCombat) == 'function'
-end
-
-local function getDetailsMetrics()
-    if not Bridge:IsAvailable() then return nil end
-    local GetCurrentCombat = Details.GetCurrentCombat
-    local combat = GetCurrentCombat and GetCurrentCombat(Details)
-    if not combat or type(combat.GetCombatTime) ~= 'function' then return nil end
-    local combatTime = combat:GetCombatTime()
-    if not combatTime or combatTime <= 0 then return nil end
-    local playerName = UnitName and UnitName('player')
+function Smartbot.DetailsBridge.GetPlayerLastSegmentMetrics()
+    local Details = _G.Details
+    if not Details or type(Details.GetCurrentCombat) ~= 'function' then return nil end
+    local okCombat, combat = pcall(Details.GetCurrentCombat, Details)
+    if not okCombat or not combat then return nil end
+    local duration = combat.GetCombatTime and combat:GetCombatTime()
+    if not duration or duration <= 0 then return nil end
+    local playerName = _G.UnitName and _G.UnitName('player')
     if not playerName then return nil end
-    local okD, damageActor = pcall(combat.GetActor, combat, DETAILS_ATTRIBUTE_DAMAGE, playerName)
-    local okH, healActor = pcall(combat.GetActor, combat, DETAILS_ATTRIBUTE_HEAL, playerName)
-    local dps = (okD and damageActor and damageActor.total) and (damageActor.total / combatTime) or nil
-    local hps = (okH and healActor and healActor.total) and (healActor.total / combatTime) or nil
-    return dps, hps
+    local dmgAttr = _G.DETAILS_ATTRIBUTE_DAMAGE or 1
+    local healAttr = _G.DETAILS_ATTRIBUTE_HEAL or 2
+    local okD, damageActor = pcall(combat.GetActor, combat, dmgAttr, playerName)
+    local okH, healActor = pcall(combat.GetActor, combat, healAttr, playerName)
+    local dps = okD and damageActor and damageActor.total or nil
+    local hps = okH and healActor and healActor.total or nil
+    return { dps = dps, hps = hps, duration = duration }
 end
 
-function Bridge:GetMetrics()
-    local dps, hps = getDetailsMetrics()
-    if dps or hps then
-        return dps, hps
-    end
-    return Bridge.fallback.lastDps, Bridge.fallback.lastHps
-end
-
-local frame = CreateFrame('Frame')
-frame:RegisterEvent('PLAYER_REGEN_DISABLED')
-frame:RegisterEvent('PLAYER_REGEN_ENABLED')
-frame:RegisterEvent('COMBAT_LOG_EVENT_UNFILTERED')
-
-frame:SetScript('OnEvent', function(_, event)
-    if event == 'PLAYER_REGEN_DISABLED' then
-        Bridge.fallback.active = true
-        Bridge.fallback.start = GetTime()
-        Bridge.fallback.damage = 0
-        Bridge.fallback.heal = 0
-        Bridge.fallback.lastDps = 0
-        Bridge.fallback.lastHps = 0
-        Bridge.fallback.guid = UnitGUID and UnitGUID('player')
-    elseif event == 'PLAYER_REGEN_ENABLED' then
-        if Bridge.fallback.active then
-            local elapsed = GetTime() - Bridge.fallback.start
-            if elapsed > 0 then
-                Bridge.fallback.lastDps = Bridge.fallback.damage / elapsed
-                Bridge.fallback.lastHps = Bridge.fallback.heal / elapsed
-            end
-        end
-        Bridge.fallback.active = false
-    elseif event == 'COMBAT_LOG_EVENT_UNFILTERED' then
-        if not Bridge.fallback.active then return end
-        local _, subevent, _, sourceGUID, _, _, _, _, _, _, _, arg12, _, _, arg15 = CombatLogGetCurrentEventInfo()
-        if sourceGUID ~= Bridge.fallback.guid then return end
-        if subevent == 'SWING_DAMAGE' then
-            Bridge.fallback.damage = Bridge.fallback.damage + (arg12 or 0)
-        elseif subevent == 'SPELL_DAMAGE' or subevent == 'RANGE_DAMAGE' or subevent == 'SPELL_PERIODIC_DAMAGE' or subevent == 'DAMAGE_SPLIT' or subevent == 'DAMAGE_SHIELD' or subevent == 'ENVIRONMENTAL_DAMAGE' then
-            Bridge.fallback.damage = Bridge.fallback.damage + (arg15 or 0)
-        elseif subevent == 'SPELL_HEAL' or subevent == 'SPELL_PERIODIC_HEAL' then
-            Bridge.fallback.heal = Bridge.fallback.heal + (arg15 or 0)
-        end
-    end
-end)
-
-return Bridge
+return Smartbot.DetailsBridge

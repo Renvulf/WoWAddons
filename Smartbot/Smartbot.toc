@@ -10,8 +10,9 @@ API.lua
 ClassSpecRules.lua
 ItemScore.lua
 Equip.lua
-Model.lua
 DetailsBridge.lua
+Meter.lua
+Model.lua
 Tooltip.lua
 Options.lua
 HEALTHCHECK.lua

@@ -13,7 +13,7 @@
     {"id": 10, "name": "Polish: docs, schema migrator, logging, final cleanup", "status": "complete"}
   ],
   "file_checksums": {
-    "Smartbot/Smartbot.toc": "55d50cdf752646ef57c49ed11ab99c480a841cc8f56be4052486d87e34228a03",
+    "Smartbot/Smartbot.toc": "2a4b276439efe9b730b114c022cdba9d8c53d6d43cac968dceaf9f3789f4b7cd",
     "Smartbot/Core.lua": "29c1ef94aba70dfb0733d5a789969e0529595d720a2b51774b31982fc9fcd653",
     "Smartbot/Logger.lua": "fab85d15b7129059aeaf30a0017ef636ebe814016c9587f61564f5d24ed74c14",
     "README.md": "ba5602551e24079bce46dfa305c2aac9c6ec0efd76762b8674e62f9bf3b221b8",
@@ -27,8 +27,9 @@
     "Smartbot/Equip.lua": "ac851daf642e74b51e9f45799bfde60bb46dd549d66b911979beca51ead907ec",
     "Smartbot/Tooltip.lua": "33b896ed1b87aa401e15021ac25fab57e9e0e4e09649b8dbc7f02fa6189f6c81",
     "Smartbot/Options.lua": "beeb771db650c5cdd361d69a98f948561dc37358807368a56d2ddbd4a55dcf9a",
-    "Smartbot/DetailsBridge.lua": "11b750acb6a7728f2a2a438a919a03ad6111ae6fa8e141921bd8271ef79e08d2",
-    "Smartbot/Model.lua": "d53ddd38072658f6f316b6229085e6019efc290daf15e092ad93a7cb644935b4",
+    "Smartbot/DetailsBridge.lua": "37353534b64e47dea20711277325e68bfa47256afb6a5bb5cfa2ceaae3459be9",
+    "Smartbot/Meter.lua": "921606e73b867d8a4212e6c62816bd20652b50638fdffd1c2967e0282554c171",
+    "Smartbot/Model.lua": "c65c4bc43a27689287cc5246ba4de57faf2999ac5f1db7a58677f3aa54242c58",
     "Smartbot/HEALTHCHECK.lua": "97fd4fd1e63b58c5f68d7c2b199a7940e73da76766918a970492eb4ee74203d6"
   },
   "next_run_focus": "All tasks complete"
