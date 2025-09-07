@@ -52,7 +52,7 @@ function Smartbot.ItemScore:IsAllowed(itemLink)
 end
 
 function Smartbot.ItemScore:GetScore(itemLink)
-    if type(itemLink) ~= 'string' or not string.find(itemLink, "|Hitem:") then
+    if not (Smartbot.API and Smartbot.API.IsValidItemLink and Smartbot.API.IsValidItemLink(itemLink)) then
         self.invalidLog = self.invalidLog or {}
         if not self.invalidLog[itemLink] and Smartbot.Logger then
             Smartbot.Logger:Log('WARN', 'Invalid itemLink', tostring(itemLink))
@@ -61,6 +61,7 @@ function Smartbot.ItemScore:GetScore(itemLink)
         return 0
     end
     local stats = getStats(itemLink) or {}
+    if not next(stats) then return 0 end
     local class, spec = getPlayerSpec()
     local weights = Smartbot.db and Smartbot.db.weights and Smartbot.db.weights[class] and Smartbot.db.weights[class][spec] or {}
     local score = 0
@@ -71,4 +72,29 @@ function Smartbot.ItemScore:GetScore(itemLink)
     return score
 end
 
+function Smartbot.ItemScore:GetDeltaPct(itemLink)
+    if not (Smartbot.API and Smartbot.API.IsValidItemLink and Smartbot.API.IsValidItemLink(itemLink)) then
+        return
+    end
+    local newScore = self:GetScore(itemLink)
+    if newScore <= 0 then return end
+    local equipLoc = select(4, _G.GetItemInfoInstant(itemLink))
+    local slots = Smartbot.Equip and Smartbot.Equip.invTypeToSlots and Smartbot.Equip.invTypeToSlots[equipLoc]
+    if not slots then return end
+    local current = 0
+    if equipLoc == 'INVTYPE_FINGER' or equipLoc == 'INVTYPE_TRINKET' then
+        for _, slot in ipairs(slots) do
+            local s = Smartbot.Equip.GetEquippedScore(slot)
+            if s > current then current = s end
+        end
+    elseif equipLoc == 'INVTYPE_2HWEAPON' then
+        current = (Smartbot.Equip.GetEquippedScore(slots[1]) or 0) + (Smartbot.Equip.GetEquippedScore(slots[2]) or 0)
+    else
+        current = Smartbot.Equip.GetEquippedScore(slots[1]) or 0
+    end
+    if current == 0 then return end
+    return ((newScore - current) / current) * 100
+end
+
 return Smartbot.ItemScore
+

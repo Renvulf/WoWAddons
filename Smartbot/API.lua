@@ -16,6 +16,13 @@ function Smartbot.API.Resolve(_, symbol)
     return resolvePath(symbol)
 end
 
+function Smartbot.API.IsValidItemLink(link)
+    if type(link) ~= "string" then return false end
+    if string.find(link, "|Hitem:") then return true end
+    if string.match(link, "^item:%d+") then return true end
+    return false
+end
+
 function Smartbot.API.GetItemStatsSafe(itemLink)
     if type(itemLink) ~= "string" then return {} end
     local API_GetItemStats = _G and _G.GetItemStats
