@@ -48,8 +48,23 @@ function Smartbot.API.IsOutOfCombat()
     return not InCombatLockdown()
 end
 
-function Smartbot.API.IsSafeToEquip()
-    return not InCombatLockdown() and not UnitAffectingCombat('player')
+function Smartbot.API.IsPlayerBusy()
+    if _G.MerchantFrame and _G.MerchantFrame:IsShown() then return true end
+    if _G.TradeFrame and _G.TradeFrame:IsShown() then return true end
+    if _G.AuctionHouseFrame and _G.AuctionHouseFrame:IsShown() then return true end
+    if _G.MailFrame and _G.MailFrame:IsShown() then return true end
+    if _G.BankFrame and _G.BankFrame:IsShown() then return true end
+    if _G.ItemSocketingFrame and _G.ItemSocketingFrame:IsShown() then return true end
+    if _G.CursorHasItem and _G.CursorHasItem() then return true end
+    return false
+end
+
+function Smartbot.API.ClearCursorSafe()
+    local CursorHasItem = _G.CursorHasItem
+    if CursorHasItem and CursorHasItem() then
+        local ClearCursor = _G.ClearCursor
+        if ClearCursor then ClearCursor() end
+    end
 end
 
 return Smartbot.API

@@ -214,6 +214,9 @@ function Smartbot.Equip.SafeEquipLink(itemLink, srcBag, srcSlot, desiredInvSlotI
     if not (Smartbot.API and Smartbot.API.IsOutOfCombat and Smartbot.API.IsOutOfCombat()) then
         return false, 'in_combat'
     end
+    if Smartbot.API.IsPlayerBusy and Smartbot.API.IsPlayerBusy() then
+        return false, 'player_busy'
+    end
     if not isValidLink(itemLink) then
         return false, 'bad_link'
     end
@@ -229,7 +232,7 @@ function Smartbot.Equip.SafeEquipLink(itemLink, srcBag, srcSlot, desiredInvSlotI
     end
     if not AMBIG[equipLoc] and not desiredInvSlotId then
         if srcBag and srcSlot then
-            if _G.ClearCursor then _G.ClearCursor() end
+            if Smartbot.API and Smartbot.API.ClearCursorSafe then Smartbot.API.ClearCursorSafe() end
             if _G.C_Container and _G.C_Container.PickupContainerItem then
                 _G.C_Container.PickupContainerItem(srcBag, srcSlot)
             elseif _G.PickupContainerItem then
@@ -239,10 +242,10 @@ function Smartbot.Equip.SafeEquipLink(itemLink, srcBag, srcSlot, desiredInvSlotI
             invId = invId and invId[1]
             if invId and _G.EquipCursorItem then
                 _G.EquipCursorItem(invId)
-                if _G.ClearCursor then _G.ClearCursor() end
+                if Smartbot.API and Smartbot.API.ClearCursorSafe then Smartbot.API.ClearCursorSafe() end
                 return true
             end
-            if _G.ClearCursor then _G.ClearCursor() end
+            if Smartbot.API and Smartbot.API.ClearCursorSafe then Smartbot.API.ClearCursorSafe() end
         end
         if Smartbot.Logger and not equipFailLog[itemLink] then
             Smartbot.Logger:Log('WARN', 'Equip failed', itemLink, 'dstSlot_unused')
@@ -262,7 +265,7 @@ function Smartbot.Equip.SafeEquipLink(itemLink, srcBag, srcSlot, desiredInvSlotI
         return false, 'equip_failed'
     end
     if srcBag and srcSlot then
-        if _G.ClearCursor then _G.ClearCursor() end
+        if Smartbot.API and Smartbot.API.ClearCursorSafe then Smartbot.API.ClearCursorSafe() end
         if _G.C_Container and _G.C_Container.PickupContainerItem then
             _G.C_Container.PickupContainerItem(srcBag, srcSlot)
         elseif _G.PickupContainerItem then
@@ -275,14 +278,14 @@ function Smartbot.Equip.SafeEquipLink(itemLink, srcBag, srcSlot, desiredInvSlotI
     end
     if _G.EquipCursorItem then
         _G.EquipCursorItem(invId)
-        if _G.ClearCursor then _G.ClearCursor() end
+        if Smartbot.API and Smartbot.API.ClearCursorSafe then Smartbot.API.ClearCursorSafe() end
         return true
     end
     if Smartbot.Logger and not equipFailLog[itemLink] then
         Smartbot.Logger:Log('WARN', 'Equip failed', itemLink, 'fallback_failed')
         equipFailLog[itemLink] = true
     end
-    if _G.ClearCursor then _G.ClearCursor() end
+    if Smartbot.API and Smartbot.API.ClearCursorSafe then Smartbot.API.ClearCursorSafe() end
     return false, 'equip_failed'
 end
 

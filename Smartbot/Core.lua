@@ -36,7 +36,9 @@ local function migrate(db, old)
 end
 
 local function processQueue()
-    if not (Smartbot.API and Smartbot.API.IsOutOfCombat and Smartbot.API.IsOutOfCombat()) or _G.UnitAffectingCombat("player") then
+    if not (Smartbot.API and Smartbot.API.IsOutOfCombat and Smartbot.API.IsOutOfCombat())
+        or _G.UnitAffectingCombat("player")
+        or (Smartbot.API.IsPlayerBusy and Smartbot.API.IsPlayerBusy()) then
         return
     end
     if #equipQueue == 0 then return end
