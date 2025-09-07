@@ -1,12 +1,5 @@
 local addonName, Smartbot = ...
 Smartbot.HealthCheck = Smartbot.HealthCheck or {}
-local Health = Smartbot.HealthCheck
-
-local CreateFrame = CreateFrame
-local GetBuildInfo = GetBuildInfo
-local InCombatLockdown = InCombatLockdown
-local UnitAffectingCombat = UnitAffectingCombat
-local hooksecurefunc = hooksecurefunc
 
 Smartbot.interface = Smartbot.interface or 110200
 
@@ -18,7 +11,7 @@ local requiredAPIs = {
     'UnitAffectingCombat',
 }
 
-function Health:CheckAPIs()
+function Smartbot.HealthCheck:CheckAPIs()
     for _, sym in ipairs(requiredAPIs) do
         local obj = _G[sym]
         if not obj and Smartbot.Logger then
@@ -27,8 +20,8 @@ function Health:CheckAPIs()
     end
 end
 
-function Health:CheckInterface()
-    local build = select(4, GetBuildInfo())
+function Smartbot.HealthCheck:CheckInterface()
+    local build = select(4, _G.GetBuildInfo())
     local game = tonumber(build, 10) or 0
     if Smartbot.interface and game ~= Smartbot.interface then
         if Smartbot.Logger then
@@ -37,21 +30,21 @@ function Health:CheckInterface()
     end
 end
 
-function Health:CheckLoadOrder()
+function Smartbot.HealthCheck:CheckLoadOrder()
     if not Smartbot.db and Smartbot.Logger then
         Smartbot.Logger:Log('ERROR', 'Core not loaded before health check')
     end
 end
 
-function Health:CheckDBVersion()
+function Smartbot.HealthCheck:CheckDBVersion()
     if Smartbot.db and Smartbot.SCHEMA_VERSION and Smartbot.db.version ~= Smartbot.SCHEMA_VERSION then
         if Smartbot.Logger then
-            Smartbot.Logger:Log('ERROR', 'DB schema mismatch', Smartbot.db.version or "nil", Smartbot.SCHEMA_VERSION)
+            Smartbot.Logger:Log('ERROR', 'DB schema mismatch', Smartbot.db.version or 'nil', Smartbot.SCHEMA_VERSION)
         end
     end
 end
 
-function Health:CheckAdapter()
+function Smartbot.HealthCheck:CheckAdapter()
     assert(type(Smartbot.API) == 'table' and type(Smartbot.API.GetItemStatsSafe) == 'function', 'Missing Smartbot.API.GetItemStatsSafe')
     if debug and debug.getupvalue then
         for name, mod in pairs(Smartbot) do
@@ -78,15 +71,15 @@ function Health:CheckAdapter()
     end
 end
 
-function Health:CheckOptions()
-    if not (Settings and Settings.GetCategory and Smartbot.Options and Smartbot.Options.categoryID) then
+function Smartbot.HealthCheck:CheckOptions()
+    if not (_G.Settings and _G.Settings.GetCategory and Smartbot.Options and Smartbot.Options.categoryID) then
         if Smartbot.Logger then
             Smartbot.Logger:Log('WARN', 'Options not registered with Settings')
         end
     end
 end
 
-function Health:Verify()
+function Smartbot.HealthCheck:Verify()
     self:CheckLoadOrder()
     self:CheckAPIs()
     self:CheckInterface()
@@ -95,9 +88,9 @@ function Health:Verify()
     self:CheckOptions()
 end
 
-if hooksecurefunc then
-    hooksecurefunc('EquipItemByName', function()
-        if InCombatLockdown() or UnitAffectingCombat('player') then
+if _G.hooksecurefunc then
+    _G.hooksecurefunc('EquipItemByName', function()
+        if _G.InCombatLockdown() or _G.UnitAffectingCombat('player') then
             if Smartbot.Logger then
                 Smartbot.Logger:Log('ERROR', 'Equip attempted in combat')
             end
@@ -105,12 +98,12 @@ if hooksecurefunc then
     end)
 end
 
-local frame = CreateFrame('Frame')
+local frame = _G.CreateFrame('Frame')
 frame:RegisterEvent('ADDON_LOADED')
 frame:SetScript('OnEvent', function(_, _, name)
     if name == addonName then
-        Health:Verify()
+        Smartbot.HealthCheck:Verify()
     end
 end)
 
-return Health
+return Smartbot.HealthCheck

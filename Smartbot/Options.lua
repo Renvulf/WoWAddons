@@ -1,20 +1,12 @@
 local addonName, Smartbot = ...
 Smartbot.Options = Smartbot.Options or {}
-local Options = Smartbot.Options
-
-local CreateFrame = CreateFrame
-local Settings_RegisterCanvasLayoutCategory = Settings and Settings.RegisterCanvasLayoutCategory
-local Settings_RegisterAddOnCategory = Settings and Settings.RegisterAddOnCategory
-local Settings_OpenToCategory = Settings and Settings.OpenToCategory
-local UnitClass = UnitClass
-local GetSpecialization = GetSpecialization
 
 local panel
 
 local function getCurrentWeights()
-    local class = select(2, UnitClass('player'))
-    local spec = GetSpecialization() or 0
-    return (Smartbot.db and Smartbot.db.weights and Smartbot.db.weights[class] and Smartbot.db.weights[class][spec]) or {}
+    local class = select(2, _G.UnitClass('player'))
+    local spec = _G.GetSpecialization() or 0
+    return Smartbot.db and Smartbot.db.weights and Smartbot.db.weights[class] and Smartbot.db.weights[class][spec] or {}
 end
 
 local function updateWeightText()
@@ -27,7 +19,7 @@ local function updateWeightText()
     panel.weightText:SetText(#parts > 0 and table.concat(parts, ', ') or 'No weights yet')
 end
 
-function Options:ResetWeights()
+function Smartbot.Options:ResetWeights()
     if Smartbot.db then
         Smartbot.db.weights = {}
         Smartbot.db.modelMeta = {}
@@ -35,21 +27,21 @@ function Options:ResetWeights()
         if Smartbot.Logger then
             Smartbot.Logger:Log('INFO', 'Weights reset')
         else
-            print('Smartbot: weights reset')
+            _G.print('Smartbot: weights reset')
         end
     end
 end
 
-function Options:Build()
+function Smartbot.Options.Build()
     if not Smartbot.db then return end
     if panel then return panel end
-    panel = CreateFrame('Frame')
+    panel = _G.CreateFrame('Frame')
 
-    if Settings_RegisterCanvasLayoutCategory and Settings_RegisterAddOnCategory then
-        local category = Settings_RegisterCanvasLayoutCategory(panel, 'Smartbot')
-        Settings_RegisterAddOnCategory(category)
+    if _G.Settings and _G.Settings.RegisterCanvasLayoutCategory and _G.Settings.RegisterAddOnCategory then
+        local category = _G.Settings.RegisterCanvasLayoutCategory(panel, 'Smartbot')
+        _G.Settings.RegisterAddOnCategory(category)
         panel.categoryID = category.ID
-        Options.categoryID = category.ID
+        Smartbot.Options.categoryID = category.ID
     else
         if Smartbot.Logger then
             Smartbot.Logger:Log('WARN', 'Settings API unavailable')
@@ -60,7 +52,7 @@ function Options:Build()
     title:SetPoint('TOPLEFT', 16, -16)
     title:SetText('Smartbot')
 
-    local auto = CreateFrame('CheckButton', nil, panel, 'InterfaceOptionsCheckButtonTemplate')
+    local auto = _G.CreateFrame('CheckButton', nil, panel, 'InterfaceOptionsCheckButtonTemplate')
     auto:SetPoint('TOPLEFT', title, 'BOTTOMLEFT', 0, -8)
     auto.Text:SetText('Enable Auto Equip')
     auto:SetChecked(Smartbot.db.profile.autoEquip)
@@ -68,7 +60,7 @@ function Options:Build()
         Smartbot.db.profile.autoEquip = self:GetChecked()
     end)
 
-    local minDelta = CreateFrame('Slider', addonName..'MinDelta', panel, 'OptionsSliderTemplate')
+    local minDelta = _G.CreateFrame('Slider', addonName..'MinDelta', panel, 'OptionsSliderTemplate')
     minDelta:SetPoint('TOPLEFT', auto, 'BOTTOMLEFT', 0, -24)
     minDelta:SetMinMaxValues(0, 100)
     minDelta:SetValueStep(1)
@@ -81,7 +73,7 @@ function Options:Build()
         Smartbot.db.profile.minDelta = math.floor(value + 0.5)
     end)
 
-    local verb = CreateFrame('Slider', addonName..'Verbosity', panel, 'OptionsSliderTemplate')
+    local verb = _G.CreateFrame('Slider', addonName..'Verbosity', panel, 'OptionsSliderTemplate')
     verb:SetPoint('TOPLEFT', minDelta, 'BOTTOMLEFT', 0, -24)
     verb:SetMinMaxValues(0, 3)
     verb:SetValueStep(1)
@@ -102,22 +94,22 @@ function Options:Build()
     panel.weightText = wt
     updateWeightText()
 
-    local reset = CreateFrame('Button', nil, panel, 'UIPanelButtonTemplate')
+    local reset = _G.CreateFrame('Button', nil, panel, 'UIPanelButtonTemplate')
     reset:SetText('Reset Weights')
     reset:SetWidth(120)
     reset:SetHeight(22)
     reset:SetPoint('TOPLEFT', wt, 'BOTTOMLEFT', 0, -24)
-    reset:SetScript('OnClick', function() Options:ResetWeights() end)
+    reset:SetScript('OnClick', function() Smartbot.Options:ResetWeights() end)
 
     return panel
 end
 
-function Options:Open()
-    Options:Build()
-    if Settings_OpenToCategory and Options.categoryID then
-        Settings_OpenToCategory(Options.categoryID)
-    elseif Settings and SettingsPanel then
-        SettingsPanel:Show()
+function Smartbot.Options.Open()
+    Smartbot.Options.Build()
+    if _G.Settings and _G.Settings.OpenToCategory and Smartbot.Options.categoryID then
+        _G.Settings.OpenToCategory(Smartbot.Options.categoryID)
+    elseif _G.SettingsPanel then
+        _G.SettingsPanel:Show()
     end
 end
 
@@ -125,10 +117,10 @@ local function trim(s)
     return s:match('^%s*(.-)%s*$')
 end
 
-function Options:HandleSlash(msg)
+function Smartbot.Options.HandleSlash(msg)
     msg = trim(msg or ''):lower()
     if msg == '' or msg == 'options' then
-        Options:Open()
+        Smartbot.Options.Open()
         return true
     elseif msg == 'auto' then
         if Smartbot.db and Smartbot.db.profile then
@@ -137,22 +129,23 @@ function Options:HandleSlash(msg)
             if Smartbot.Logger then
                 Smartbot.Logger:Log('INFO', 'AutoEquip', state)
             else
-                print('Smartbot auto-equip', state)
+                _G.print('Smartbot auto-equip', state)
             end
         end
         return true
     elseif msg == 'reset' then
-        Options:ResetWeights()
+        Smartbot.Options:ResetWeights()
         return true
     end
-    Options:Open()
+    Smartbot.Options.Open()
     return true
 end
 
 SLASH_SMARTBOT1 = '/smartbot'
 SlashCmdList.SMARTBOT = function(msg)
-    if not Options:HandleSlash(msg) then
-        Options:Open()
+    if not Smartbot.Options.HandleSlash(msg) then
+        Smartbot.Options.Open()
     end
 end
 
+return Smartbot.Options

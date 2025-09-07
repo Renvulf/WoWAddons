@@ -3,12 +3,7 @@ _G.Smartbot = Smartbot
 
 Smartbot.SCHEMA_VERSION = 1
 
-local CreateFrame = CreateFrame
-local UnitAffectingCombat = UnitAffectingCombat
-local EquipItemByName = EquipItemByName
-local C_Timer_After = C_Timer and C_Timer.After
-
-local eventFrame = CreateFrame("Frame")
+local eventFrame = _G.CreateFrame("Frame")
 local equipQueue = {}
 local defaults = {
     version = Smartbot.SCHEMA_VERSION,
@@ -41,7 +36,9 @@ local function migrate(db, old)
 end
 
 local function processQueue()
-    if not (Smartbot.API and Smartbot.API.IsOutOfCombat and Smartbot.API.IsOutOfCombat()) or UnitAffectingCombat("player") then return end
+    if not (Smartbot.API and Smartbot.API.IsOutOfCombat and Smartbot.API.IsOutOfCombat()) or _G.UnitAffectingCombat("player") then
+        return
+    end
     if #equipQueue == 0 then return end
     local entry = table.remove(equipQueue, 1)
     if entry then
@@ -50,7 +47,7 @@ local function processQueue()
             if Smartbot.Equip and Smartbot.Equip.Validate and not Smartbot.Equip:Validate(item, slot) then
                 -- skip invalid or outdated entry
             else
-                local ok, err = pcall(EquipItemByName, item, slot)
+                local ok, err = pcall(_G.EquipItemByName, item, slot)
                 if not ok and Smartbot.Logger then
                     Smartbot.Logger:Log("WARN", "Equip failed", item, err)
                 end
@@ -58,7 +55,10 @@ local function processQueue()
         end
     end
     if #equipQueue > 0 then
-        C_Timer_After(0.5, processQueue)
+        local after = _G.C_Timer and _G.C_Timer.After
+        if after then
+            after(0.5, processQueue)
+        end
     end
 end
 
@@ -101,3 +101,5 @@ end)
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+
+return Smartbot

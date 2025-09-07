@@ -1,11 +1,5 @@
 local addonName, Smartbot = ...
 Smartbot.Tooltip = Smartbot.Tooltip or {}
-local Tooltip = Smartbot.Tooltip
-local ItemScore = Smartbot.ItemScore
-local Equip = Smartbot.Equip
-
-local AddTooltipPostCall = TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall
-local GetItemInfoInstant = _G.GetItemInfoInstant or (C_Item and C_Item.GetItemInfoInstant)
 
 local function formatDelta(delta)
     if delta > 0 then
@@ -18,26 +12,26 @@ local function formatDelta(delta)
 end
 
 local function compareScore(itemLink)
-    local _, _, _, equipLoc = GetItemInfoInstant(itemLink)
-    local slots = Equip.invTypeToSlots[equipLoc]
+    local _, _, _, equipLoc = _G.GetItemInfoInstant(itemLink)
+    local slots = Smartbot.Equip.invTypeToSlots[equipLoc]
     if not slots then
-        return ItemScore:GetScore(itemLink), 0
+        return Smartbot.ItemScore:GetScore(itemLink), 0
     end
-    local newScore = ItemScore:GetScore(itemLink)
+    local newScore = Smartbot.ItemScore:GetScore(itemLink)
     local delta
     if equipLoc == 'INVTYPE_FINGER' or equipLoc == 'INVTYPE_TRINKET' then
         for _, slot in ipairs(slots) do
-            local current = Equip.GetEquippedScore(slot)
+            local current = Smartbot.Equip.GetEquippedScore(slot)
             local d = newScore - current
             if not delta or d > delta then
                 delta = d
             end
         end
     elseif equipLoc == 'INVTYPE_2HWEAPON' then
-        local current = Equip.GetEquippedScore(slots[1]) + Equip.GetEquippedScore(slots[2])
+        local current = Smartbot.Equip.GetEquippedScore(slots[1]) + Smartbot.Equip.GetEquippedScore(slots[2])
         delta = newScore - current
     else
-        local current = Equip.GetEquippedScore(slots[1])
+        local current = Smartbot.Equip.GetEquippedScore(slots[1])
         delta = newScore - current
     end
     return newScore, delta
@@ -50,20 +44,19 @@ local function handleTooltip(tooltip, data)
     else
         _, itemLink = tooltip:GetItem()
     end
-    if not itemLink or not ItemScore:IsAllowed(itemLink) then return end
+    if not itemLink or not Smartbot.ItemScore:IsAllowed(itemLink) then return end
     local score, delta = compareScore(itemLink)
     tooltip:AddLine(string.format('Smartbot: %.1f (%s)', score, formatDelta(delta or 0)))
     tooltip:Show()
 end
 
-if AddTooltipPostCall and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Item then
-    AddTooltipPostCall(Enum.TooltipDataType.Item, handleTooltip)
+if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Item then
+    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, handleTooltip)
 else
-    local GameTooltip = GameTooltip
-    local HasScript = GameTooltip and GameTooltip.HasScript
-    if GameTooltip and GameTooltip.HookScript and HasScript and GameTooltip:HasScript('OnTooltipSetItem') then
+    local GameTooltip = _G.GameTooltip
+    if GameTooltip and GameTooltip.HookScript and GameTooltip.HasScript and GameTooltip:HasScript('OnTooltipSetItem') then
         GameTooltip:HookScript('OnTooltipSetItem', handleTooltip)
     end
 end
 
-return Tooltip
+return Smartbot.Tooltip

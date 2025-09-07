@@ -1,21 +1,25 @@
 local addonName, Smartbot = ...
 Smartbot.Logger = Smartbot.Logger or {}
-local Logger = Smartbot.Logger
 
-local MAX_LOGS = 100
 local buffer = {}
+local MAX_LOGS = 100
 
-function Logger:Log(level, ...)
+function Smartbot.Logger:Log(level, ...)
     local msg = table.concat({...}, " ")
     if #buffer >= MAX_LOGS then
         table.remove(buffer, 1)
     end
-    table.insert(buffer, {time = GetTime(), level = level, msg = msg})
+    table.insert(buffer, {time = _G.GetTime(), level = level, msg = msg})
     if Smartbot.db and Smartbot.db.profile and Smartbot.db.profile.verbosity > 0 then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99Smartbot|r " .. msg)
+        local frame = _G.DEFAULT_CHAT_FRAME
+        if frame and frame.AddMessage then
+            frame:AddMessage("|cff33ff99Smartbot|r " .. msg)
+        end
     end
 end
 
-function Logger:Get()
+function Smartbot.Logger:Get()
     return buffer
 end
+
+return Smartbot.Logger

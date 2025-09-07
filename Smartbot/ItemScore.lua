@@ -1,18 +1,6 @@
 local addonName, Smartbot = ...
 Smartbot.ItemScore = Smartbot.ItemScore or {}
-local ItemScore = Smartbot.ItemScore
 
-local GetItemInfoInstant = _G.GetItemInfoInstant or (C_Item and C_Item.GetItemInfoInstant)
-local UnitClass = _G.UnitClass
-local GetSpecialization = _G.GetSpecialization
-
-local ClassSpecRules = Smartbot.ClassSpecRules or {}
-
-local function GetStats(link)
-    return Smartbot.API.GetItemStatsSafe(link)
-end
-
--- Weapon and armor type mappings derived from ZygorGuidesViewer/Code-Retail/Item-DataTables.lua (MIT License)
 local weaponTypeMap = {
     [0] = 'AXE', [1] = 'TH_AXE', [2] = 'BOW', [3] = 'GUN', [4] = 'MACE',
     [5] = 'TH_MACE', [6] = 'TH_POLE', [7] = 'SWORD', [8] = 'TH_SWORD',
@@ -28,16 +16,17 @@ local armorTypeMap = {
 }
 
 local function getPlayerSpec()
-    local _, class = UnitClass('player')
-    local spec = GetSpecialization() or 0
+    local _, class = _G.UnitClass('player')
+    local spec = _G.GetSpecialization() or 0
     return class, spec
 end
 
 local function getRules()
+    local ClassSpecRules = Smartbot.ClassSpecRules or {}
     local class, spec = getPlayerSpec()
     local classRules = ClassSpecRules[class]
     if classRules then
-        return classRules[spec] or classRules[5] -- spec 5 before choosing spec
+        return classRules[spec] or classRules[5]
     end
 end
 
@@ -49,27 +38,31 @@ local function itemTypeToken(itemClassID, itemSubClassID)
     end
 end
 
-function ItemScore:IsAllowed(itemLink)
+local function getStats(link)
+    return Smartbot.API.GetItemStatsSafe(link)
+end
+
+function Smartbot.ItemScore:IsAllowed(itemLink)
     local rules = getRules()
     if not rules then return true end
-    local _, _, _, _, _, itemClassID, itemSubClassID = GetItemInfoInstant(itemLink)
+    local _, _, _, _, _, itemClassID, itemSubClassID = _G.GetItemInfoInstant(itemLink)
     local token = itemTypeToken(itemClassID, itemSubClassID)
     if not token then return true end
     return rules.itemtypes[token] or false
 end
 
-function ItemScore:GetScore(itemLink)
+function Smartbot.ItemScore:GetScore(itemLink)
     if type(itemLink) ~= 'string' or not string.find(itemLink, "|Hitem:") then
-        ItemScore.invalidLog = ItemScore.invalidLog or {}
-        if not ItemScore.invalidLog[itemLink] and Smartbot.Logger then
+        self.invalidLog = self.invalidLog or {}
+        if not self.invalidLog[itemLink] and Smartbot.Logger then
             Smartbot.Logger:Log('WARN', 'Invalid itemLink', tostring(itemLink))
-            ItemScore.invalidLog[itemLink] = true
+            self.invalidLog[itemLink] = true
         end
         return 0
     end
-    local stats = GetStats(itemLink) or {}
+    local stats = getStats(itemLink) or {}
     local class, spec = getPlayerSpec()
-    local weights = (Smartbot.db.weights[class] and Smartbot.db.weights[class][spec]) or {}
+    local weights = Smartbot.db and Smartbot.db.weights and Smartbot.db.weights[class] and Smartbot.db.weights[class][spec] or {}
     local score = 0
     for stat, value in pairs(stats) do
         local w = weights[stat] or 0
@@ -78,4 +71,4 @@ function ItemScore:GetScore(itemLink)
     return score
 end
 
-return ItemScore
+return Smartbot.ItemScore
