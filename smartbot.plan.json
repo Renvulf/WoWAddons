@@ -55,6 +55,11 @@
       "id": 11,
       "name": "Repair tooltip crash and equip slot taint; add link validation and docs",
       "status": "complete"
+    },
+    {
+      "id": 12,
+      "name": "Final stabilization pass",
+      "status": "complete"
     }
   ],
   "file_checksums": {
@@ -65,7 +70,7 @@
     "LICENSE": "731683113662b881f8b6ad6fa743c5d8bd9eb488ec2011104e384665cd1d6443",
     "THIRD_PARTY_NOTICES.md": "cab8b2aa1202c7604dcea720b3fabf10c8356d57c0c694ade8675302c5d7235d",
     "Smartbot/API.lua": "a46e3629a7d505d19f9a68429d14d057ab0b201035854ce9a7fc36819d50d0a2",
-    "Smartbot/HEALTH.md": "668b76a227e5eab9002589c41ac696ee901992de5dfd9cddac28ebdc5faab0e1",
+    "Smartbot/HEALTH.md": "26e02df54a046ffe8315bf8b27a79536026d5995f24a70bbda69e2331c14a89e",
     "Smartbot/ClassSpecRules.lua": "4e0f7a81b8169776d3111f151fee3568c5bba7eb7d49c43faa896fd6ec8974aa",
     "Smartbot/ItemScore.lua": "9242ea771b20f6679e1929a36659262fd7c7664f459a28562b6a432553623ed0",
     "Smartbot/tools/extract_rules.py": "04dea0aee02c0958ce9489d0c2aab3ad1f9e694d0cadee8f08e24e550e485776",

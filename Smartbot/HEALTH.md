@@ -10,5 +10,4 @@
 - Health checks validate API availability, interface version, load order, combat safety, DB schema version, adapter usage and Settings registration; warn on stray GetItemStats locals, tooltip:GetItem and improper equip slots
 
 ## Next Steps
-- None
-
+- None; repository healthy
