@@ -9,7 +9,7 @@
 - Online learner with per-spec weights and persistence active
 - Health checks validate API availability, interface version, load order, combat safety,
   DB schema version, adapter usage and Settings registration; warn on stray GetItemStats
-  locals, tooltip:GetItem and improper equip slots (none detected)
+  locals, tooltip:GetItem usage, forbidden stdlib and improper equip slots (none detected)
 
 ## Next Steps
 - None; repository healthy

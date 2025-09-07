@@ -79,13 +79,18 @@ function Smartbot.HealthCheck:CheckOptions()
     end
 end
 
-function Smartbot.HealthCheck:CheckTooltipSource()
-    local f = io.open('Smartbot/Tooltip.lua', 'r')
-    if f then
-        local content = f:read('*a')
-        f:close()
-        if content and string.find(content, ':GetItem') and Smartbot.Logger then
-            Smartbot.Logger:Log('WARN', 'Tooltip.lua uses :GetItem')
+function Smartbot.HealthCheck:CheckForbiddenStdLib()
+    for _, sym in ipairs({ 'io', 'os', 'package', 'require' }) do
+        if _G[sym] and Smartbot.Logger then
+            Smartbot.Logger:Log('WARN', 'Forbidden stdlib present', sym)
+        end
+    end
+end
+
+function Smartbot.HealthCheck:CheckTooltipHealth()
+    if Smartbot.Tooltip and Smartbot.Tooltip.health and Smartbot.Tooltip.health.usesGetItem then
+        if Smartbot.Logger then
+            Smartbot.Logger:Log('WARN', 'Tooltip used :GetItem')
         end
     end
 end
@@ -97,7 +102,8 @@ function Smartbot.HealthCheck:Verify()
     self:CheckDBVersion()
     self:CheckAdapter()
     self:CheckOptions()
-    self:CheckTooltipSource()
+    self:CheckForbiddenStdLib()
+    self:CheckTooltipHealth()
 end
 
 if _G.hooksecurefunc then

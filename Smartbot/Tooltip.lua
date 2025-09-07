@@ -1,5 +1,6 @@
 local addonName, Smartbot = ...
 Smartbot.Tooltip = Smartbot.Tooltip or {}
+Smartbot.Tooltip.health = Smartbot.Tooltip.health or { usesGetItem = false }
 
 local function OnItemTooltip(tooltip, data)
     if not data or data.type ~= Enum.TooltipDataType.Item then return end
