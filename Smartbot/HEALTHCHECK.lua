@@ -79,6 +79,17 @@ function Smartbot.HealthCheck:CheckOptions()
     end
 end
 
+function Smartbot.HealthCheck:CheckTooltipSource()
+    local f = io.open('Smartbot/Tooltip.lua', 'r')
+    if f then
+        local content = f:read('*a')
+        f:close()
+        if content and string.find(content, ':GetItem') and Smartbot.Logger then
+            Smartbot.Logger:Log('WARN', 'Tooltip.lua uses :GetItem')
+        end
+    end
+end
+
 function Smartbot.HealthCheck:Verify()
     self:CheckLoadOrder()
     self:CheckAPIs()
@@ -86,6 +97,7 @@ function Smartbot.HealthCheck:Verify()
     self:CheckDBVersion()
     self:CheckAdapter()
     self:CheckOptions()
+    self:CheckTooltipSource()
 end
 
 if _G.hooksecurefunc then
@@ -93,6 +105,15 @@ if _G.hooksecurefunc then
         if _G.InCombatLockdown() or _G.UnitAffectingCombat('player') then
             if Smartbot.Logger then
                 Smartbot.Logger:Log('ERROR', 'Equip attempted in combat')
+            end
+        end
+    end)
+    _G.hooksecurefunc(Smartbot, 'QueueEquip', function(_, link, slot)
+        if slot then
+            local equipLoc = select(4, _G.GetItemInfoInstant(link))
+            local ambig = { INVTYPE_FINGER = true, INVTYPE_TRINKET = true, INVTYPE_WEAPON = true }
+            if equipLoc and not ambig[equipLoc] and Smartbot.Logger then
+                Smartbot.Logger:Log('WARN', 'QueueEquip passed slot for non-ambiguous equipLoc', equipLoc)
             end
         end
     end)
@@ -107,3 +128,4 @@ frame:SetScript('OnEvent', function(_, _, name)
 end)
 
 return Smartbot.HealthCheck
+

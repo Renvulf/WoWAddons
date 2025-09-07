@@ -2,6 +2,9 @@
 
 Smartbot is a World of Warcraft Retail addon that learns per-spec stat weights from play and can automatically equip upgrades out of combat. It integrates with Details! Damage Meter when available, falling back to a lightweight internal meter otherwise.
 
+- Tooltip resolver uses TooltipDataProcessor item data (guid/hyperlink/id) rather than per-tooltip methods.
+- Equips prefer automatic slot resolution; explicit slots are only used for ambiguous locations like rings, trinkets and generic weapons.
+
 ## Usage
 1. Install Smartbot in `Interface/AddOns`.
 2. In game, type `/smartbot` to open the settings panel.
@@ -13,3 +16,4 @@ This repository also contains reference addons used for API discovery. Smartbot 
 
 ## License
 Smartbot is released under the MIT License. See `LICENSE` for details.
+

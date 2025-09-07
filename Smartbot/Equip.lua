@@ -2,7 +2,7 @@ local addonName, Smartbot = ...
 Smartbot.Equip = Smartbot.Equip or {}
 
 local function isValidLink(link)
-    return type(link) == 'string' and string.find(link, '|Hitem:')
+    return Smartbot.API and Smartbot.API.IsValidItemLink and Smartbot.API.IsValidItemLink(link)
 end
 
 local slots = {
@@ -48,6 +48,8 @@ local invTypeToSlots = {
 
 Smartbot.Equip.invTypeToSlots = invTypeToSlots
 
+local AMBIG = { INVTYPE_FINGER = true, INVTYPE_TRINKET = true, INVTYPE_WEAPON = true }
+
 local lastEquipTime = {}
 
 local function getEquippedScore(slot)
@@ -62,8 +64,22 @@ function Smartbot.Equip.GetEquippedScore(slot)
     return getEquippedScore(slot)
 end
 
+function Smartbot.Equip:PickWeakerSlot(itemLink, equipLoc)
+    local slotsGroup = invTypeToSlots[equipLoc]
+    if not slotsGroup then return end
+    local weakest, minScore
+    for _, slot in ipairs(slotsGroup) do
+        local s = self.GetEquippedScore(slot)
+        if not minScore or s < minScore then
+            minScore = s
+            weakest = slot
+        end
+    end
+    return weakest
+end
+
 function Smartbot.Equip:Validate(itemLink, slot)
-    local _, _, _, equipLoc = _G.GetItemInfoInstant(itemLink)
+    local equipLoc = select(4, _G.GetItemInfoInstant(itemLink))
     local slotsGroup = invTypeToSlots[equipLoc]
     if not slotsGroup then return false end
     local delta
@@ -92,15 +108,16 @@ local function shouldEquip(slot)
     return true
 end
 
-local function queueUpgrade(itemLink, slot)
+local function queueUpgrade(itemLink, slot, equipLoc)
     if not isValidLink(itemLink) or not slot then return end
     if not Smartbot.Equip:Validate(itemLink, slot) then return end
     if not Smartbot.API.IsOutOfCombat() or _G.UnitAffectingCombat('player') then return end
     if not shouldEquip(slot) then return end
-    Smartbot:QueueEquip(itemLink, slot)
+    local passSlot = AMBIG[equipLoc] and slot or nil
+    Smartbot:QueueEquip(itemLink, passSlot)
 end
 
-local function evaluateBasic(itemLink, slotsGroup)
+local function evaluateBasic(itemLink, slotsGroup, equipLoc)
     local minDelta = Smartbot.db.profile.minDelta or 0
     local newScore = Smartbot.ItemScore:GetScore(itemLink)
     local bestSlot, bestDelta
@@ -113,7 +130,7 @@ local function evaluateBasic(itemLink, slotsGroup)
         end
     end
     if bestSlot then
-        queueUpgrade(itemLink, bestSlot)
+        queueUpgrade(itemLink, bestSlot, equipLoc)
     end
 end
 
@@ -122,7 +139,7 @@ local function evaluateTwoHand(itemLink)
     local current = select(1, getEquippedScore(mh)) + select(1, getEquippedScore(oh))
     local newScore = Smartbot.ItemScore:GetScore(itemLink)
     if newScore - current >= (Smartbot.db.profile.minDelta or 0) then
-        queueUpgrade(itemLink, mh)
+        queueUpgrade(itemLink, mh, 'INVTYPE_2HWEAPON')
     end
 end
 
@@ -133,13 +150,13 @@ local function evaluateOneHandCandidates(candidates)
     if #candidates >= 2 then
         local newScore = candidates[1].score + candidates[2].score
         if newScore - current >= (Smartbot.db.profile.minDelta or 0) then
-            queueUpgrade(candidates[1].link, mhSlot)
-            queueUpgrade(candidates[2].link, ohSlot)
+            queueUpgrade(candidates[1].link, mhSlot, 'INVTYPE_WEAPON')
+            queueUpgrade(candidates[2].link, ohSlot, 'INVTYPE_WEAPON')
             return
         end
     end
     for _, cand in ipairs(candidates) do
-        evaluateBasic(cand.link, {mhSlot, ohSlot})
+        evaluateBasic(cand.link, {mhSlot, ohSlot}, 'INVTYPE_WEAPON')
     end
 end
 
@@ -171,9 +188,9 @@ function Smartbot.Equip:Scan()
                     elseif equipLoc == 'INVTYPE_WEAPON' then
                         table.insert(oneHand, {link = link, score = Smartbot.ItemScore:GetScore(link)})
                     elseif equipLoc == 'INVTYPE_WEAPONMAINHAND' or equipLoc == 'INVTYPE_WEAPONOFFHAND' or equipLoc == 'INVTYPE_SHIELD' or equipLoc == 'INVTYPE_HOLDABLE' then
-                        evaluateBasic(link, group)
+                        evaluateBasic(link, group, equipLoc)
                     else
-                        evaluateBasic(link, group)
+                        evaluateBasic(link, group, equipLoc)
                     end
                 end
             end
@@ -191,6 +208,84 @@ function Smartbot.Equip:Scan()
     end
 end
 
+local equipFailLog = {}
+
+function Smartbot.Equip.SafeEquipLink(itemLink, srcBag, srcSlot, desiredInvSlotId)
+    if not (Smartbot.API and Smartbot.API.IsOutOfCombat and Smartbot.API.IsOutOfCombat()) then
+        return false, 'in_combat'
+    end
+    if not isValidLink(itemLink) then
+        return false, 'bad_link'
+    end
+    local ok = pcall(_G.EquipItemByName, itemLink)
+    if ok then return true end
+    local equipLoc = select(4, _G.GetItemInfoInstant(itemLink))
+    if not equipLoc then
+        if Smartbot.Logger and not equipFailLog[itemLink] then
+            Smartbot.Logger:Log('WARN', 'Equip failed', itemLink, 'no_equipLoc')
+            equipFailLog[itemLink] = true
+        end
+        return false, 'equip_failed'
+    end
+    if not AMBIG[equipLoc] and not desiredInvSlotId then
+        if srcBag and srcSlot then
+            if _G.ClearCursor then _G.ClearCursor() end
+            if _G.C_Container and _G.C_Container.PickupContainerItem then
+                _G.C_Container.PickupContainerItem(srcBag, srcSlot)
+            elseif _G.PickupContainerItem then
+                _G.PickupContainerItem(srcBag, srcSlot)
+            end
+            local invId = invTypeToSlots[equipLoc]
+            invId = invId and invId[1]
+            if invId and _G.EquipCursorItem then
+                _G.EquipCursorItem(invId)
+                if _G.ClearCursor then _G.ClearCursor() end
+                return true
+            end
+            if _G.ClearCursor then _G.ClearCursor() end
+        end
+        if Smartbot.Logger and not equipFailLog[itemLink] then
+            Smartbot.Logger:Log('WARN', 'Equip failed', itemLink, 'dstSlot_unused')
+            equipFailLog[itemLink] = true
+        end
+        return false, 'equip_failed'
+    end
+    local invId = desiredInvSlotId
+    if not invId then
+        invId = Smartbot.Equip:PickWeakerSlot(itemLink, equipLoc)
+    end
+    if not invId then
+        if Smartbot.Logger and not equipFailLog[itemLink] then
+            Smartbot.Logger:Log('WARN', 'Equip failed', itemLink, 'no_invId')
+            equipFailLog[itemLink] = true
+        end
+        return false, 'equip_failed'
+    end
+    if srcBag and srcSlot then
+        if _G.ClearCursor then _G.ClearCursor() end
+        if _G.C_Container and _G.C_Container.PickupContainerItem then
+            _G.C_Container.PickupContainerItem(srcBag, srcSlot)
+        elseif _G.PickupContainerItem then
+            _G.PickupContainerItem(srcBag, srcSlot)
+        end
+    else
+        if _G.PickupItem then
+            _G.PickupItem(itemLink)
+        end
+    end
+    if _G.EquipCursorItem then
+        _G.EquipCursorItem(invId)
+        if _G.ClearCursor then _G.ClearCursor() end
+        return true
+    end
+    if Smartbot.Logger and not equipFailLog[itemLink] then
+        Smartbot.Logger:Log('WARN', 'Equip failed', itemLink, 'fallback_failed')
+        equipFailLog[itemLink] = true
+    end
+    if _G.ClearCursor then _G.ClearCursor() end
+    return false, 'equip_failed'
+end
+
 local frame = _G.CreateFrame('Frame')
 frame:RegisterEvent('PLAYER_LOGIN')
 frame:RegisterEvent('BAG_UPDATE_DELAYED')
@@ -199,4 +294,3 @@ frame:SetScript('OnEvent', function()
     Smartbot.Equip:Scan()
 end)
 
-return Smartbot.Equip

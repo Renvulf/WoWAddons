@@ -47,7 +47,7 @@ local function processQueue()
             if Smartbot.Equip and Smartbot.Equip.Validate and not Smartbot.Equip:Validate(item, slot) then
                 -- skip invalid or outdated entry
             else
-                local ok, err = pcall(_G.EquipItemByName, item, slot)
+                local ok, err = Smartbot.Equip and Smartbot.Equip.SafeEquipLink and Smartbot.Equip.SafeEquipLink(item, nil, nil, slot)
                 if not ok and Smartbot.Logger then
                     Smartbot.Logger:Log("WARN", "Equip failed", item, err)
                 end
@@ -103,3 +103,4 @@ eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 
 return Smartbot
+
