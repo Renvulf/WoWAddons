@@ -1101,6 +1101,119 @@ FOUR_PHYSICAL_ONLY: Dict[str, bool] = {
     "Quaquaval": True,
 }
 
+# =========================
+# PATCH: SV 1v1 — Legality-correct movepools + Aqua Step speed buff
+# (Overrides original definitions below.)
+# =========================
+
+LEGAL_MOVES = {
+    "Swampert": [
+        # Water STAB
+        "Waterfall",
+        "Liquidation",
+        # Ground STAB
+        "Earthquake",
+        "Bulldoze",
+        "Stomping Tantrum",  # Tantrum modeled at base 75 for now
+        # Ice coverage
+        "Ice Punch",
+        "Ice Fang",
+        "Avalanche",
+        # Rock coverage
+        "Rock Slide",
+        "Stone Edge",
+        "Rock Tomb",
+        # Utility
+        "Protect",
+    ],
+    "Blaziken": [
+        # Fire STAB
+        "Flare Blitz",
+        "Blaze Kick",
+        "Fire Punch",
+        # Fighting STAB
+        "Close Combat",
+        "Brick Break",
+        # Ground/Rock coverage
+        "Earthquake",
+        "Rock Slide",
+        "Stone Edge",
+        # Other physical coverage
+        "Thunder Punch",
+        "Shadow Claw",
+        "Brave Bird",
+        "Knock Off",
+        "U-turn",
+        # Utility
+        "Swords Dance",
+        "Protect",
+    ],
+    "Quaquaval": [
+        # Water STAB
+        "Aqua Step",
+        "Liquidation",
+        "Waterfall",
+        "Aqua Cutter",
+        # Fighting STAB
+        "Close Combat",
+        "Brick Break",
+        # Ice/Flying coverage
+        "Ice Spinner",
+        "Brave Bird",
+        "Acrobatics",
+        # Dark/Bug/Pivot
+        "Knock Off",
+        "U-turn",
+        # Utility
+        "Swords Dance",
+        "Protect",
+    ],
+}
+
+MOVE_POOLS = {k: list(LEGAL_MOVES[k]) for k in ["Swampert", "Blaziken", "Quaquaval"]}
+
+if "Waterfall" not in MOVE_DB:
+    MOVE_DB["Waterfall"] = Move("Waterfall", "Water", "Physical", 80, 1.0, contact=True)
+if "Aqua Cutter" not in MOVE_DB:
+    MOVE_DB["Aqua Cutter"] = Move("Aqua Cutter", "Water", "Physical", 70, 1.0, contact=True)
+if "Bulldoze" not in MOVE_DB:
+    MOVE_DB["Bulldoze"] = Move("Bulldoze", "Ground", "Physical", 60, 1.0, contact=False)
+if "Stomping Tantrum" not in MOVE_DB:
+    MOVE_DB["Stomping Tantrum"] = Move(
+        "Stomping Tantrum", "Ground", "Physical", 75, 1.0, contact=True
+    )
+if "Ice Fang" not in MOVE_DB:
+    MOVE_DB["Ice Fang"] = Move("Ice Fang", "Ice", "Physical", 65, 0.95, contact=True)
+if "Avalanche" not in MOVE_DB:
+    MOVE_DB["Avalanche"] = Move("Avalanche", "Ice", "Physical", 60, 1.0, contact=True)
+if "Rock Tomb" not in MOVE_DB:
+    MOVE_DB["Rock Tomb"] = Move("Rock Tomb", "Rock", "Physical", 60, 0.95, contact=False)
+if "Blaze Kick" not in MOVE_DB:
+    MOVE_DB["Blaze Kick"] = Move("Blaze Kick", "Fire", "Physical", 85, 0.9, contact=True)
+if "Fire Punch" not in MOVE_DB:
+    MOVE_DB["Fire Punch"] = Move(
+        "Fire Punch", "Fire", "Physical", 75, 1.0, contact=True, is_punch=True
+    )
+if "Thunder Punch" not in MOVE_DB:
+    MOVE_DB["Thunder Punch"] = Move(
+        "Thunder Punch", "Electric", "Physical", 75, 1.0, contact=True, is_punch=True
+    )
+if "Brick Break" not in MOVE_DB:
+    MOVE_DB["Brick Break"] = Move("Brick Break", "Fighting", "Physical", 75, 1.0, contact=True)
+if "Aerial Ace" not in MOVE_DB:
+    MOVE_DB["Aerial Ace"] = Move("Aerial Ace", "Flying", "Physical", 60, 1.0, contact=True)
+if "Acrobatics" not in MOVE_DB:
+    MOVE_DB["Acrobatics"] = Move("Acrobatics", "Flying", "Physical", 55, 1.0, contact=True)
+if "U-turn" not in MOVE_DB:
+    MOVE_DB["U-turn"] = Move("U-turn", "Bug", "Physical", 70, 1.0, contact=True)
+
+
+def assert_legal_moves(species: str, moves: List[str]) -> None:
+    legal = set(LEGAL_MOVES.get(species, []))
+    bad = [m for m in moves if m not in legal]
+    if bad:
+        raise ValueError(f"Illegal moves for {species}: {bad}")
+
 
 # =========================
 #    ADVERSARY GENERATION
@@ -1413,6 +1526,23 @@ def apply_stat_side_effects_after(self_state: BattleState, move: Move):
     elif move.name == "Headlong Rush":
         self_state.stages["Def"] = max(-6, self_state.stages["Def"] - 1)
         self_state.stages["SpD"] = max(-6, self_state.stages["SpD"] - 1)
+
+
+# Override with Aqua Step boost while retaining existing drops
+def apply_stat_side_effects_after(self_state: BattleState, move: Move):
+    if move.name == "Close Combat":
+        self_state.stages["Def"] = max(-6, self_state.stages["Def"] - 1)
+        self_state.stages["SpD"] = max(-6, self_state.stages["SpD"] - 1)
+    elif move.name == "Draco Meteor":
+        self_state.stages["SpA"] = max(-6, self_state.stages["SpA"] - 2)
+    elif move.name == "Leaf Storm":
+        self_state.stages["SpA"] = max(-6, self_state.stages["SpA"] - 2)
+    elif move.name == "Headlong Rush":
+        self_state.stages["Def"] = max(-6, self_state.stages["Def"] - 1)
+        self_state.stages["SpD"] = max(-6, self_state.stages["SpD"] - 1)
+
+    if move.name == "Aqua Step":
+        self_state.stages["Spe"] = min(6, self_state.stages["Spe"] + 1)
 
 
 def is_contact_effective(move: Move, attacker_item: str) -> bool:
@@ -2197,6 +2327,49 @@ def enumerate_candidates_for_species(species: str) -> List[SetBuild]:
                     for mv in sample_movesets(movesets):
                         if not filter_moveset_by_item(item, mv):
                             continue
+                        cands.append(
+                            SetBuild(
+                                species=species,
+                                item=item,
+                                ability=spec.ability_hint,
+                                tera_type=tera,
+                                nature=nature,
+                                evs=evs,
+                                ivs=ivs,
+                                moves=mv,
+                            )
+                        )
+    return cands
+
+
+def enumerate_candidates_for_species(species: str) -> List[SetBuild]:
+    spec = SPECIES_DATA[species]
+    items = ITEM_CANDIDATES[species]
+    teras = TERA_POOLS[species]
+    movesets = movesets_from_pool(MOVE_POOLS[species], FOUR_PHYSICAL_ONLY[species])
+
+    if pick_offense_category(spec) == "Physical":
+        ev_axes = ("HP", "Atk", "Def", "Spe")
+    else:
+        ev_axes = ("HP", "SpA", "SpD", "Spe")
+
+    ev_packs = iterate_evs_axes(ev_axes)
+    ivs = {k: 31 for k in ["HP", "Atk", "Def", "SpA", "SpD", "Spe"]}
+
+    def sample_movesets(ms: List[List[str]]) -> List[List[str]]:
+        return ms[:16] + ms[16:48:2]
+
+    cands = []
+    for item in items:
+        for tera in teras:
+            for nature in (
+                ["Jolly", "Adamant"] if species != "Swampert" else ["Adamant", "Careful", "Impish"]
+            ):
+                for evs in ev_packs:
+                    for mv in sample_movesets(movesets):
+                        if not filter_moveset_by_item(item, mv):
+                            continue
+                        assert_legal_moves(species, mv)
                         cands.append(
                             SetBuild(
                                 species=species,
