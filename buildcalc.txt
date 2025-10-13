@@ -1,0 +1,2564 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+SV 1v1 (L100) PERFECT-BUILD OPTIMIZER — CPU-ONLY, SINGLE FILE
+Version: 3.0.1 (Gen9-lite mechanics with optimal-play & stochastic branching, Py3.9+)
+Author: ChatGPT (single-file, no web, no external deps)
+
+WHAT'S NEW (3.0.1 over 3.0.0)
+-----------------------------
+- FIX: Grounded check now uses current defensive typing (post-Tera) so Electric Terrain
+  boosts apply correctly when Flying is lost (or gained) via Terastallization.
+- FIX: Tera Blast category now switches to Physical/Special ONLY when Terastallized,
+  using the higher of Atk vs SpA; otherwise it remains Normal/Special.
+- Minor internal cleanups; mechanics & scoring unchanged.
+
+WHAT'S NEW (3.0.0 over 2.2.1)
+-----------------------------
+- CORE: True stochastic rules. We branch on hit/miss (and always-crit where relevant) instead of
+  multiplying by accuracy. All thresholded effects (Focus Sash, Sturdy, Sitrus, Weakness Policy,
+  recoil, Multiscale) now fire on actual hits only.
+- ENDING: Official 1v1 sudden-death: after EXACTLY 3 full turns (or earlier KOs), higher %HP wins;
+  equal is a tie. No heuristic horizon eval.
+- FIELDS: Sun and Electric Terrain now boost move power properly (Sun: Fire×1.5, Water×0.5;
+  Electric Terrain: grounded Electric×1.3). “Grounded” approximated by current defensive typing.
+- TERA: Tera timing is applied before acting; STAB rules consistent for non–Tera Blast moves.
+- CHOICE LOCK: Runtime enforcement—once locked, only that move remains (no status/counter/coat).
+- SCORING: Mean P(win) vs each threat’s variant mix (equal weights by default) instead of worst-case.
+  Trio metric uses best-of-three vs a threat’s variant mixture.
+- SEARCH: SEARCH_TURNS is now 3 by default (full 1v1 window). EV refine runs on top candidates.
+
+USAGE
+-----
+$ python sv1v1_optimizer.py
+- Tune speed/quality: EV_STEPS, SEARCH_TURNS (keep 3 for faithful 1v1), THREAT_LIST.
+- No dependencies. Deterministic given the code (stochastic is computed exactly by branching).
+
+LICENSE
+-------
+Public domain (as-is). No warranty.
+"""
+
+import copy
+import itertools
+import math
+import os
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from functools import lru_cache
+from typing import Callable, Dict, List, Optional, Tuple, Union
+
+# =========================
+#     TYPE CHART (GEN 9)
+# =========================
+TYPES = [
+    "Normal",
+    "Fire",
+    "Water",
+    "Electric",
+    "Grass",
+    "Ice",
+    "Fighting",
+    "Poison",
+    "Ground",
+    "Flying",
+    "Psychic",
+    "Bug",
+    "Rock",
+    "Ghost",
+    "Dragon",
+    "Dark",
+    "Steel",
+    "Fairy",
+]
+
+N = len(TYPES)
+type_index: Dict[str, int] = {t: i for i, t in enumerate(TYPES)}
+effectiveness: List[List[float]] = [[1.0 for _ in range(N)] for _ in range(N)]
+
+
+def _se(a: str, b: str, m: float) -> None:
+    effectiveness[type_index[a]][type_index[b]] = m
+
+
+# Normal
+_se("Normal", "Rock", 0.5)
+_se("Normal", "Ghost", 0.0)
+_se("Normal", "Steel", 0.5)
+# Fire
+for b in ["Grass", "Ice", "Bug", "Steel"]:
+    _se("Fire", b, 2.0)
+for b in ["Fire", "Water", "Rock", "Dragon"]:
+    _se("Fire", b, 0.5)
+# Water
+for b in ["Fire", "Ground", "Rock"]:
+    _se("Water", b, 2.0)
+for b in ["Water", "Grass", "Dragon"]:
+    _se("Water", b, 0.5)
+# Electric
+for b in ["Water", "Flying"]:
+    _se("Electric", b, 2.0)
+for b in ["Electric", "Grass", "Dragon"]:
+    _se("Electric", b, 0.5)
+_se("Electric", "Ground", 0.0)
+# Grass
+for b in ["Water", "Ground", "Rock"]:
+    _se("Grass", b, 2.0)
+for b in ["Fire", "Grass", "Poison", "Flying", "Bug", "Dragon", "Steel"]:
+    _se("Grass", b, 0.5)
+# Ice
+for b in ["Grass", "Ground", "Flying", "Dragon"]:
+    _se("Ice", b, 2.0)
+for b in ["Fire", "Water", "Ice", "Steel"]:
+    _se("Ice", b, 0.5)
+# Fighting
+for b in ["Normal", "Ice", "Rock", "Dark", "Steel"]:
+    _se("Fighting", b, 2.0)
+for b in ["Poison", "Flying", "Psychic", "Bug", "Fairy"]:
+    _se("Fighting", b, 0.5)
+_se("Fighting", "Ghost", 0.0)
+# Poison
+for b in ["Grass", "Fairy"]:
+    _se("Poison", b, 2.0)
+for b in ["Poison", "Ground", "Rock", "Ghost"]:
+    _se("Poison", b, 0.5)
+_se("Poison", "Steel", 0.0)
+# Ground
+for b in ["Fire", "Electric", "Poison", "Rock", "Steel"]:
+    _se("Ground", b, 2.0)
+for b in ["Grass", "Bug"]:
+    _se("Ground", b, 0.5)
+_se("Ground", "Flying", 0.0)
+# Flying
+for b in ["Grass", "Fighting", "Bug"]:
+    _se("Flying", b, 2.0)
+for b in ["Electric", "Rock", "Steel"]:
+    _se("Flying", b, 0.5)
+# Psychic
+for b in ["Fighting", "Poison"]:
+    _se("Psychic", b, 2.0)
+for b in ["Psychic", "Steel"]:
+    _se("Psychic", b, 0.5)
+_se("Psychic", "Dark", 0.0)
+# Bug
+for b in ["Grass", "Psychic", "Dark"]:
+    _se("Bug", b, 2.0)
+for b in ["Fire", "Fighting", "Poison", "Flying", "Ghost", "Steel", "Fairy"]:
+    _se("Bug", b, 0.5)
+# Rock
+for b in ["Fire", "Ice", "Flying", "Bug"]:
+    _se("Rock", b, 2.0)
+for b in ["Fighting", "Ground", "Steel"]:
+    _se("Rock", b, 0.5)
+# Ghost
+for b in ["Psychic", "Ghost"]:
+    _se("Ghost", b, 2.0)
+for b in ["Dark"]:
+    _se("Ghost", b, 0.5)
+_se("Ghost", "Normal", 0.0)
+# Dragon
+for b in ["Dragon"]:
+    _se("Dragon", b, 2.0)
+for b in ["Steel"]:
+    _se("Dragon", b, 0.5)
+_se("Dragon", "Fairy", 0.0)
+# Dark
+for b in ["Psychic", "Ghost"]:
+    _se("Dark", b, 2.0)
+for b in ["Fighting", "Dark", "Fairy"]:
+    _se("Dark", b, 0.5)
+# Steel
+for b in ["Ice", "Rock", "Fairy"]:
+    _se("Steel", b, 2.0)
+for b in ["Fire", "Water", "Electric", "Steel"]:
+    _se("Steel", b, 0.5)
+# Fairy
+for b in ["Fighting", "Dragon", "Dark"]:
+    _se("Fairy", b, 2.0)
+for b in ["Fire", "Poison", "Steel"]:
+    _se("Fairy", b, 0.5)
+
+# Cache type multipliers (hot path)
+_type_mult_cache: Dict[Tuple[int, int, int], float] = {}
+
+
+def type_mult(move_type: str, defender_types: List[str]) -> float:
+    t1 = type_index[move_type]
+    d1 = type_index[defender_types[0]] if defender_types else -1
+    d2 = type_index[defender_types[1]] if len(defender_types) > 1 else -1
+    key = (t1, d1, d2)
+    if key in _type_mult_cache:
+        return _type_mult_cache[key]
+    m = 1.0
+    for dt in defender_types:
+        m *= effectiveness[t1][type_index[dt]]
+    _type_mult_cache[key] = m
+    return m
+
+
+# =========================
+#       NATURES (L100)
+# =========================
+NATURES: Dict[str, Tuple[Optional[str], Optional[str]]] = {
+    "Adamant": ("Atk", "SpA"),
+    "Jolly": ("Spe", "SpA"),
+    "Modest": ("SpA", "Atk"),
+    "Timid": ("Spe", "Atk"),
+    "Careful": ("SpD", "SpA"),
+    "Calm": ("SpD", "Atk"),
+    "Impish": ("Def", "SpA"),
+    "Bold": ("Def", "Atk"),
+    "Hasty": ("Spe", "Def"),
+    "Naive": ("Spe", "SpD"),
+    "Naughty": ("Atk", "SpD"),
+    "Rash": ("SpA", "SpD"),
+    "Mild": ("SpA", "Def"),
+    "Lonely": ("Atk", "Def"),
+    "Bashful": (None, None),
+    "Docile": (None, None),
+    "Serious": (None, None),
+    "Hardy": (None, None),
+    "Quirky": (None, None),
+    "Gentle": ("SpD", "Def"),
+}
+
+
+def nature_mult(nature: str, stat: str) -> float:
+    up, down = NATURES.get(nature, (None, None))
+    if up == stat:
+        return 1.1
+    if down == stat:
+        return 0.9
+    return 1.0
+
+
+# =========================
+#         MOVES
+# =========================
+@dataclass(frozen=True)
+class Move:
+    name: str
+    mtype: str
+    category: str  # "Physical" or "Special" or "Status"
+    power: int = 0
+    accuracy: float = 1.0
+    contact: bool = False
+    is_punch: bool = False
+    multi_hits: int = 1
+    always_crit: bool = False
+    priority: int = 0
+    is_counter: bool = False
+    is_mirror_coat: bool = False
+    is_protect: bool = False
+    is_swords_dance: bool = False
+    is_tera_blast: bool = False
+    # optional simple flags for common Gen 9 moves we included
+    first_turn_only: bool = False  # e.g., First Impression
+
+
+MOVE_DB: Dict[str, Move] = {
+    # Utility
+    "Protect": Move("Protect", "Normal", "Status", 0, 1.0, priority=4, is_protect=True),
+    "Detect": Move(
+        "Detect", "Normal", "Status", 0, 1.0, priority=4, is_protect=True
+    ),  # alias
+    "Swords Dance": Move(
+        "Swords Dance", "Normal", "Status", 0, 1.0, is_swords_dance=True
+    ),
+    "Counter": Move(
+        "Counter", "Fighting", "Physical", 0, 1.0, priority=-5, is_counter=True
+    ),
+    "Mirror Coat": Move(
+        "Mirror Coat", "Psychic", "Special", 0, 1.0, priority=-5, is_mirror_coat=True
+    ),
+    # Tera Blast
+    "Tera Blast": Move("Tera Blast", "Normal", "Special", 80, 1.0, is_tera_blast=True),
+    # Physical staples
+    "Earthquake": Move("Earthquake", "Ground", "Physical", 100, 1.0),
+    "Liquidation": Move("Liquidation", "Water", "Physical", 85, 1.0, contact=True),
+    "Ice Punch": Move(
+        "Ice Punch", "Ice", "Physical", 75, 1.0, contact=True, is_punch=True
+    ),
+    "Rock Slide": Move("Rock Slide", "Rock", "Physical", 75, 0.9),
+    "Flare Blitz": Move("Flare Blitz", "Fire", "Physical", 120, 1.0, contact=True),
+    "Close Combat": Move(
+        "Close Combat", "Fighting", "Physical", 120, 1.0, contact=True
+    ),
+    "Aqua Step": Move("Aqua Step", "Water", "Physical", 80, 1.0, contact=True),
+    "Ice Spinner": Move("Ice Spinner", "Ice", "Physical", 80, 1.0, contact=True),
+    "Brave Bird": Move("Brave Bird", "Flying", "Physical", 120, 1.0, contact=True),
+    "Outrage": Move("Outrage", "Dragon", "Physical", 120, 1.0, contact=True),
+    "Extreme Speed": Move(
+        "Extreme Speed", "Normal", "Physical", 80, 1.0, priority=2, contact=True
+    ),
+    "Sucker Punch": Move(
+        "Sucker Punch", "Dark", "Physical", 70, 1.0, priority=1, contact=True
+    ),
+    "Iron Head": Move("Iron Head", "Steel", "Physical", 80, 1.0, contact=True),
+    "Knock Off": Move("Knock Off", "Dark", "Physical", 65, 1.0, contact=True),
+    "Stone Edge": Move("Stone Edge", "Rock", "Physical", 100, 0.8),
+    "Gunk Shot": Move("Gunk Shot", "Poison", "Physical", 120, 0.8, contact=True),
+    "Surging Strikes": Move(
+        "Surging Strikes",
+        "Water",
+        "Physical",
+        25,
+        1.0,
+        contact=True,
+        multi_hits=3,
+        always_crit=True,
+    ),
+    "Wild Charge": Move("Wild Charge", "Electric", "Physical", 90, 1.0, contact=True),
+    "Zen Headbutt": Move("Zen Headbutt", "Psychic", "Physical", 80, 0.9, contact=True),
+    "Play Rough": Move("Play Rough", "Fairy", "Physical", 90, 0.9, contact=True),
+    "Shadow Claw": Move("Shadow Claw", "Ghost", "Physical", 70, 1.0, contact=True),
+    "Leech Life": Move("Leech Life", "Bug", "Physical", 80, 1.0, contact=True),
+    "Power Whip": Move("Power Whip", "Grass", "Physical", 120, 0.85, contact=True),
+    "Leaf Blade": Move("Leaf Blade", "Grass", "Physical", 90, 1.0, contact=True),
+    # a few common Gen 9 additions that are easy to model
+    "Headlong Rush": Move(
+        "Headlong Rush", "Ground", "Physical", 120, 1.0, contact=True
+    ),
+    "First Impression": Move(
+        "First Impression",
+        "Bug",
+        "Physical",
+        90,
+        1.0,
+        contact=True,
+        priority=2,
+        first_turn_only=True,
+    ),
+    "Shadow Sneak": Move(
+        "Shadow Sneak", "Ghost", "Physical", 40, 1.0, contact=True, priority=1
+    ),
+    # Special staples
+    "Moonblast": Move("Moonblast", "Fairy", "Special", 95, 1.0),
+    "Shadow Ball": Move("Shadow Ball", "Ghost", "Special", 80, 1.0),
+    "Draco Meteor": Move("Draco Meteor", "Dragon", "Special", 130, 0.9),
+    "Thunderbolt": Move("Thunderbolt", "Electric", "Special", 90, 1.0),
+    "Ice Beam": Move("Ice Beam", "Ice", "Special", 90, 1.0),
+    "Flamethrower": Move("Flamethrower", "Fire", "Special", 90, 1.0),
+    "Hydro Pump": Move("Hydro Pump", "Water", "Special", 110, 0.8),
+    "Psychic": Move("Psychic", "Psychic", "Special", 90, 1.0),
+    "Psyshock": Move("Psyshock", "Psychic", "Special", 80, 1.0),  # SpA vs Def
+    "Hurricane": Move("Hurricane", "Flying", "Special", 110, 0.7),
+    "Flash Cannon": Move("Flash Cannon", "Steel", "Special", 80, 1.0),
+    "Dark Pulse": Move("Dark Pulse", "Dark", "Special", 80, 1.0),
+    "Hyper Beam": Move("Hyper Beam", "Normal", "Special", 150, 0.9),
+    "Leaf Storm": Move("Leaf Storm", "Grass", "Special", 130, 0.9),
+}
+
+# recoil ratios (simplified)
+RECOIL_RATIO: Dict[str, float] = {
+    "Flare Blitz": 1 / 3,
+    "Brave Bird": 1 / 3,
+    "Wild Charge": 1 / 4,
+}
+
+# =========================
+#         ITEMS
+# =========================
+ITEMS = [
+    "Focus Sash",
+    "Assault Vest",
+    "Choice Band",
+    "Choice Specs",
+    "Choice Scarf",
+    "Life Orb",
+    "Leftovers",
+    "Booster Energy",
+    "Covert Cloak",
+    "Black Glasses",
+    "Sitrus Berry",
+    "Weakness Policy",
+    "Punching Glove",
+    "Rocky Helmet",
+]
+
+
+# =========================
+#       SPECIES DATA
+# =========================
+@dataclass(frozen=True)
+class Species:
+    name: str
+    types: Tuple[str, Optional[str]]  # second may be None
+    base: Dict[str, int]  # HP,Atk,Def,SpA,SpD,Spe
+    ability_hint: Optional[str] = None
+
+
+SPECIES_DATA: Dict[str, Species] = {
+    # Our trio
+    "Swampert": (
+        "Swampert",
+        ("Water", "Ground"),
+        {"HP": 100, "Atk": 110, "Def": 90, "SpA": 85, "SpD": 90, "Spe": 60},
+        "Torrent",
+    ),
+    "Blaziken": (
+        "Blaziken",
+        ("Fire", "Fighting"),
+        {"HP": 80, "Atk": 120, "Def": 70, "SpA": 110, "SpD": 70, "Spe": 80},
+        "Speed Boost",
+    ),
+    "Quaquaval": (
+        "Quaquaval",
+        ("Water", "Fighting"),
+        {"HP": 85, "Atk": 120, "Def": 80, "SpA": 85, "SpD": 75, "Spe": 85},
+        "Torrent",
+    ),
+    # Core threats (expandable)
+    "Calyrex-Shadow": (
+        "Calyrex-Shadow",
+        ("Psychic", "Ghost"),
+        {"HP": 100, "Atk": 85, "Def": 80, "SpA": 165, "SpD": 100, "Spe": 150},
+        None,
+    ),
+    "Koraidon": (
+        "Koraidon",
+        ("Fighting", "Dragon"),
+        {"HP": 100, "Atk": 135, "Def": 115, "SpA": 85, "SpD": 100, "Spe": 135},
+        "Orichalcum Pulse",
+    ),
+    "Miraidon": (
+        "Miraidon",
+        ("Electric", "Dragon"),
+        {"HP": 100, "Atk": 85, "Def": 100, "SpA": 135, "SpD": 115, "Spe": 135},
+        "Hadron Engine",
+    ),
+    "Dragonite": (
+        "Dragonite",
+        ("Dragon", "Flying"),
+        {"HP": 91, "Atk": 134, "Def": 95, "SpA": 100, "SpD": 100, "Spe": 80},
+        "Multiscale",
+    ),
+    "Flutter Mane": (
+        "Flutter Mane",
+        ("Ghost", "Fairy"),
+        {"HP": 55, "Atk": 55, "Def": 55, "SpA": 135, "SpD": 135, "Spe": 135},
+        "Protosynthesis",
+    ),
+    "Kingambit": (
+        "Kingambit",
+        ("Dark", "Steel"),
+        {"HP": 100, "Atk": 135, "Def": 120, "SpA": 60, "SpD": 85, "Spe": 50},
+        None,
+    ),
+    "Urshifu-Rapid-Strike": (
+        "Urshifu-Rapid-Strike",
+        ("Fighting", "Water"),
+        {"HP": 100, "Atk": 130, "Def": 100, "SpA": 63, "SpD": 60, "Spe": 97},
+        None,
+    ),
+    "Urshifu": (
+        "Urshifu",
+        ("Fighting", "Dark"),
+        {"HP": 100, "Atk": 130, "Def": 100, "SpA": 63, "SpD": 60, "Spe": 97},
+        None,
+    ),
+    "Volcarona": (
+        "Volcarona",
+        ("Bug", "Fire"),
+        {"HP": 85, "Atk": 60, "Def": 65, "SpA": 135, "SpD": 105, "Spe": 100},
+        None,
+    ),
+    "Iron Bundle": (
+        "Iron Bundle",
+        ("Ice", "Water"),
+        {"HP": 56, "Atk": 80, "Def": 114, "SpA": 124, "SpD": 60, "Spe": 136},
+        None,
+    ),
+    "Roaring Moon": (
+        "Roaring Moon",
+        ("Dragon", "Dark"),
+        {"HP": 105, "Atk": 139, "Def": 71, "SpA": 55, "SpD": 101, "Spe": 119},
+        "Protosynthesis",
+    ),
+    "Raging Bolt": (
+        "Raging Bolt",
+        ("Electric", "Dragon"),
+        {"HP": 125, "Atk": 73, "Def": 91, "SpA": 137, "SpD": 89, "Spe": 75},
+        "Protosynthesis",
+    ),
+    "Walking Wake": (
+        "Walking Wake",
+        ("Water", "Dragon"),
+        {"HP": 99, "Atk": 83, "Def": 91, "SpA": 125, "SpD": 83, "Spe": 109},
+        "Protosynthesis",
+    ),
+    "Garchomp": (
+        "Garchomp",
+        ("Dragon", "Ground"),
+        {"HP": 108, "Atk": 130, "Def": 95, "SpA": 80, "SpD": 85, "Spe": 102},
+        None,
+    ),
+    "Haxorus": (
+        "Haxorus",
+        ("Dragon", None),
+        {"HP": 76, "Atk": 147, "Def": 90, "SpA": 60, "SpD": 70, "Spe": 97},
+        None,
+    ),
+    "Great Tusk": (
+        "Great Tusk",
+        ("Ground", "Fighting"),
+        {"HP": 115, "Atk": 131, "Def": 131, "SpA": 53, "SpD": 53, "Spe": 87},
+        None,
+    ),
+    "Iron Hands": (
+        "Iron Hands",
+        ("Fighting", "Electric"),
+        {"HP": 154, "Atk": 140, "Def": 108, "SpA": 50, "SpD": 68, "Spe": 50},
+        None,
+    ),
+    "Zapdos": (
+        "Zapdos",
+        ("Electric", "Flying"),
+        {"HP": 90, "Atk": 90, "Def": 85, "SpA": 125, "SpD": 90, "Spe": 100},
+        None,
+    ),
+    "Primarina": (
+        "Primarina",
+        ("Water", "Fairy"),
+        {"HP": 80, "Atk": 74, "Def": 74, "SpA": 126, "SpD": 116, "Spe": 60},
+        None,
+    ),
+    "Pecharunt": (
+        "Pecharunt",
+        ("Poison", "Ghost"),
+        {"HP": 88, "Atk": 88, "Def": 160, "SpA": 88, "SpD": 88, "Spe": 88},
+        None,
+    ),
+    "Spectrier": (
+        "Spectrier",
+        ("Ghost", None),
+        {"HP": 100, "Atk": 65, "Def": 60, "SpA": 145, "SpD": 80, "Spe": 130},
+        None,
+    ),
+    "Ursaluna": (
+        "Ursaluna",
+        ("Normal", "Ground"),
+        {"HP": 130, "Atk": 140, "Def": 105, "SpA": 45, "SpD": 80, "Spe": 50},
+        None,
+    ),
+    "Ursaluna-Bloodmoon": (
+        "Ursaluna-Bloodmoon",
+        ("Normal", "Ground"),
+        {"HP": 113, "Atk": 70, "Def": 120, "SpA": 135, "SpD": 80, "Spe": 52},
+        None,
+    ),
+    "Corviknight": (
+        "Corviknight",
+        ("Flying", "Steel"),
+        {"HP": 98, "Atk": 87, "Def": 105, "SpA": 53, "SpD": 85, "Spe": 67},
+        None,
+    ),
+    "Dragapult": (
+        "Dragapult",
+        ("Dragon", "Ghost"),
+        {"HP": 88, "Atk": 120, "Def": 75, "SpA": 100, "SpD": 75, "Spe": 142},
+        None,
+    ),
+    "Goodra-Hisui": (
+        "Goodra-Hisui",
+        ("Steel", "Dragon"),
+        {"HP": 80, "Atk": 100, "Def": 100, "SpA": 110, "SpD": 150, "Spe": 60},
+        None,
+    ),
+    "Landorus-Therian": (
+        "Landorus-Therian",
+        ("Ground", "Flying"),
+        {"HP": 89, "Atk": 145, "Def": 90, "SpA": 105, "SpD": 80, "Spe": 91},
+        "Intimidate",
+    ),
+    "Ninetales-Alola": (
+        "Ninetales-Alola",
+        ("Ice", "Fairy"),
+        {"HP": 73, "Atk": 67, "Def": 75, "SpA": 81, "SpD": 100, "Spe": 109},
+        None,
+    ),
+    "Ogerpon-Wellspring": (
+        "Ogerpon-Wellspring",
+        ("Water", "Grass"),
+        {"HP": 80, "Atk": 120, "Def": 84, "SpA": 60, "SpD": 96, "Spe": 110},
+        None,
+    ),
+    "Sylveon": (
+        "Sylveon",
+        ("Fairy", None),
+        {"HP": 95, "Atk": 65, "Def": 65, "SpA": 110, "SpD": 130, "Spe": 60},
+        None,
+    ),
+    "Volcanion": (
+        "Volcanion",
+        ("Fire", "Water"),
+        {"HP": 80, "Atk": 110, "Def": 120, "SpA": 130, "SpD": 90, "Spe": 70},
+        None,
+    ),
+    "Manaphy": (
+        "Manaphy",
+        ("Water", None),
+        {"HP": 100, "Atk": 100, "Def": 100, "SpA": 100, "SpD": 100, "Spe": 100},
+        None,
+    ),
+    "Moltres-Galar": (
+        "Moltres-Galar",
+        ("Dark", "Flying"),
+        {"HP": 90, "Atk": 85, "Def": 90, "SpA": 100, "SpD": 125, "Spe": 90},
+        None,
+    ),
+    "Scizor": (
+        "Scizor",
+        ("Bug", "Steel"),
+        {"HP": 70, "Atk": 130, "Def": 100, "SpA": 55, "SpD": 80, "Spe": 65},
+        None,
+    ),
+    "Skeledirge": (
+        "Skeledirge",
+        ("Fire", "Ghost"),
+        {"HP": 104, "Atk": 75, "Def": 100, "SpA": 110, "SpD": 75, "Spe": 66},
+        "Unaware",
+    ),
+    "Sneasler": (
+        "Sneasler",
+        ("Fighting", "Poison"),
+        {"HP": 80, "Atk": 130, "Def": 60, "SpA": 40, "SpD": 80, "Spe": 120},
+        None,
+    ),
+    "Dondozo": (
+        "Dondozo",
+        ("Water", None),
+        {"HP": 150, "Atk": 100, "Def": 115, "SpA": 65, "SpD": 65, "Spe": 35},
+        "Unaware",
+    ),
+    "Porygon-Z": (
+        "Porygon-Z",
+        ("Normal", None),
+        {"HP": 85, "Atk": 80, "Def": 70, "SpA": 135, "SpD": 75, "Spe": 90},
+        None,
+    ),
+    "Kyurem": (
+        "Kyurem",
+        ("Dragon", "Ice"),
+        {"HP": 125, "Atk": 130, "Def": 90, "SpA": 130, "SpD": 90, "Spe": 95},
+        None,
+    ),
+    "Azumarill": (
+        "Azumarill",
+        ("Water", "Fairy"),
+        {"HP": 100, "Atk": 50, "Def": 80, "SpA": 60, "SpD": 80, "Spe": 50},
+        None,
+    ),
+    "Garganacl": (
+        "Garganacl",
+        ("Rock", None),
+        {"HP": 100, "Atk": 100, "Def": 130, "SpA": 45, "SpD": 90, "Spe": 35},
+        None,
+    ),
+    "Gholdengo": (
+        "Gholdengo",
+        ("Steel", "Ghost"),
+        {"HP": 87, "Atk": 60, "Def": 95, "SpA": 133, "SpD": 91, "Spe": 84},
+        None,
+    ),
+    "Iron Crown": (
+        "Iron Crown",
+        ("Steel", "Psychic"),
+        {"HP": 90, "Atk": 72, "Def": 100, "SpA": 122, "SpD": 108, "Spe": 98},
+        "Quark Drive",
+    ),
+    "Iron Valiant": (
+        "Iron Valiant",
+        ("Fairy", "Fighting"),
+        {"HP": 74, "Atk": 130, "Def": 90, "SpA": 120, "SpD": 60, "Spe": 116},
+        "Quark Drive",
+    ),
+    "Annihilape": (
+        "Annihilape",
+        ("Fighting", "Ghost"),
+        {"HP": 110, "Atk": 115, "Def": 80, "SpA": 50, "SpD": 90, "Spe": 90},
+        None,
+    ),
+    "Chien-Pao": (
+        "Chien-Pao",
+        ("Dark", "Ice"),
+        {"HP": 80, "Atk": 120, "Def": 80, "SpA": 90, "SpD": 65, "Spe": 135},
+        None,
+    ),
+    "Cresselia": (
+        "Cresselia",
+        ("Psychic", None),
+        {"HP": 120, "Atk": 70, "Def": 120, "SpA": 75, "SpD": 130, "Spe": 85},
+        None,
+    ),
+    "Meowscarada": (
+        "Meowscarada",
+        ("Grass", "Dark"),
+        {"HP": 76, "Atk": 110, "Def": 70, "SpA": 81, "SpD": 70, "Spe": 123},
+        None,
+    ),
+}
+SPECIES_DATA = {k: Species(*v) for k, v in SPECIES_DATA.items()}
+
+# Optional aliases
+ALIASES: Dict[str, str] = {
+    "Hisuian Goodra": "Goodra-Hisui",
+    "Galarian Moltres": "Moltres-Galar",
+    "Bloodmoon Ursaluna": "Ursaluna-Bloodmoon",
+    "Walking-Wake": "Walking Wake",
+    "Great-Tusk": "Great Tusk",
+    "Landorus-T": "Landorus-Therian",
+    "Ninetales-A": "Ninetales-Alola",
+    "Ogerpon (Wellspring)": "Ogerpon-Wellspring",
+    "PorygonZ": "Porygon-Z",
+}
+
+THREAT_LIST: List[str] = [
+    "Roaring Moon",
+    "Sylveon",
+    "Volcanion",
+    "Walking Wake",
+    "Zapdos",
+    "Annihilape",
+    "Chien-Pao",
+    "Cresselia",
+    "Great Tusk",
+    "Manaphy",
+    "Moltres-Galar",
+    "Scizor",
+    "Skeledirge",
+    "Sneasler",
+    "Dondozo",
+    "Porygon-Z",
+    "Garchomp",
+    "Haxorus",
+    "Iron Hands",
+    "Meowscarada",
+    "Raging Bolt",
+    "Urshifu",
+    "Urshifu-Rapid-Strike",
+    "Volcarona",
+    "Dragonite",
+    "Kingambit",
+    "Flutter Mane",
+    "Miraidon",
+    "Koraidon",
+    "Calyrex-Shadow",
+    "Gholdengo",
+    "Garganacl",
+    "Iron Bundle",
+    "Kyurem",
+    "Ursaluna-Bloodmoon",
+    "Azumarill",
+    "Goodra-Hisui",
+    "Landorus-Therian",
+    "Ninetales-Alola",
+    "Ogerpon-Wellspring",
+    "Primarina",
+    "Spectrier",
+    "Ursaluna",
+    "Iron Crown",
+    "Iron Valiant",
+    "Corviknight",
+    "Dragapult",
+    "Raging Bolt",  # (dup present here; dedup at runtime)
+]
+
+# Default per-threat variant weights (equal if unknown usage)
+DEFAULT_VARIANT_WEIGHTS = []  # empty => equal weights
+
+
+# =========================
+#     BUILD / SET MODEL
+# =========================
+@dataclass
+class SetBuild:
+    species: str
+    item: str
+    ability: Optional[str]
+    tera_type: Optional[str]
+    nature: str
+    evs: Dict[str, int]  # HP,Atk,Def,SpA,SpD,Spe
+    ivs: Dict[str, int]  # default all 31
+    moves: List[str]
+
+
+@dataclass
+class BattleState:
+    hp: int
+    max_hp: int
+    stages: Dict[str, int]
+    sash_intact: bool = True
+    sturdy_intact: bool = True
+    consumed_item: Dict[str, bool] = field(default_factory=dict)
+    tera_used: bool = False
+    tera_type: Optional[str] = None
+    ability_active: Dict[str, Union[bool, dict]] = field(default_factory=dict)
+    multiscale_on: bool = False
+    locked_move: Optional[str] = None  # Choice lock
+    turns_elapsed: int = 0  # full turns completed
+
+
+# =========================
+#       STAT FORMULAS
+# =========================
+def stat_hp(base: int, iv: int, ev: int, level: int = 100) -> int:
+    return math.floor(((2 * base + iv + ev // 4) * level) / 100) + level + 10
+
+
+def stat_other(base: int, iv: int, ev: int, nature: float, level: int = 100) -> int:
+    x = math.floor(((2 * base + iv + ev // 4) * level) / 100) + 5
+    return math.floor(x * nature)
+
+
+def apply_choice(
+    item: str, atk: float, spa: float, spe: float
+) -> Tuple[float, float, float, bool, bool, bool]:
+    lock = False
+    if item == "Choice Band":
+        atk *= 1.5
+        lock = True
+    elif item == "Choice Specs":
+        spa *= 1.5
+        lock = True
+    elif item == "Choice Scarf":
+        spe *= 1.5
+        lock = True
+    return atk, spa, spe, lock, (item == "Choice Band"), (item == "Choice Specs")
+
+
+# =========================
+#    MECHANIC UTILITIES
+# =========================
+def ability_context(
+    ability: str,
+    side: str,
+    weather: Dict[str, Optional[str]],
+    terrain: Dict[str, Optional[str]],
+    atk_mult: Dict[str, float],
+    spa_mult: Dict[str, float],
+):
+    if ability == "Orichalcum Pulse":
+        weather["state"] = "Harsh Sunlight"
+        atk_mult[side] = 1.3
+    elif ability == "Hadron Engine":
+        terrain["state"] = "Electric Terrain"
+        spa_mult[side] = 1.3
+
+
+def tera_stab_mult(
+    move_type: str, orig_types: Tuple[str, Optional[str]], tera_type: Optional[str]
+) -> float:
+    """
+    STAB rules:
+    - If move_type in original types: 1.5x
+    - If terastalized and move_type == tera_type:
+        - If also original type: 2.0x
+        - Else: 1.5x
+    """
+    orig = [t for t in orig_types if t]
+    base_stab = 1.5 if move_type in orig else 1.0
+    if tera_type and move_type == tera_type:
+        return 2.0 if move_type in orig else 1.5
+    return base_stab
+
+
+def category_stat_names(cat: str) -> Tuple[str, str]:
+    return ("Atk", "Def") if cat == "Physical" else ("SpA", "SpD")
+
+
+def stage_mult(stage: int, is_speed: bool = False) -> float:
+    s = max(-6, min(6, stage))
+    if s >= 0:
+        return (2 + s) / 2
+    else:
+        return 2 / (2 - s)
+
+
+def pick_offense_category(spec: Species) -> str:
+    return "Physical" if spec.base["Atk"] >= spec.base["SpA"] else "Special"
+
+
+def effective_types_defense(build: SetBuild, state: BattleState) -> List[str]:
+    if state.tera_used and state.tera_type:
+        return [state.tera_type]
+    t = SPECIES_DATA[build.species].types
+    return [t[0]] + ([t[1]] if t[1] else [])
+
+
+def is_grounded(build: SetBuild, state: BattleState) -> bool:
+    # Use current defensive typing (post-Tera) to decide groundedness.
+    # Approximation: not grounded if current typing contains Flying.
+    current_types = effective_types_defense(build, state)
+    return "Flying" not in current_types
+
+
+def effective_types_offense(build: SetBuild) -> Tuple[str, Optional[str]]:
+    return SPECIES_DATA[build.species].types
+
+
+def field_power_mult(
+    move_type: str,
+    attacker_build: SetBuild,
+    attacker_state: BattleState,
+    weather: Dict[str, Optional[str]],
+    terrain: Dict[str, Optional[str]],
+) -> float:
+    m = 1.0
+    if weather.get("state") == "Harsh Sunlight":
+        if move_type == "Fire":
+            m *= 1.5
+        if move_type == "Water":
+            m *= 0.5
+    if terrain.get("state") == "Electric Terrain":
+        if move_type == "Electric" and is_grounded(attacker_build, attacker_state):
+            m *= 1.3
+    return m
+
+
+# =========================
+#  DAMAGE (no accuracy RNG)
+# =========================
+@lru_cache(maxsize=None)
+def _calc_stats_cached(
+    spec_name: str,
+    nature: str,
+    ev_tuple: Tuple[int, int, int, int, int, int],
+    iv_tuple: Tuple[int, int, int, int, int, int],
+) -> Tuple[int, int, int, int, int, int]:
+    spec = SPECIES_DATA[spec_name]
+    evs = {
+        "HP": ev_tuple[0],
+        "Atk": ev_tuple[1],
+        "Def": ev_tuple[2],
+        "SpA": ev_tuple[3],
+        "SpD": ev_tuple[4],
+        "Spe": ev_tuple[5],
+    }
+    ivs = {
+        "HP": iv_tuple[0],
+        "Atk": iv_tuple[1],
+        "Def": iv_tuple[2],
+        "SpA": iv_tuple[3],
+        "SpD": iv_tuple[4],
+        "Spe": iv_tuple[5],
+    }
+    out = {}
+    for k in ["HP", "Atk", "Def", "SpA", "SpD", "Spe"]:
+        if k == "HP":
+            out[k] = stat_hp(spec.base["HP"], ivs[k], evs[k])
+        else:
+            out[k] = stat_other(spec.base[k], ivs[k], evs[k], nature_mult(nature, k))
+    return (out["HP"], out["Atk"], out["Def"], out["SpA"], out["SpD"], out["Spe"])
+
+
+def calc_stats(
+    spec: Species, nature: str, evs: Dict[str, int], ivs: Dict[str, int]
+) -> Dict[str, int]:
+    tup = _calc_stats_cached(
+        spec.name,
+        nature,
+        (evs["HP"], evs["Atk"], evs["Def"], evs["SpA"], evs["SpD"], evs["Spe"]),
+        (ivs["HP"], ivs["Atk"], ivs["Def"], ivs["SpA"], ivs["SpD"], ivs["Spe"]),
+    )
+    return {
+        "HP": tup[0],
+        "Atk": tup[1],
+        "Def": tup[2],
+        "SpA": tup[3],
+        "SpD": tup[4],
+        "Spe": tup[5],
+    }
+
+
+def base_power(move: Move) -> int:
+    return 80 if move.is_tera_blast else move.power
+
+
+def average_roll() -> float:
+    return 0.925  # average of 85..100 over 16 rolls
+
+
+def move_item_mult(item: str, move: Move, atk_cat: str) -> float:
+    if item == "Life Orb":
+        return 1.3
+    if item == "Black Glasses" and move.mtype == "Dark":
+        return 1.2
+    if item == "Punching Glove" and move.is_punch:
+        return 1.1
+    return 1.0
+
+
+def is_crit(move: Move) -> bool:
+    return True if move.always_crit else False  # only "always crit" modeled
+
+
+def damage(
+    level: int,
+    power: int,
+    atk: int,
+    deff: int,
+    stab: float,
+    type_m: float,
+    item_mult: float,
+    burn_half: bool,
+    multiscale_on: bool,
+    field_mult: float,
+    crit: bool,
+) -> int:
+    A = math.floor((2 * level) / 5) + 2
+    B = math.floor(A * power * atk / max(1, deff))
+    C = math.floor(B / 50) + 2
+    if burn_half:
+        C = math.floor(C * 0.5)
+    if multiscale_on:
+        C = math.floor(C * 0.5)
+    M = stab * type_m * item_mult * field_mult * average_roll()
+    if crit:
+        M *= 1.5
+    return max(1, int(math.floor(C * M)))
+
+
+# =========================
+#  SEARCH / EVAL KNOBS
+# =========================
+EV_STEPS = [0, 84, 168, 252]  # coarse grid (multiple of 4)
+EV_TOTAL_MAX = 510
+LOCAL_REFINE_PASSES = 32  # keep modest for speed
+SEARCH_TURNS = 3  # official 1v1 window
+ALPHA_INIT = -1e9
+BETA_INIT = 1e9
+
+ITEM_CANDIDATES: Dict[str, List[str]] = {
+    "Swampert": [
+        "Assault Vest",
+        "Life Orb",
+        "Choice Band",
+        "Leftovers",
+        "Focus Sash",
+        "Black Glasses",
+        "Weakness Policy",
+        "Punching Glove",
+    ],
+    "Blaziken": [
+        "Focus Sash",
+        "Life Orb",
+        "Choice Band",
+        "Leftovers",
+        "Punching Glove",
+        "Weakness Policy",
+        "Choice Scarf",
+    ],
+    "Quaquaval": [
+        "Focus Sash",
+        "Life Orb",
+        "Choice Band",
+        "Leftovers",
+        "Punching Glove",
+        "Weakness Policy",
+    ],
+}
+TERA_POOLS: Dict[str, List[str]] = {
+    "Swampert": ["Water", "Ground", "Dark", "Ice"],
+    "Blaziken": ["Fire", "Fighting", "Flying", "Ghost"],
+    "Quaquaval": ["Water", "Fighting", "Flying", "Ghost"],
+}
+MOVE_POOLS: Dict[str, List[str]] = {
+    "Swampert": [
+        "Earthquake",
+        "Liquidation",
+        "Ice Punch",
+        "Tera Blast",
+        "Rock Slide",
+        "Headlong Rush",
+    ],
+    "Blaziken": [
+        "Protect",
+        "Swords Dance",
+        "Flare Blitz",
+        "Close Combat",
+        "Counter",
+        "Tera Blast",
+        "Brave Bird",
+        "Mirror Coat",
+        "First Impression",
+        "Shadow Sneak",
+    ],
+    "Quaquaval": [
+        "Aqua Step",
+        "Close Combat",
+        "Ice Spinner",
+        "Tera Blast",
+        "Counter",
+        "Brave Bird",
+        "Protect",
+    ],
+}
+FOUR_PHYSICAL_ONLY: Dict[str, bool] = {
+    "Swampert": True,
+    "Blaziken": True,
+    "Quaquaval": True,
+}
+
+
+# =========================
+#    ADVERSARY GENERATION
+# =========================
+def best_stab_for(spec: Species) -> Tuple[Move, str]:
+    cat = pick_offense_category(spec)
+    if cat == "Physical":
+        primary = spec.types[0]
+        fallback = {
+            "Fighting": "Close Combat",
+            "Fire": "Flare Blitz",
+            "Water": "Liquidation",
+            "Dragon": "Outrage",
+            "Electric": "Wild Charge",
+            "Ice": "Ice Punch",
+            "Ground": "Earthquake",
+            "Rock": "Stone Edge",
+            "Dark": "Knock Off",
+            "Steel": "Iron Head",
+            "Bug": "Leech Life",
+            "Fairy": "Play Rough",
+            "Ghost": "Shadow Claw",
+            "Psychic": "Zen Headbutt",
+            "Grass": "Power Whip",
+            "Flying": "Brave Bird",
+            "Normal": "Extreme Speed",
+            "Poison": "Gunk Shot",
+        }
+        name = fallback.get(primary, "Earthquake")
+        return MOVE_DB.get(name, MOVE_DB["Earthquake"]), cat
+    else:
+        primary = spec.types[0]
+        fallback = {
+            "Fairy": "Moonblast",
+            "Ghost": "Shadow Ball",
+            "Dragon": "Draco Meteor",
+            "Fire": "Flamethrower",
+            "Water": "Hydro Pump",
+            "Electric": "Thunderbolt",
+            "Ice": "Ice Beam",
+            "Psychic": "Psychic",
+            "Grass": "Leaf Storm",
+            "Normal": "Hyper Beam",
+            "Steel": "Flash Cannon",
+            "Dark": "Dark Pulse",
+            "Flying": "Hurricane",
+        }
+        name = fallback.get(primary, "Shadow Ball")
+        return MOVE_DB.get(name, MOVE_DB["Shadow Ball"]), cat
+
+
+def type_coverage_gain(spec: Species, stab_type: str, cov_type: str) -> float:
+    base = 0.0
+    new = 0.0
+    for t in TYPES:
+        base += max(effectiveness[type_index[stab_type]][type_index[t]], 1.0)
+        new += max(
+            max(
+                effectiveness[type_index[stab_type]][type_index[t]],
+                effectiveness[type_index[cov_type]][type_index[t]],
+            ),
+            1.0,
+        )
+    return (new - base) / len(TYPES)
+
+
+def coverage_candidates(spec: Species, cat: str, limit: int = 2) -> List[Move]:
+    pool = []
+    for mv in MOVE_DB.values():
+        if mv.category == "Status":
+            continue
+        if (cat == "Physical" and mv.category != "Physical") or (
+            cat == "Special" and mv.category != "Special"
+        ):
+            continue
+        pool.append(mv)
+    stab, _ = best_stab_for(spec)
+    cand = sorted(
+        pool, key=lambda m: type_coverage_gain(spec, stab.mtype, m.mtype), reverse=True
+    )
+    out = []
+    for m in cand:
+        if m.name == stab.name:
+            continue
+        out.append(m)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def resolve_species_name(name: str) -> Optional[str]:
+    if name in SPECIES_DATA:
+        return name
+    if name in ALIASES and ALIASES[name] in SPECIES_DATA:
+        return ALIASES[name]
+    return None
+
+
+def make_default_adversary(spec_name: str) -> Optional[SetBuild]:
+    key = resolve_species_name(spec_name)
+    if key is None:
+        return None
+    spec = SPECIES_DATA[key]
+    cat = pick_offense_category(spec)
+    stab, cat = best_stab_for(spec)
+    cov = coverage_candidates(spec, cat, limit=2)
+    moves = [stab.name] + [m.name for m in cov]
+    fourth = (
+        "Extreme Speed"
+        if "Extreme Speed" in MOVE_DB and cat == "Physical"
+        else "Tera Blast"
+    )
+    if fourth not in moves:
+        moves.append(fourth)
+    if cat == "Physical":
+        nature = "Adamant"
+        evs = {"HP": 0, "Atk": 252, "Def": 0, "SpA": 0, "SpD": 4, "Spe": 252}
+    else:
+        nature = "Modest"
+        evs = {"HP": 0, "Atk": 0, "Def": 0, "SpA": 252, "SpD": 4, "Spe": 252}
+    ivs = {k: 31 for k in ["HP", "Atk", "Def", "SpA", "SpD", "Spe"]}
+    if spec.name in [
+        "Calyrex-Shadow",
+        "Miraidon",
+        "Flutter Mane",
+        "Iron Bundle",
+        "Porygon-Z",
+        "Kyurem",
+    ]:
+        item = "Choice Specs"
+    elif spec.name in [
+        "Garchomp",
+        "Haxorus",
+        "Great Tusk",
+        "Kingambit",
+        "Roaring Moon",
+        "Chien-Pao",
+        "Dragonite",
+        "Iron Hands",
+    ]:
+        item = "Choice Band"
+    else:
+        item = "Life Orb"
+    tera = spec.types[0]
+    return SetBuild(
+        species=spec.name,
+        item=item,
+        ability=spec.ability_hint,
+        tera_type=tera,
+        nature=nature,
+        evs=evs,
+        ivs=ivs,
+        moves=moves,
+    )
+
+
+# --- Adversary variants (small curated item pool) ---
+def adversary_variants(spec_name: str) -> Optional[Tuple[List[SetBuild], List[float]]]:
+    base = make_default_adversary(spec_name)
+    if base is None:
+        return None
+    spec = SPECIES_DATA[base.species]
+    cat = pick_offense_category(spec)
+    # plausible item variants
+    items = ["Life Orb", "Focus Sash", "Weakness Policy"] + (
+        ["Choice Band"] if cat == "Physical" else ["Choice Specs"]
+    )
+    variants = []
+    seen = set()
+    for it in items:
+        v = copy.deepcopy(base)
+        v.item = it
+        key = (v.item, tuple(v.moves))
+        if key in seen:
+            continue
+        seen.add(key)
+        variants.append(v)
+    # weights (equal by default)
+    w = [1.0 / len(variants)] * len(variants) if variants else []
+    return variants, w
+
+
+# =========================
+#  MINI 1V1 SIMULATOR CORE
+# =========================
+def initial_state(build: SetBuild) -> BattleState:
+    spec = SPECIES_DATA[build.species]
+    st = calc_stats(spec, build.nature, build.evs, build.ivs)
+    bs = BattleState(
+        hp=st["HP"],
+        max_hp=st["HP"],
+        stages={"Atk": 0, "Def": 0, "SpA": 0, "SpD": 0, "Spe": 0},
+    )
+    bs.multiscale_on = spec.ability_hint == "Multiscale"
+    bs.sturdy_intact = spec.ability_hint == "Sturdy"
+    return bs
+
+
+def apply_speed_boost_if_any(build: SetBuild, state: BattleState):
+    if SPECIES_DATA[build.species].ability_hint == "Speed Boost":
+        state.stages["Spe"] = min(6, state.stages["Spe"] + 1)
+
+
+def pq_activation(
+    build: SetBuild,
+    weather: Dict[str, Optional[str]],
+    terrain: Dict[str, Optional[str]],
+    state: BattleState,
+    stats: Dict[str, int],
+    dry_run: bool = False,
+) -> Dict[str, float]:
+    """
+    Activate Protosynthesis / Quark Drive if Sun/Electric Terrain or Booster Energy (one-time).
+    Returns multipliers dict {"Atk":1.0|1.5, "SpA":..., "Spe":1.0|1.3}
+    dry_run=True => do NOT consume Booster Energy; used for speed checks/orders.
+    """
+    ability = SPECIES_DATA[build.species].ability_hint
+    if ability not in ["Protosynthesis", "Quark Drive"]:
+        return {"Atk": 1.0, "SpA": 1.0, "Spe": 1.0}
+
+    sun_ok = weather.get("state") == "Harsh Sunlight"
+    et_ok = terrain.get("state") == "Electric Terrain"
+    trigger = (ability == "Protosynthesis" and sun_ok) or (
+        ability == "Quark Drive" and et_ok
+    )
+
+    # Booster Energy can trigger if not already used
+    if (
+        not trigger
+        and build.item == "Booster Energy"
+        and not state.consumed_item.get("Booster Energy", False)
+    ):
+        trigger = True
+        if not dry_run:
+            state.consumed_item["Booster Energy"] = True
+
+    if not trigger:
+        return {"Atk": 1.0, "SpA": 1.0, "Spe": 1.0}
+
+    cand = {"Atk": stats["Atk"], "SpA": stats["SpA"], "Spe": stats["Spe"]}
+    best = max(cand, key=cand.get)
+    if best == "Spe":
+        return {"Atk": 1.0, "SpA": 1.0, "Spe": 1.3}
+    else:
+        return {
+            "Atk": 1.5 if best == "Atk" else 1.0,
+            "SpA": 1.5 if best == "SpA" else 1.0,
+            "Spe": 1.0,
+        }
+
+
+def compute_spe_for_order(
+    build: SetBuild, state: BattleState, stats: Dict[str, int], weather, terrain
+) -> float:
+    a_mult = 1.0
+    s_mult = 1.0
+    spe_mult = 1.0
+    a_mult, s_mult, spe_mult, _, _, _ = apply_choice(
+        build.item, a_mult, s_mult, spe_mult
+    )
+    pq = pq_activation(build, weather, terrain, state, stats, dry_run=True)
+    return stats["Spe"] * stage_mult(state.stages["Spe"], True) * spe_mult * pq["Spe"]
+
+
+def try_sitrus(state: BattleState, build: SetBuild):
+    if (
+        build.item == "Sitrus Berry"
+        and not state.consumed_item.get("Sitrus Berry", False)
+        and state.hp > 0
+        and state.hp * 2 <= state.max_hp
+    ):
+        heal = int(math.ceil(0.25 * state.max_hp))
+        state.hp = min(state.max_hp, state.hp + heal)
+        state.consumed_item["Sitrus Berry"] = True
+
+
+def try_leftovers(state: BattleState, build: SetBuild):
+    if build.item == "Leftovers" and state.hp > 0:
+        heal = max(1, state.max_hp // 16)
+        state.hp = min(state.max_hp, state.hp + heal)
+
+
+def apply_recoil_move(attacker_state: BattleState, move: Move, damage_dealt: int):
+    r = RECOIL_RATIO.get(move.name)
+    if not r or damage_dealt <= 0:
+        return
+    recoil = max(1, int(math.floor(damage_dealt * r)))
+    attacker_state.hp = max(0, attacker_state.hp - recoil)
+
+
+def apply_recoil_life_orb(
+    attacker_state: BattleState, build: SetBuild, damage_dealt: int
+):
+    if damage_dealt <= 0:
+        return
+    if build.item == "Life Orb" and attacker_state.hp > 0:
+        recoil = max(1, attacker_state.max_hp // 10)
+        attacker_state.hp = max(0, attacker_state.hp - recoil)
+
+
+def apply_stat_side_effects_after(self_state: BattleState, move: Move):
+    # Stage drops for user after the move connects
+    if move.name == "Close Combat":
+        self_state.stages["Def"] = max(-6, self_state.stages["Def"] - 1)
+        self_state.stages["SpD"] = max(-6, self_state.stages["SpD"] - 1)
+    elif move.name == "Draco Meteor":
+        self_state.stages["SpA"] = max(-6, self_state.stages["SpA"] - 2)
+    elif move.name == "Leaf Storm":
+        self_state.stages["SpA"] = max(-6, self_state.stages["SpA"] - 2)
+    elif move.name == "Headlong Rush":
+        self_state.stages["Def"] = max(-6, self_state.stages["Def"] - 1)
+        self_state.stages["SpD"] = max(-6, self_state.stages["SpD"] - 1)
+
+
+def is_contact_effective(move: Move, attacker_item: str) -> bool:
+    # Punching Glove removes contact on punching moves
+    if attacker_item == "Punching Glove" and move.is_punch:
+        return False
+    return move.contact
+
+
+# ---- Core: apply a damaging move that HITS (no accuracy randomness here) ----
+def perform_damage_hit(
+    self_build: SetBuild,
+    opp_build: SetBuild,
+    self_state: BattleState,
+    opp_state: BattleState,
+    mv: Move,
+    tera: bool,
+    ttype: Optional[str],
+    weather,
+    terrain,
+    stats_self: Dict[str, int],
+    stats_opp: Dict[str, int],
+    opp_selected_move: Optional[Move] = None,
+) -> int:
+    # Sucker Punch failure against Status, Counter, Mirror Coat
+    if mv.name == "Sucker Punch" and opp_selected_move is not None:
+        if (
+            opp_selected_move.category == "Status"
+            or opp_selected_move.is_counter
+            or opp_selected_move.is_mirror_coat
+        ):
+            # still record nothing received
+            opp_state.ability_active["last_received"] = {
+                "category": mv.category,
+                "damage": 0,
+            }
+            return 0
+
+    # Choice lock after first used damaging move
+    if (
+        self_build.item in ("Choice Band", "Choice Specs", "Choice Scarf")
+        and self_state.locked_move is None
+    ):
+        self_state.locked_move = mv.name
+
+    # Decide Tera state BEFORE damage (offense + defense this turn)
+    tera_now = False
+    if tera and ttype:
+        self_state.tera_used = True
+        self_state.tera_type = ttype
+        tera_now = True
+
+    # Determine move type and (dynamic) category
+    orig_types = effective_types_offense(self_build)
+    used_type = mv.mtype
+    if mv.is_tera_blast and (self_state.tera_used or tera_now) and ttype:
+        used_type = ttype
+        used_cat = "Physical" if stats_self["Atk"] >= stats_self["SpA"] else "Special"
+    else:
+        used_cat = mv.category
+
+    atk_stat, def_stat = category_stat_names(used_cat)
+    if mv.name == "Psyshock":  # SpA vs Def
+        def_stat = "Def"
+
+    # Multipliers
+    a_mult = 1.0
+    s_mult = 1.0
+    spe_mult = 1.0
+    a_mult, s_mult, spe_mult, _, _, _ = apply_choice(
+        self_build.item, a_mult, s_mult, spe_mult
+    )
+
+    # Hadron/Orichalcum stat-side boost
+    if SPECIES_DATA[self_build.species].ability_hint == "Hadron Engine":
+        s_mult *= 1.3
+    if SPECIES_DATA[self_build.species].ability_hint == "Orichalcum Pulse":
+        a_mult *= 1.3
+
+    pq = pq_activation(
+        self_build, weather, terrain, self_state, stats_self, dry_run=False
+    )
+
+    # Crit handling for stage ignore (only for always-crit moves modeled)
+    crit = is_crit(mv)
+    a_stage = self_state.stages[atk_stat]
+    d_stage = opp_state.stages[def_stat]
+    if crit:
+        a_stage = max(0, a_stage)
+        d_stage = min(0, d_stage)
+
+    # Unaware handling
+    if SPECIES_DATA[opp_build.species].ability_hint == "Unaware":
+        if a_stage > 0:
+            a_stage = 0
+    if SPECIES_DATA[self_build.species].ability_hint == "Unaware":
+        if d_stage > 0:
+            d_stage = 0
+
+    if atk_stat == "Atk":
+        atk_val = int(stats_self["Atk"] * stage_mult(a_stage) * a_mult * pq["Atk"])
+    else:
+        atk_val = int(stats_self["SpA"] * stage_mult(a_stage) * s_mult * pq["SpA"])
+
+    def_base = stats_opp[def_stat] * stage_mult(d_stage)
+    if def_stat == "SpD" and opp_build.item == "Assault Vest":
+        def_base *= 1.5
+    def_val = int(def_base)
+
+    offensive_stab = tera_stab_mult(
+        used_type, orig_types, self_state.tera_type if self_state.tera_used else None
+    )
+    opp_types_now = effective_types_defense(opp_build, opp_state)
+    item_m = move_item_mult(self_build.item, mv, atk_stat)
+    field_m = field_power_mult(used_type, self_build, self_state, weather, terrain)
+
+    # Compute total damage across hits (Multiscale only on the first hit that connects)
+    total_dealt = 0
+    hits = mv.multi_hits if mv.multi_hits > 1 else 1
+    ms = opp_state.multiscale_on
+
+    for _ in range(hits):
+        tmult = type_mult(used_type, opp_types_now)
+        d = damage(
+            100,
+            base_power(mv),
+            atk_val,
+            def_val,
+            offensive_stab,
+            tmult,
+            item_m,
+            False,
+            ms,
+            field_m,
+            crit,
+        )
+
+        # Focus Sash / Sturdy timing per hit
+        if (
+            opp_build.item == "Focus Sash"
+            and opp_state.sash_intact
+            and opp_state.hp == opp_state.max_hp
+            and d >= opp_state.hp
+        ):
+            opp_state.hp = 1
+            opp_state.sash_intact = False
+            dealt = 1
+        elif (
+            SPECIES_DATA[opp_build.species].ability_hint == "Sturdy"
+            and opp_state.sturdy_intact
+            and opp_state.hp == opp_state.max_hp
+            and d >= opp_state.hp
+        ):
+            opp_state.hp = 1
+            opp_state.sturdy_intact = False
+            dealt = 1
+        else:
+            opp_state.hp = max(0, opp_state.hp - d)
+            dealt = d
+
+        total_dealt += dealt
+        ms = False
+        opp_state.multiscale_on = False
+        try_sitrus(opp_state, opp_build)
+
+        if opp_state.hp <= 0:
+            break
+
+    # Weakness Policy (if hit and first-hit was SE)
+    if total_dealt > 0:
+        tm_first = type_mult(used_type, effective_types_defense(opp_build, opp_state))
+        if (
+            tm_first > 1.0
+            and opp_build.item == "Weakness Policy"
+            and not opp_state.consumed_item.get("Weakness Policy", False)
+        ):
+            opp_state.consumed_item["Weakness Policy"] = True
+            opp_state.stages["Atk"] = min(6, opp_state.stages["Atk"] + 2)
+            opp_state.stages["SpA"] = min(6, opp_state.stages["SpA"] + 2)
+
+    # Record last RECEIVED (for Counter/Mirror Coat)
+    opp_state.ability_active["last_received"] = {
+        "category": used_cat,
+        "damage": total_dealt,
+    }
+
+    # Recoil sequence (only if we actually hit for >0)
+    apply_recoil_move(self_state, mv, total_dealt)
+    if (
+        total_dealt > 0
+        and is_contact_effective(mv, self_build.item)
+        and opp_build.item == "Rocky Helmet"
+        and self_state.hp > 0
+    ):
+        rh = max(1, self_state.max_hp // 6)
+        self_state.hp = max(0, self_state.hp - rh)
+    apply_recoil_life_orb(self_state, self_build, total_dealt)
+    try_sitrus(self_state, self_build)
+
+    # User-side stage drops after successful connection
+    if total_dealt > 0:
+        apply_stat_side_effects_after(self_state, mv)
+
+    return total_dealt
+
+
+def do_status_action(mv: Move, self_state: BattleState):
+    if mv.is_protect:
+        self_state.ability_active["Protect"] = True
+        return
+    if mv.is_swords_dance:
+        self_state.stages["Atk"] = min(6, self_state.stages["Atk"] + 2)
+        return
+
+
+def apply_counter_like(
+    mv: Move, self_state: BattleState, opp_state: BattleState, opp_build: SetBuild
+):
+    # Blocked by Protect
+    if opp_state.ability_active.get("Protect", False):
+        return
+    last = self_state.ability_active.get("last_received", None)
+    if last and isinstance(last, dict):
+        if mv.is_counter and last.get("category") == "Physical":
+            dmg = int(last.get("damage", 0)) * 2
+        elif mv.is_mirror_coat and last.get("category") == "Special":
+            dmg = int(last.get("damage", 0)) * 2
+        else:
+            return
+        # Sash timing
+        if (
+            opp_build.item == "Focus Sash"
+            and opp_state.sash_intact
+            and opp_state.hp == opp_state.max_hp
+            and dmg >= opp_state.hp
+        ):
+            opp_state.hp = 1
+            opp_state.sash_intact = False
+        else:
+            opp_state.hp = max(0, opp_state.hp - dmg)
+        opp_state.multiscale_on = False
+        try_sitrus(opp_state, opp_build)
+
+
+def action_list_for(build: SetBuild, state: BattleState) -> List[Tuple[str, bool]]:
+    # Respect Choice lock: only that move remains
+    moves = build.moves if state.locked_move is None else [state.locked_move]
+    acts = []
+    can_tera = (not state.tera_used) and bool(build.tera_type)
+    for name in moves:
+        # Disallow status/counter/coat after Choice lock (locked move must be the damaging move)
+        if state.locked_move is not None:
+            mv = MOVE_DB[state.locked_move]
+            if mv.category == "Status" or mv.is_counter or mv.is_mirror_coat:
+                continue
+        # First-turn-only check is handled later (we still list; enforce at selection)
+        acts.append((name, False))
+        if can_tera:
+            acts.append((name, True))
+    return acts
+
+
+def speed_order(tupleA, tupleB, weather, terrain):
+    buildA, stateA, statsA = tupleA
+    buildB, stateB, statsB = tupleB
+    speA = compute_spe_for_order(buildA, stateA, statsA, weather, terrain)
+    speB = compute_spe_for_order(buildB, stateB, statsB, weather, terrain)
+    if speA > speB:
+        return ("A", "B")
+    if speB > speA:
+        return ("B", "A")
+    return ("TIE", "TIE")  # resolve by branching both orders
+
+
+def apply_start_of_battle_hooks(
+    buildA: SetBuild, A: BattleState, buildB: SetBuild, B: BattleState
+):
+    # Intimidate
+    if SPECIES_DATA[buildA.species].ability_hint == "Intimidate":
+        B.stages["Atk"] = max(-6, B.stages["Atk"] - 1)
+    if SPECIES_DATA[buildB.species].ability_hint == "Intimidate":
+        A.stages["Atk"] = max(-6, A.stages["Atk"] - 1)
+
+
+# ------- CHANCE BRANCH HELPERS -------
+# Return list of (prob, outcome_val_or_None, newA, newB)
+ChanceBranch = Tuple[float, Optional[float], BattleState, BattleState]
+
+
+def branch_on_move(
+    build_att: SetBuild,
+    state_att: BattleState,
+    stats_att: Dict[str, int],
+    build_def: SetBuild,
+    state_def: BattleState,
+    stats_def: Dict[str, int],
+    weather,
+    terrain,
+    mv: Move,
+    tera: bool,
+    ttype: Optional[str],
+    opp_selected_move: Optional[Move],
+) -> List[Tuple[float, BattleState, BattleState]]:
+    """
+    Returns a list of (probability, new_att_state, new_def_state) after ATTACKER acts (hit/miss).
+    """
+    out: List[Tuple[float, BattleState, BattleState]] = []
+
+    # First-turn-only moves (e.g., First Impression)
+    if mv.first_turn_only and (state_att.turns_elapsed > 0):
+        sA = copy.deepcopy(state_att)
+        sD = copy.deepcopy(state_def)
+        sD.ability_active["last_received"] = {"category": mv.category, "damage": 0}
+        out.append((1.0, sA, sD))
+        return out
+
+    if mv.category == "Status":
+        sA = copy.deepcopy(state_att)
+        sD = copy.deepcopy(state_def)
+        if tera and ttype:
+            sA.tera_used = True
+            sA.tera_type = ttype
+        do_status_action(mv, sA)
+        out.append((1.0, sA, sD))
+        return out
+
+    if mv.is_counter or mv.is_mirror_coat:
+        sA = copy.deepcopy(state_att)
+        sD = copy.deepcopy(state_def)
+        if tera and ttype:
+            sA.tera_used = True
+            sA.tera_type = ttype
+        apply_counter_like(mv, sA, sD, build_def)
+        out.append((1.0, sA, sD))
+        return out
+
+    # If defender has Protect active, the hit is blocked
+    if state_def.ability_active.get("Protect", False):
+        sA = copy.deepcopy(state_att)
+        sD = copy.deepcopy(state_def)
+        if tera and ttype:
+            sA.tera_used = True
+            sA.tera_type = ttype
+        sD.ability_active["last_received"] = {"category": mv.category, "damage": 0}
+        out.append((1.0, sA, sD))
+        return out
+
+    # Accuracy branching (one check per move)
+    acc = max(0.0, min(1.0, mv.accuracy))
+    # MISS branch
+    if acc < 1.0:
+        sA_m = copy.deepcopy(state_att)
+        sD_m = copy.deepcopy(state_def)
+        if tera and ttype:
+            sA_m.tera_used = True
+            sA_m.tera_type = ttype
+        sD_m.ability_active["last_received"] = {"category": mv.category, "damage": 0}
+        out.append((1.0 - acc, sA_m, sD_m))
+    # HIT branch
+    sA_h = copy.deepcopy(state_att)
+    sD_h = copy.deepcopy(state_def)
+    dmg = perform_damage_hit(
+        build_att,
+        build_def,
+        sA_h,
+        sD_h,
+        mv,
+        tera,
+        ttype,
+        weather,
+        terrain,
+        stats_att,
+        stats_def,
+        opp_selected_move,
+    )
+    out.append((acc, sA_h, sD_h))
+    return out
+
+
+def step_resolution(
+    buildA: SetBuild,
+    stateA: BattleState,
+    statsA: Dict[str, int],
+    buildB: SetBuild,
+    stateB: BattleState,
+    statsB: Dict[str, int],
+    weather,
+    terrain,
+    actA: Tuple[str, bool],
+    actB: Tuple[str, bool],
+) -> List[ChanceBranch]:
+    """
+    Execute both chosen actions for one turn (order by priority then speed).
+    Return list of stochastic branches: (prob, terminal_value_or_None, newA, newB).
+    """
+    mvA = MOVE_DB[actA[0]]
+    teraA = actA[1]
+    ttA = buildA.tera_type if teraA else None
+    mvB = MOVE_DB[actB[0]]
+    teraB = actB[1]
+    ttB = buildB.tera_type if teraB else None
+
+    def clear_turn_flags(S: BattleState):
+        S.ability_active.pop("Protect", None)
+        S.ability_active["last_received"] = None
+
+    def ordered(first: str) -> List[ChanceBranch]:
+        A = copy.deepcopy(stateA)
+        B = copy.deepcopy(stateB)
+        clear_turn_flags(A)
+        clear_turn_flags(B)
+
+        # FIRST acts
+        if first == "A":
+            branches_first = branch_on_move(
+                buildA,
+                A,
+                statsA,
+                buildB,
+                B,
+                statsB,
+                weather,
+                terrain,
+                mvA,
+                teraA,
+                ttA,
+                mvB,
+            )
+        else:
+            branches_first = branch_on_move(
+                buildB,
+                B,
+                statsB,
+                buildA,
+                A,
+                statsA,
+                weather,
+                terrain,
+                mvB,
+                teraB,
+                ttB,
+                mvA,
+            )
+
+        out_branches: List[ChanceBranch] = []
+        for p1, SA1, SB1 in branches_first:
+            # Terminal after first action?
+            if SA1.hp <= 0 and SB1.hp <= 0:
+                out_branches.append((p1, 0.5, SA1, SB1))
+                continue
+            if SB1.hp <= 0:
+                out_branches.append((p1, 1.0 if first == "A" else 0.0, SA1, SB1))
+                continue
+            if SA1.hp <= 0:
+                out_branches.append((p1, 0.0 if first == "A" else 1.0, SA1, SB1))
+                continue
+
+            # SECOND acts if alive
+            if first == "A":
+                branches_second = branch_on_move(
+                    buildB,
+                    SB1,
+                    statsB,
+                    buildA,
+                    SA1,
+                    statsA,
+                    weather,
+                    terrain,
+                    mvB,
+                    teraB,
+                    ttB,
+                    mvA,
+                )
+                for p2, SB2, SA2 in branches_second:
+                    apply_speed_boost_if_any(buildA, SA2)
+                    apply_speed_boost_if_any(buildB, SB2)
+                    try_sitrus(SA2, buildA)
+                    try_sitrus(SB2, buildB)
+                    try_leftovers(SA2, buildA)
+                    try_leftovers(SB2, buildB)
+                    out_branches.append((p1 * p2, None, SA2, SB2))
+            else:
+                branches_second = branch_on_move(
+                    buildA,
+                    SA1,
+                    statsA,
+                    buildB,
+                    SB1,
+                    statsB,
+                    weather,
+                    terrain,
+                    mvA,
+                    teraA,
+                    ttA,
+                    mvB,
+                )
+                for p2, SA2, SB2 in branches_second:
+                    apply_speed_boost_if_any(buildA, SA2)
+                    apply_speed_boost_if_any(buildB, SB2)
+                    try_sitrus(SA2, buildA)
+                    try_sitrus(SB2, buildB)
+                    try_leftovers(SA2, buildA)
+                    try_leftovers(SB2, buildB)
+                    out_branches.append((p1 * p2, None, SA2, SB2))
+        return out_branches
+
+    if mvA.priority > mvB.priority:
+        return ordered("A")
+    elif mvB.priority > mvA.priority:
+        return ordered("B")
+    else:
+        o = speed_order(
+            (buildA, stateA, statsA), (buildB, stateB, statsB), weather, terrain
+        )
+        if o[0] == "TIE":
+            a = ordered("A")
+            b = ordered("B")
+            return [(0.5 * p, val, sA, sB) for (p, val, sA, sB) in a] + [
+                (0.5 * p, val, sA, sB) for (p, val, sA, sB) in b
+            ]
+        else:
+            return ordered(o[0])
+
+
+# ---------- Minimax (simultaneous choices + chance nodes) ----------
+def state_key(
+    buildA: SetBuild, A: BattleState, buildB: SetBuild, B: BattleState, depth: int
+) -> Tuple:
+    def cflags(st: BattleState) -> Tuple:
+        return (
+            st.hp,
+            st.max_hp,
+            st.stages["Atk"],
+            st.stages["Def"],
+            st.stages["SpA"],
+            st.stages["SpD"],
+            st.stages["Spe"],
+            st.sash_intact,
+            st.sturdy_intact,
+            st.multiscale_on,
+            st.tera_used,
+            st.tera_type or "",
+            st.locked_move or "",
+            st.consumed_item.get("Booster Energy", False),
+            st.consumed_item.get("Sitrus Berry", False),
+            st.consumed_item.get("Weakness Policy", False),
+            st.turns_elapsed,
+        )
+
+    def ev_tuple(ev: Dict[str, int]) -> Tuple[int, int, int, int, int, int]:
+        return (ev["HP"], ev["Atk"], ev["Def"], ev["SpA"], ev["SpD"], ev["Spe"])
+
+    def iv_tuple(iv: Dict[str, int]) -> Tuple[int, int, int, int, int, int]:
+        return (iv["HP"], iv["Atk"], iv["Def"], iv["SpA"], iv["SpD"], iv["Spe"])
+
+    return (
+        buildA.species,
+        buildA.item,
+        buildA.tera_type or "",
+        buildA.nature,
+        ev_tuple(buildA.evs),
+        iv_tuple(buildA.ivs),
+        cflags(A),
+        buildB.species,
+        buildB.item,
+        buildB.tera_type or "",
+        buildB.nature,
+        ev_tuple(buildB.evs),
+        iv_tuple(buildB.ivs),
+        cflags(B),
+        depth,
+    )
+
+
+_minimax_cache: Dict[Tuple, float] = {}
+
+
+def sudden_death_value(A: BattleState, B: BattleState) -> float:
+    a = 0.0 if A.max_hp <= 0 else A.hp / A.max_hp
+    b = 0.0 if B.max_hp <= 0 else B.hp / B.max_hp
+    if abs(a - b) < 1e-9:
+        return 0.5
+    return 1.0 if a > b else 0.0
+
+
+def minimax(
+    buildA: SetBuild,
+    A: BattleState,
+    statsA: Dict[str, int],
+    buildB: SetBuild,
+    B: BattleState,
+    statsB: Dict[str, int],
+    weather,
+    terrain,
+    depth: int,
+    alpha: float,
+    beta: float,
+) -> float:
+    # Terminal KOs
+    if A.hp <= 0 and B.hp <= 0:
+        return 0.5
+    if B.hp <= 0:
+        return 1.0
+    if A.hp <= 0:
+        return 0.0
+
+    # Depth==0 => sudden death by %HP
+    if depth == 0:
+        return sudden_death_value(A, B)
+
+    key = state_key(buildA, A, buildB, B, depth)
+    if key in _minimax_cache:
+        return _minimax_cache[key]
+
+    actsA = action_list_for(buildA, A)
+    actsB = action_list_for(buildB, B)
+
+    best_val = -1e9
+    for actA in actsA:
+        worst_val = 1e9
+        local_beta = beta
+        for actB in actsB:
+            branches = step_resolution(
+                buildA, A, statsA, buildB, B, statsB, weather, terrain, actA, actB
+            )
+            ev = 0.0
+            for p, val, nA, nB in branches:
+                nA2 = copy.deepcopy(nA)
+                nB2 = copy.deepcopy(nB)
+                nA2.turns_elapsed = A.turns_elapsed + 1
+                nB2.turns_elapsed = B.turns_elapsed + 1
+
+                if val is None:
+                    ev += p * minimax(
+                        buildA,
+                        nA2,
+                        statsA,
+                        buildB,
+                        nB2,
+                        statsB,
+                        weather,
+                        terrain,
+                        depth - 1,
+                        alpha,
+                        local_beta,
+                    )
+                else:
+                    ev += p * val
+            if ev < worst_val:
+                worst_val = ev
+            if worst_val <= alpha:
+                break  # prune B
+            if worst_val < local_beta:
+                local_beta = worst_val
+        if worst_val > best_val:
+            best_val = worst_val
+        if best_val >= beta:
+            break  # prune A
+        if best_val > alpha:
+            alpha = best_val
+
+    _minimax_cache[key] = best_val
+    return best_val
+
+
+def simulate(buildA: SetBuild, buildB: SetBuild, verbose: bool = False) -> float:
+    """
+    Optimal-play simulator (minimax + chance nodes), SEARCH_TURNS horizon (3).
+    Returns P(win) in [0,1].
+    """
+    # Precompute stats
+    specA = SPECIES_DATA[buildA.species]
+    specB = SPECIES_DATA[buildB.species]
+    statsA = calc_stats(specA, buildA.nature, buildA.evs, buildA.ivs)
+    statsB = calc_stats(specB, buildB.nature, buildB.evs, buildB.ivs)
+
+    # Initial states
+    A0 = initial_state(buildA)
+    B0 = initial_state(buildB)
+
+    # Environment and ability context
+    weather = {"state": None}
+    terrain = {"state": None}
+    atk_mult = {"A": 1.0, "B": 1.0}
+    spa_mult = {"A": 1.0, "B": 1.0}
+    ability_context(specA.ability_hint or "", "A", weather, terrain, atk_mult, spa_mult)
+    ability_context(specB.ability_hint or "", "B", weather, terrain, atk_mult, spa_mult)
+
+    # Start-of-battle hooks (e.g., Intimidate)
+    apply_start_of_battle_hooks(buildA, A0, buildB, B0)
+
+    # Reset cache per match
+    _minimax_cache.clear()
+
+    pwin = minimax(
+        buildA,
+        A0,
+        statsA,
+        buildB,
+        B0,
+        statsB,
+        weather,
+        terrain,
+        SEARCH_TURNS,
+        ALPHA_INIT,
+        BETA_INIT,
+    )
+    return max(0.0, min(1.0, pwin))
+
+
+# =========================
+#     OBJECTIVE / SEARCH
+# =========================
+def valid_evs(ev: Dict[str, int]) -> bool:
+    if any(v % 4 != 0 for v in ev.values()):
+        return False
+    if any(v > 252 for v in ev.values()):
+        return False
+    return sum(ev.values()) <= EV_TOTAL_MAX
+
+
+def iterate_evs_axes(axes: Tuple[str, ...]) -> List[Dict[str, int]]:
+    packs = []
+    for vals in itertools.product(EV_STEPS, repeat=len(axes)):
+        ev = {k: 0 for k in ["HP", "Atk", "Def", "SpA", "SpD", "Spe"]}
+        for i, k in enumerate(axes):
+            ev[k] = vals[i]
+        if not valid_evs(ev):
+            continue
+        packs.append(ev)
+    return packs
+
+
+def movesets_from_pool(pool: List[str], four_physical_only: bool) -> List[List[str]]:
+    phys_ok = [n for n in pool if MOVE_DB[n].category != "Special"]
+    base = phys_ok if four_physical_only else list(pool)
+    out = []
+    for combo in itertools.combinations(base, 4):
+        if not any(MOVE_DB[n].category != "Status" for n in combo):
+            continue
+        out.append(list(combo))
+    return out
+
+
+def filter_moveset_by_item(item: str, moves: List[str]) -> bool:
+    has_status = any(MOVE_DB[m].category == "Status" for m in moves)
+    if item == "Assault Vest" and has_status:
+        return False
+    if item in ("Choice Band", "Choice Specs", "Choice Scarf") and has_status:
+        return False
+    if item in ("Choice Band", "Choice Specs", "Choice Scarf") and (
+        "Counter" in moves or "Mirror Coat" in moves
+    ):
+        return False
+    return True
+
+
+def enumerate_candidates_for_species(species: str) -> List[SetBuild]:
+    spec = SPECIES_DATA[species]
+    items = ITEM_CANDIDATES[species]
+    teras = TERA_POOLS[species]
+    movesets = movesets_from_pool(MOVE_POOLS[species], FOUR_PHYSICAL_ONLY[species])
+    if pick_offense_category(spec) == "Physical":
+        ev_axes = ("HP", "Atk", "Def", "Spe")
+    else:
+        ev_axes = ("HP", "SpA", "SpD", "Spe")
+    ev_packs = iterate_evs_axes(ev_axes)
+    ivs = {k: 31 for k in ["HP", "Atk", "Def", "SpA", "SpD", "Spe"]}
+
+    def sample_movesets(ms: List[List[str]]) -> List[List[str]]:
+        return ms[:16] + ms[16:48:2]
+
+    cands = []
+    for item in items:
+        for tera in teras:
+            for nature in (
+                ["Jolly", "Adamant"]
+                if species != "Swampert"
+                else ["Adamant", "Careful", "Impish"]
+            ):
+                for evs in ev_packs:
+                    for mv in sample_movesets(movesets):
+                        if not filter_moveset_by_item(item, mv):
+                            continue
+                        cands.append(
+                            SetBuild(
+                                species=species,
+                                item=item,
+                                ability=spec.ability_hint,
+                                tera_type=tera,
+                                nature=nature,
+                                evs=evs,
+                                ivs=ivs,
+                                moves=mv,
+                            )
+                        )
+    return cands
+
+
+# ---------- Local EV hill-climb refine ----------
+EV_KEYS_ORDER = ("HP", "Atk", "Def", "SpA", "SpD", "Spe")
+
+
+def clamp_evs(ev: Dict[str, int]) -> Dict[str, int]:
+    ev = {k: max(0, min(252, (ev.get(k, 0) // 4) * 4)) for k in EV_KEYS_ORDER}
+    total = sum(ev.values())
+    if total > EV_TOTAL_MAX:
+        overflow = total - EV_TOTAL_MAX
+        for k in ("HP", "Atk", "Def", "SpA", "SpD", "Spe"):
+            take = min(overflow, ev[k])
+            take = (take // 4) * 4
+            ev[k] -= take
+            overflow -= take
+            if overflow <= 0:
+                break
+    return ev
+
+
+def ev_neighbors(
+    ev: Dict[str, int], axes: Tuple[str, ...], step: int = 16
+) -> List[Dict[str, int]]:
+    out = []
+    for i in range(len(axes)):
+        for j in range(len(axes)):
+            if i == j:
+                continue
+            a, b = axes[i], axes[j]
+            if ev[b] >= step:
+                cand = dict(ev)
+                cand[a] = min(252, cand[a] + step)
+                cand[b] = max(0, cand[b] - step)
+                if cand[a] % 4 == 0 and cand[b] % 4 == 0 and valid_evs(cand):
+                    out.append(cand)
+    return out
+
+
+def refine_evs_local(
+    base: SetBuild,
+    eval_fn: Callable[[SetBuild], float],
+    axes: Tuple[str, ...],
+    passes: int = LOCAL_REFINE_PASSES,
+) -> SetBuild:
+    best = copy.deepcopy(base)
+    best_score = eval_fn(best)
+    for _ in range(passes):
+        improved = False
+        for cand_evs in ev_neighbors(best.evs, axes, step=16):
+            cand = copy.deepcopy(best)
+            cand.evs = clamp_evs(cand_evs)
+            score = eval_fn(cand)
+            if score > best_score + 1e-9:
+                best = cand
+                best_score = score
+                improved = True
+        if not improved:
+            break
+    return best
+
+
+# Prebuild threat variants once (with weights)
+def prebuild_threat_variants(
+    threat_names: List[str],
+) -> Dict[str, Tuple[List[SetBuild], List[float]]]:
+    out = {}
+    missing = []
+    for t in threat_names:
+        vw = adversary_variants(t)
+        if not vw:
+            missing.append(t)
+        else:
+            variants, weights = vw
+            resolved = resolve_species_name(t)
+            out[SPECIES_DATA[resolved].name] = (variants, weights)
+    if missing:
+        print("[warn] Missing threats (not in SPECIES_DATA):", sorted(set(missing)))
+    return out
+
+
+def weighted_mean(vals: List[float], weights: List[float]) -> float:
+    if not vals:
+        return 0.0
+    if not weights or len(weights) != len(vals):
+        return sum(vals) / len(vals)
+    s = sum(weights)
+    if s <= 0:
+        return sum(vals) / len(vals)
+    return sum(v * w for v, w in zip(vals, weights)) / s
+
+
+def eval_candidate_single(
+    candidate: SetBuild,
+    threats_order: List[str],
+    threats_variants: Dict[str, Tuple[List[SetBuild], List[float]]],
+) -> Tuple[float, List[float], SetBuild]:
+    wrs = []
+    for name in threats_order:
+        variants, weights = threats_variants[name]
+        results = [simulate(candidate, opp) for opp in variants]
+        wrs.append(weighted_mean(results, weights))
+    score = sum(wrs) / len(wrs) if wrs else 0.0
+    return score, wrs, candidate
+
+
+def eval_candidate_trio(
+    candidate: SetBuild,
+    fixed_builds: Dict[str, SetBuild],
+    threats_order: List[str],
+    threats_variants: Dict[str, Tuple[List[SetBuild], List[float]]],
+) -> Tuple[float, List[float], SetBuild]:
+    trio = dict(fixed_builds)
+    trio[candidate.species] = candidate
+    wrs = []
+    for name in threats_order:
+        variants, weights = threats_variants[name]
+        per_variant = []
+        for opp in variants:
+            ours = max(simulate(b, opp) for _, b in trio.items())
+            per_variant.append(ours)
+        wrs.append(weighted_mean(per_variant, weights))
+    score = sum(wrs) / len(wrs) if wrs else 0.0
+    return score, wrs, candidate
+
+
+def build_search_for_species(
+    species: str,
+    threats: List[str],
+    conditioned_on: Optional[Dict[str, SetBuild]] = None,
+):
+    threats_variants = prebuild_threat_variants(threats)
+    if not threats_variants:
+        return None, {}
+    candidates = enumerate_candidates_for_species(species)
+    if not candidates:
+        return None, {}
+
+    best = None
+    per_wr = {}
+    max_workers = max(1, (os.cpu_count() or 1))
+
+    if conditioned_on is None:
+        # Solo objective — shortlist in parallel
+        with ProcessPoolExecutor(max_workers=max_workers) as ex:
+            futures = [
+                ex.submit(eval_candidate_single, c, threats, threats_variants)
+                for c in candidates
+            ]
+            for fut in as_completed(futures):
+                score, wrs, cand = fut.result()
+                if (best is None) or (score > best[0]):
+                    best = (score, wrs, cand)
+
+        # Local refine — solo
+        def solo_eval_fn(sb: SetBuild) -> float:
+            wrs = []
+            for name in threats:
+                variants, weights = threats_variants[name]
+                results = [simulate(sb, opp) for opp in variants]
+                wrs.append(weighted_mean(results, weights))
+            return sum(wrs) / len(wrs) if wrs else 0.0
+
+        axes = (
+            ("HP", "Atk", "Def", "Spe")
+            if pick_offense_category(SPECIES_DATA[species]) == "Physical"
+            else ("HP", "SpA", "SpD", "Spe")
+        )
+        refined = refine_evs_local(
+            best[2], solo_eval_fn, axes, passes=LOCAL_REFINE_PASSES
+        )
+        if refined.evs != best[2].evs:
+            wrs = []
+            for name in threats:
+                variants, weights = threats_variants[name]
+                results = [simulate(refined, opp) for opp in variants]
+                wrs.append(weighted_mean(results, weights))
+            best = (sum(wrs) / len(wrs) if wrs else 0.0, wrs, refined)
+
+    else:
+        # Trio-conditioned objective (sequential)
+        def trio_eval_fn(sb: SetBuild) -> float:
+            trio = dict(conditioned_on)
+            trio[species] = sb
+            wrs = []
+            for name in threats:
+                variants, weights = threats_variants[name]
+                per_variant = []
+                for opp in variants:
+                    ours = max(simulate(b, opp) for _, b in trio.items())
+                    per_variant.append(ours)
+                wrs.append(weighted_mean(per_variant, weights))
+            return sum(wrs) / len(wrs) if wrs else 0.0
+
+        for c in candidates:
+            score, wrs, cand = eval_candidate_trio(
+                c, conditioned_on, threats, threats_variants
+            )
+            if (best is None) or (score > best[0]):
+                best = (score, wrs, cand)
+
+        # Local refine — trio-conditioned
+        axes = (
+            ("HP", "Atk", "Def", "Spe")
+            if pick_offense_category(SPECIES_DATA[species]) == "Physical"
+            else ("HP", "SpA", "SpD", "Spe")
+        )
+        refined = refine_evs_local(
+            best[2], trio_eval_fn, axes, passes=LOCAL_REFINE_PASSES
+        )
+        if refined.evs != best[2].evs:
+            wrs = []
+            trio_fixed = dict(conditioned_on)
+            trio_fixed[species] = refined
+            for name in threats:
+                variants, weights = threats_variants[name]
+                per_variant = []
+                for opp in variants:
+                    ours = max(simulate(b, opp) for _, b in trio_fixed.items())
+                    per_variant.append(ours)
+                wrs.append(weighted_mean(per_variant, weights))
+            best = (sum(wrs) / len(wrs) if wrs else 0.0, wrs, refined)
+
+    if best is None:
+        return None, {}
+    per_wr = {threats[i]: best[1][i] for i in range(len(threats))}
+    return best[2], per_wr
+
+
+def coordinate_descent_trio(order: List[str], threats: List[str], rounds: int = 2):
+    # Initial independent bests
+    bests = {}
+    per_wr_all = {}
+    resolvable = [t for t in threats if resolve_species_name(t)]
+    for sp in order:
+        print(f"\nSearching best build for {sp} (solo)...")
+        b, wrs = build_search_for_species(sp, resolvable, conditioned_on=None)
+        if b is None:
+            raise RuntimeError(f"No candidate found for {sp}")
+        bests[sp] = b
+        per_wr_all[sp] = wrs
+        print(
+            f"[Best SOLO] {sp}: item={b.item}, tera={b.tera_type}, nature={b.nature}, EVs={b.evs}, moves={b.moves}"
+        )
+
+    # Coordinate updates
+    for r in range(1, rounds + 1):
+        print(f"\n== Coordinate descent round {r} ==")
+        for sp in order:
+            fixed = {k: v for k, v in bests.items() if k != sp}
+            b, wrs = build_search_for_species(sp, resolvable, conditioned_on=fixed)
+            if b is not None:
+                bests[sp] = b
+                per_wr_all[sp] = wrs
+                print(
+                    f"[Best TEAM] {sp}: item={b.item}, tera={b.tera_type}, nature={b.nature}, EVs={b.evs}, moves={b.moves}"
+                )
+    return bests, per_wr_all
+
+
+def trio_objective(builds: Dict[str, SetBuild], threats: List[str]):
+    agg = {}
+    used = 0
+    threats_variants = prebuild_threat_variants(threats)
+    for name in threats:
+        if name not in threats_variants:
+            continue
+        used += 1
+        variants, weights = threats_variants[name]
+        per_variant = []
+        for opp in variants:
+            ours = max(simulate(b, opp) for _, b in builds.items())
+            per_variant.append(ours)
+        agg[name] = weighted_mean(per_variant, weights)
+    avg = (sum(agg.values()) / used) if used else 0.0
+    return avg, agg, used
+
+
+# =========================
+#            MAIN
+# =========================
+def canonical_name(name: str) -> Optional[str]:
+    key = resolve_species_name(name)
+    return SPECIES_DATA[key].name if key else None
+
+
+def main():
+    start = time.time()
+    print("== SV 1v1 Optimizer — CPU only ==")
+    print("Version:", "3.0.1")
+    print("Threats listed:", len(THREAT_LIST))
+
+    # Dedup threats (avoid overweighting duplicates) and canonicalize names
+    unique_threats = sorted(set(THREAT_LIST), key=lambda x: THREAT_LIST.index(x))
+    canonical_threats = [cn for cn in (canonical_name(t) for t in unique_threats) if cn]
+    missing = [t for t in unique_threats if not resolve_species_name(t)]
+    print(f"Threats resolvable: {len(canonical_threats)}; missing: {len(missing)}")
+    if missing:
+        print("Missing threats will be skipped:", sorted(set(missing)))
+
+    order = ["Swampert", "Blaziken", "Quaquaval"]
+    print("\nSearch knobs:")
+    _ev_count_phys = len(iterate_evs_axes(("HP", "Atk", "Def", "Spe")))
+    _ev_count_spec = len(iterate_evs_axes(("HP", "SpA", "SpD", "Spe")))
+    _mv_counts = {
+        sp: len(movesets_from_pool(MOVE_POOLS[sp], FOUR_PHYSICAL_ONLY[sp]))
+        for sp in order
+    }
+    print(
+        f"  EV packs (phys 4-axes): ~{_ev_count_phys}, (spec 4-axes): ~{_ev_count_spec}"
+    )
+    print(f"  Movesets per species: {_mv_counts}")
+    print(f"  SEARCH_TURNS: {SEARCH_TURNS}, LOCAL_REFINE_PASSES: {LOCAL_REFINE_PASSES}")
+
+    # Coordinate descent for trio
+    bests, per_wr_all = coordinate_descent_trio(order, canonical_threats, rounds=2)
+
+    avg, agg, used = trio_objective(bests, canonical_threats)
+
+    print("\n================== RESULT (CANDIDATE) ==================")
+    for sp in order:
+        b = bests[sp]
+        print(f"\n!requestSV {sp} @ {b.item}")
+        print(f"Ability: {b.ability or SPECIES_DATA[sp].ability_hint or '—'}")
+        print(f"Tera Type: {b.tera_type}")
+        print("Level: 100")
+        print(
+            f"EVs: {b.evs['HP']} HP / {b.evs['Atk']} Atk / {b.evs['Def']} Def / {b.evs['SpA']} SpA / {b.evs['SpD']} SpD / {b.evs['Spe']} Spe"
+        )
+        print(f"{b.nature} Nature")
+        for m in b.moves:
+            print(f"- {m}")
+
+    print("\n================== TRIO OBJECTIVE ==================")
+    print(
+        f"Avg best-of-trio P(win) across {used} usable threats (vs variant mixtures): {avg:.3f}"
+    )
+    losses = [t for t, v in agg.items() if (v < 0.5)]
+    print(f"Outright losses (best-of-trio): {len(losses)} -> {sorted(losses)}")
+
+    dur = time.time() - start
+    print(f"\nDone in {dur:.1f}s on CPU.")
+    print("Tips:")
+    print("- For speed: reduce EV_STEPS or THREAT_LIST; sample fewer movesets.")
+    print("- For quality: widen movesets or EV grid; increase LOCAL_REFINE_PASSES.")
+    print(
+        "- SEARCH_TURNS is set to 3 to match official 1v1 sudden-death; keep it at 3 for fidelity."
+    )
+
+
+if __name__ == "__main__":
+    main()
