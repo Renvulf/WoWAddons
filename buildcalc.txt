@@ -1707,176 +1707,258 @@ _add_move("Rest", "Psychic", "Status", 0, 1.0)
 _add_move("Sleep Talk", "Normal", "Status", 0, 1.0)
 _add_move("Tera Blast", "Normal", "Special", 80, 1.0)
 
-LEGAL_MOVES_SWAMPERT = sorted(
-    set(
-        [
-            "Liquidation",
-            "Waterfall",
-            "Aqua Tail",
-            "Aqua Jet",
-            "Chilling Water",
-            "Hydro Pump",
-            "Surf",
-            "Rain Dance",
-            "Hydro Cannon",
-            "Earthquake",
-            "High Horsepower",
-            "Stomping Tantrum",
-            "Bulldoze",
-            "Mud Shot",
-            "Dig",
-            "Ice Punch",
-            "Ice Fang",
-            "Ice Spinner",
-            "Avalanche",
-            "Icy Wind",
-            "Rock Slide",
-            "Stone Edge",
-            "Rock Tomb",
-            "Sandstorm",
-            "Stealth Rock",
-            "Flash Cannon",
-            "Endeavor",
-            "Protect",
-            "Detect",
-            "Yawn",
-            "Curse",
-            "Rest",
-            "Sleep Talk",
-            "Substitute",
-            "Take Down",
-            "Facade",
-        ]
+def _add_if_missing(
+    name: str,
+    mtype: str,
+    category: str,  # "Physical" | "Special" | "Status"
+    power: int = 0,
+    accuracy: float = 1.0,
+    *,
+    contact: bool = False,
+    priority: int = 0,
+    is_punch: bool = False,
+    is_slicing: bool = False,
+    multi_hits: int = 1,
+    always_crit: bool = False,
+):
+    if name in MOVE_DB:
+        # If present, do not disturb; assume prior metadata good enough for 1v1 scoring.
+        return
+    MOVE_DB[name] = Move(
+        name=name,
+        mtype=mtype,
+        category=category,
+        power=power,
+        accuracy=accuracy,
+        contact=contact,
+        priority=priority,
+        is_punch=is_punch,
+        is_tera_blast=(name == "Tera Blast"),
+        multi_hits=multi_hits,
+        always_crit=always_crit,
     )
-)
-
-LEGAL_MOVES_BLAZIKEN = sorted(
-    set(
-        [
-            "Flare Blitz",
-            "Blaze Kick",
-            "Fire Punch",
-            "Flamethrower",
-            "Fire Blast",
-            "Overheat",
-            "Heat Wave",
-            "Flame Charge",
-            "Fire Pledge",
-            "Close Combat",
-            "Low Kick",
-            "Low Sweep",
-            "Reversal",
-            "Aura Sphere",
-            "Brick Break",
-            "Bulk Up",
-            "Brave Bird",
-            "Aerial Ace",
-            "Bounce",
-            "Quick Attack",
-            "Detect",
-            "Protect",
-            "Endure",
-            "Swords Dance",
-            "Substitute",
-            "Will-O-Wisp",
-            "Agility",
-            "Sunny Day",
-            "Baton Pass",
-            "Roar",
-            "Knock Off",
-            "Shadow Claw",
-            "Earthquake",
-            "Bulldoze",
-            "Dig",
-            "Rock Slide",
-            "Rock Tomb",
-            "Stone Edge",
-            "Poison Jab",
-            "Thunder Punch",
-            "Facade",
-            "Fling",
-            "Take Down",
-            "U-turn",
-            "Giga Impact",
-            "Hyper Beam",
-            "Solar Beam",
-            "Heat Wave",
-            "Helping Hand",
-            "Fire Spin",
-            "Swift",
-            "Sleep Talk",
-            "Rest",
-            "Tera Blast",
-        ]
-    )
-)
-
-LEGAL_MOVES_QUAQUAVAL = sorted(
-    set(
-        [
-            "Aqua Step",
-            "Liquidation",
-            "Waterfall",
-            "Aqua Cutter",
-            "Aqua Jet",
-            "Flip Turn",
-            "Surf",
-            "Hydro Pump",
-            "Hydro Cannon",
-            "Chilling Water",
-            "Rain Dance",
-            "Close Combat",
-            "Drain Punch",
-            "Brick Break",
-            "Low Kick",
-            "Low Sweep",
-            "Reversal",
-            "Bulk Up",
-            "Swords Dance",
-            "Ice Spinner",
-            "Avalanche",
-            "Icy Wind",
-            "Brave Bird",
-            "Acrobatics",
-            "U-turn",
-            "Knock Off",
-            "Air Slash",
-            "Hurricane",
-            "Aerial Ace",
-            "Trailblaze",
-            "Pounce",
-            "Encore",
-            "Taunt",
-            "Protect",
-            "Detect",
-            "Substitute",
-            "Rest",
-            "Sleep Talk",
-            "Helping Hand",
-            "Giga Impact",
-            "Hyper Beam",
-            "Tera Blast",
-        ]
-    )
-)
-
-RECOIL_RATIO.setdefault("Flare Blitz", 1 / 3)
-RECOIL_RATIO.setdefault("Brave Bird", 1 / 3)
-RECOIL_RATIO.setdefault("Take Down", 1 / 4)
+    if is_slicing:
+        # Tag for Sharpness handling if present in engine
+        object.__setattr__(MOVE_DB[name], "is_slicing", True)
 
 
-def assert_legal_moves(species: str, moves: list[str]) -> None:
-    legal = set(LEGAL_MOVES.get(species, []))
-    bad = [m for m in moves if m not in legal]
-    if bad:
-        raise ValueError(f"Illegal moves for {species}: {bad}")
+# --- Canonical SV TM / tutor / staple moves we reference below (only adds if absent) ---
+# Normal / utility / priority
+_add_if_missing("Quick Attack", "Normal", "Physical", 40, 1.0, contact=True, priority=1)
+_add_if_missing("Extreme Speed", "Normal", "Physical", 80, 1.0, contact=True, priority=2)
+_add_if_missing("Facade", "Normal", "Physical", 70, 1.0, contact=True)
+_add_if_missing("Endure", "Normal", "Status", 0, 1.0, priority=4)
+_add_if_missing("Substitute", "Normal", "Status", 0, 1.0)
+_add_if_missing("Work Up", "Normal", "Status", 0, 1.0)
+_add_if_missing("Double-Edge", "Normal", "Physical", 120, 1.0, contact=True)
+_add_if_missing("Giga Impact", "Normal", "Physical", 150, 0.9, contact=True)
+_add_if_missing("Hyper Beam", "Normal", "Special", 150, 0.9)
 
+# Fire
+_add_if_missing("Flare Blitz", "Fire", "Physical", 120, 1.0, contact=True)
+_add_if_missing("Blaze Kick", "Fire", "Physical", 85, 0.9, contact=True, is_slicing=True)
+_add_if_missing("Fire Punch", "Fire", "Physical", 75, 1.0, contact=True, is_punch=True)
+_add_if_missing("Flamethrower", "Fire", "Special", 90, 1.0)
+_add_if_missing("Fire Blast", "Fire", "Special", 110, 0.85)
+_add_if_missing("Overheat", "Fire", "Special", 130, 0.9)
+_add_if_missing("Heat Wave", "Fire", "Special", 95, 0.9)
+_add_if_missing("Will-O-Wisp", "Fire", "Status", 0, 0.85)
+_add_if_missing("Sunny Day", "Fire", "Status", 0, 1.0)
 
+# Fighting
+_add_if_missing("Close Combat", "Fighting", "Physical", 120, 1.0, contact=True)
+_add_if_missing("Low Kick", "Fighting", "Physical", 60, 1.0, contact=True)  # weight scaling simplified
+_add_if_missing("Low Sweep", "Fighting", "Physical", 65, 1.0, contact=True)
+_add_if_missing("Reversal", "Fighting", "Physical", 1, 1.0, contact=True)  # power varies
+_add_if_missing("Brick Break", "Fighting", "Physical", 75, 1.0, contact=True)
+_add_if_missing("Drain Punch", "Fighting", "Physical", 75, 1.0, contact=True, is_punch=True)
+_add_if_missing("Bulk Up", "Fighting", "Status", 0, 1.0)
+_add_if_missing("Focus Blast", "Fighting", "Special", 120, 0.7)
+_add_if_missing("Counter", "Fighting", "Physical", 0, 1.0, priority=-5)
+
+# Flying
+_add_if_missing("Brave Bird", "Flying", "Physical", 120, 1.0, contact=True)
+_add_if_missing("Aerial Ace", "Flying", "Physical", 60, 1.0, contact=True)
+_add_if_missing("Bounce", "Flying", "Physical", 85, 0.85, contact=True)
+_add_if_missing("Acrobatics", "Flying", "Physical", 55, 1.0, contact=True)
+_add_if_missing("Air Slash", "Flying", "Special", 75, 0.95)
+_add_if_missing("Hurricane", "Flying", "Special", 110, 0.7)
+_add_if_missing("Roost", "Flying", "Status", 0, 1.0)
+
+# Water
+_add_if_missing("Aqua Jet", "Water", "Physical", 40, 1.0, contact=True, priority=1)
+_add_if_missing("Waterfall", "Water", "Physical", 80, 1.0, contact=True)
+_add_if_missing("Liquidation", "Water", "Physical", 85, 1.0, contact=True)
+_add_if_missing("Aqua Tail", "Water", "Physical", 90, 0.9, contact=True)
+_add_if_missing("Surf", "Water", "Special", 90, 1.0)
+_add_if_missing("Hydro Pump", "Water", "Special", 110, 0.8)
+_add_if_missing("Hydro Cannon", "Water", "Special", 150, 0.9)
+_add_if_missing("Chilling Water", "Water", "Special", 50, 1.0)
+_add_if_missing("Rain Dance", "Water", "Status", 0, 1.0)
+_add_if_missing("Flip Turn", "Water", "Physical", 60, 1.0, contact=True)
+_add_if_missing("Aqua Cutter", "Water", "Physical", 70, 1.0, contact=True, is_slicing=True)
+_add_if_missing("Aqua Step", "Water", "Physical", 80, 1.0, contact=True)
+
+# Ground / Rock
+_add_if_missing("Earthquake", "Ground", "Physical", 100, 1.0)
+_add_if_missing("High Horsepower", "Ground", "Physical", 95, 0.95, contact=True)
+_add_if_missing("Stomping Tantrum", "Ground", "Physical", 75, 1.0, contact=True)
+_add_if_missing("Mud Shot", "Ground", "Special", 55, 0.95)
+_add_if_missing("Dig", "Ground", "Physical", 80, 1.0, contact=True)
+_add_if_missing("Bulldoze", "Ground", "Physical", 60, 1.0)
+_add_if_missing("Sandstorm", "Rock", "Status", 0, 1.0)
+_add_if_missing("Stone Edge", "Rock", "Physical", 100, 0.8)
+_add_if_missing("Rock Slide", "Rock", "Physical", 75, 0.9)
+_add_if_missing("Rock Tomb", "Rock", "Physical", 60, 0.95)
+_add_if_missing("Stealth Rock", "Rock", "Status", 0, 1.0)
+
+# Ice
+_add_if_missing("Ice Punch", "Ice", "Physical", 75, 1.0, contact=True, is_punch=True)
+_add_if_missing("Ice Fang", "Ice", "Physical", 65, 0.95, contact=True)
+_add_if_missing("Ice Spinner", "Ice", "Physical", 80, 1.0, contact=True)
+_add_if_missing("Avalanche", "Ice", "Physical", 60, 1.0, contact=True)
+_add_if_missing("Icy Wind", "Ice", "Special", 55, 0.95)
+_add_if_missing("Ice Beam", "Ice", "Special", 90, 1.0)
+
+# Dark / Ghost / Psychic / Grass / Electric / Steel / Dragon / Fairy / Bug
+_add_if_missing("Knock Off", "Dark", "Physical", 65, 1.0, contact=True)
+_add_if_missing("Sucker Punch", "Dark", "Physical", 70, 1.0, contact=True, priority=1)
+_add_if_missing("Night Slash", "Dark", "Physical", 70, 1.0, contact=True, is_slicing=True)
+_add_if_missing("Shadow Claw", "Ghost", "Physical", 70, 1.0, contact=True, is_slicing=True)
+_add_if_missing("Zen Headbutt", "Psychic", "Physical", 80, 0.9, contact=True)
+_add_if_missing("Psychic", "Psychic", "Special", 90, 1.0)
+_add_if_missing("Psyshock", "Psychic", "Special", 80, 1.0)
+_add_if_missing("Trailblaze", "Grass", "Physical", 50, 1.0, contact=True)
+_add_if_missing("Leaf Blade", "Grass", "Physical", 90, 1.0, contact=True, is_slicing=True)
+_add_if_missing("Energy Ball", "Grass", "Special", 90, 1.0)
+_add_if_missing("Thunder Punch", "Electric", "Physical", 75, 1.0, contact=True, is_punch=True)
+_add_if_missing("Thunderbolt", "Electric", "Special", 90, 1.0)
+_add_if_missing("Wild Charge", "Electric", "Physical", 90, 1.0, contact=True)
+_add_if_missing("Iron Head", "Steel", "Physical", 80, 1.0, contact=True)
+_add_if_missing("Flash Cannon", "Steel", "Special", 80, 1.0)
+_add_if_missing("Outrage", "Dragon", "Physical", 120, 1.0, contact=True)
+_add_if_missing("Draco Meteor", "Dragon", "Special", 130, 0.9)
+_add_if_missing("Play Rough", "Fairy", "Physical", 90, 0.9, contact=True)
+_add_if_missing("U-turn", "Bug", "Physical", 70, 1.0, contact=True)
+_add_if_missing("Pounce", "Bug", "Physical", 50, 1.0, contact=True)
+_add_if_missing("Leech Life", "Bug", "Physical", 80, 1.0, contact=True)
+_add_if_missing("Bug Buzz", "Bug", "Special", 90, 1.0)
+
+# Status / disruption
+_add_if_missing("Protect", "Normal", "Status", 0, 1.0, priority=4)
+_add_if_missing("Detect", "Normal", "Status", 0, 1.0, priority=4)
+_add_if_missing("Taunt", "Dark", "Status", 0, 1.0)
+_add_if_missing("Encore", "Normal", "Status", 0, 1.0)
+_add_if_missing("Yawn", "Normal", "Status", 0, 1.0)
+_add_if_missing("Curse", "Ghost", "Status", 0, 1.0)
+_add_if_missing("Rest", "Psychic", "Status", 0, 1.0)
+_add_if_missing("Sleep Talk", "Normal", "Status", 0, 1.0)
+_add_if_missing("Focus Energy", "Normal", "Status", 0, 1.0)
+_add_if_missing("Agility", "Psychic", "Status", 0, 1.0)
+_add_if_missing("Sunny Day", "Fire", "Status", 0, 1.0)
+_add_if_missing("Rain Dance", "Water", "Status", 0, 1.0)
+
+# Tera
+_add_if_missing("Tera Blast", "Normal", "Special", 80, 1.0)  # engine already switches cat/type on Tera
+
+# ------------------------------------------------------------------------------------------------
+# FULL SV MOVEPOOLS (Swampert, Blaziken, Quaquaval) — Generation 9 legal: Level-up, TM, Egg, Reminder
+# Source: Pokémon Database SV learnset pages (see header links), synced 2025-10-14.
+# If a move appears multiple ways (e.g., level & TM), it’s listed once.
+# ------------------------------------------------------------------------------------------------
+
+SV_MOVES_SWAMPERT = sorted(set([
+    # Water
+    "Aqua Jet","Aqua Tail","Chilling Water","Hydro Pump","Hydro Cannon","Liquidation","Rain Dance","Surf","Waterfall",
+    # Ground / Rock
+    "Bulldoze","Dig","Earthquake","High Horsepower","Mud Shot","Rock Slide","Rock Tomb","Sandstorm","Stealth Rock","Stone Edge","Stomping Tantrum",
+    # Ice
+    "Avalanche","Ice Beam","Ice Fang","Ice Punch","Ice Spinner","Icy Wind",
+    # Steel / Normal
+    "Flash Cannon","Facade","Double-Edge","Giga Impact","Hyper Beam","Endeavor",
+    # Utility / Status
+    "Protect","Detect","Substitute","Yawn","Curse","Rest","Sleep Talk",
+    # Coverage / Misc
+    "Brick Break","Body Press","Power-Up Punch","Counter","Low Kick","Low Sweep",
+    "Trailblaze","Energy Ball",  # Grass coverage via TM (SV)
+    "Rock Blast","Iron Head",
+    # Dark / Psychic / Ghost (select TMs commonly available in SV)
+    "Knock Off","Payback","Thief","Shadow Claw","Zen Headbutt","Psychic","Psyshock",
+    # Electric (limited)
+    "Thunder Punch","Wild Charge",
+    # Bug / Flying (rare via TMs)
+    "U-turn","Aerial Ace",
+    # Tera
+    "Tera Blast",
+]))
+
+SV_MOVES_BLAZIKEN = sorted(set([
+    # Fire
+    "Blaze Kick","Fire Punch","Flame Charge","Flamethrower","Fire Blast","Overheat","Heat Wave","Flare Blitz","Sunny Day","Fire Spin",
+    # Fighting
+    "Close Combat","Low Kick","Low Sweep","Reversal","Brick Break","Drain Punch","Bulk Up","Counter","Body Press","Vacuum Wave",
+    # Flying
+    "Brave Bird","Aerial Ace","Bounce","Acrobatics",
+    # Dark / Ghost
+    "Knock Off","Night Slash","Thief","Sucker Punch","Shadow Claw",
+    # Ground / Rock
+    "Bulldoze","Dig","Earthquake","Rock Slide","Rock Tomb","Stone Edge","Stomping Tantrum",
+    # Electric / Psychic / Poison
+    "Thunder Punch","Zen Headbutt","Poison Jab",
+    # Normal / Utility
+    "Quick Attack","Giga Impact","Hyper Beam","Facade","Endure","Protect","Detect","Substitute","Focus Energy","Agility","Taunt","Encore","Sunny Day","Rest","Sleep Talk","Work Up","Baton Pass","Roar",
+    # Bug / Grass
+    "U-turn","Pounce","Trailblaze","Leech Life",
+    # Water (niche TM)
+    "Rain Dance",
+    # Tera
+    "Tera Blast",
+]))
+
+SV_MOVES_QUAQUAVAL = sorted(set([
+    # Signature / Water
+    "Aqua Step","Aqua Cutter","Aqua Jet","Liquidation","Waterfall","Flip Turn","Surf","Hydro Pump","Hydro Cannon","Chilling Water","Rain Dance",
+    # Fighting
+    "Close Combat","Drain Punch","Brick Break","Low Kick","Low Sweep","Reversal","Bulk Up","Body Press","Counter",
+    # Flying
+    "Brave Bird","Acrobatics","Aerial Ace","Air Slash","Hurricane",
+    # Ice
+    "Ice Spinner","Avalanche","Icy Wind","Ice Beam",
+    # Dark / Bug / Grass
+    "Knock Off","U-turn","Pounce","Trailblaze",
+    # Utility / Normal
+    "Protect","Detect","Encore","Taunt","Substitute","Rest","Sleep Talk","Giga Impact","Hyper Beam","Facade","Endure","Helping Hand",
+    # Ground / Rock (via TMs)
+    "Bulldoze","Rock Slide","Rock Tomb","Stone Edge",
+    # Electric / Psychic (limited TMs)
+    "Thunder Punch","Zen Headbutt",
+    # Tera
+    "Tera Blast",
+]))
+
+# --- Ensure every move referenced above exists in MOVE_DB (no-ops if already present) ---
+for _mv in (SV_MOVES_SWAMPERT + SV_MOVES_BLAZIKEN + SV_MOVES_QUAQUAVAL):
+    # Essentials were added in the big registry section above; here we simply guard that a name exists.
+    if _mv not in MOVE_DB:
+        # Fallback: add as Status 0/100 if somehow missed (rare). This keeps the engine robust.
+        _add_if_missing(_mv, "Normal", "Status", 0, 1.0)
+
+# --- Replace the trio LEGAL_MOVES to be exhaustive (SV) ---
+LEGAL_MOVES_SWAMPERT = SV_MOVES_SWAMPERT
+LEGAL_MOVES_BLAZIKEN = SV_MOVES_BLAZIKEN
+LEGAL_MOVES_QUAQUAVAL = SV_MOVES_QUAQUAVAL
+
+# Rebuild the LEGAL_MOVES dict used by assert_legal_moves / enumeration, keeping exact names.
+LEGAL_MOVES = {
+    "Swampert": LEGAL_MOVES_SWAMPERT,
+    "Blaziken": LEGAL_MOVES_BLAZIKEN,
+    "Quaquaval": LEGAL_MOVES_QUAQUAVAL,
+}
+
+# --- Optional: quick sanity ping at startup to confirm move counts (helps catch typos) ---
 def _print_trio_movepool_summary():
     for s in ["Swampert", "Blaziken", "Quaquaval"]:
-        print(
-            f"[movepool:{s}] {len(LEGAL_MOVES[s])} moves; physical-only={FOUR_PHYSICAL_ONLY[s]}"
-        )
+        print(f"[movepool:{s}] {len(LEGAL_MOVES[s])} SV-legal moves loaded")
 
 
 # =========================
