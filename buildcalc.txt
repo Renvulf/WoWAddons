@@ -1222,155 +1222,194 @@ TERA_POOLS: Dict[str, List[str]] = {
     "Blaziken": ["Fire", "Fighting", "Flying", "Ghost"],
     "Quaquaval": ["Water", "Fighting", "Flying", "Ghost"],
 }
-MOVE_POOLS: Dict[str, List[str]] = {
-    "Swampert": [
-        "Earthquake",
-        "Liquidation",
-        "Ice Punch",
-        "Tera Blast",
-        "Rock Slide",
-        "Headlong Rush",
-    ],
-    "Blaziken": [
-        "Protect",
-        "Swords Dance",
-        "Flare Blitz",
-        "Close Combat",
-        "Counter",
-        "Tera Blast",
-        "Brave Bird",
-        "Mirror Coat",
-        "First Impression",
-        "Shadow Sneak",
-    ],
-    "Quaquaval": [
-        "Aqua Step",
-        "Close Combat",
-        "Ice Spinner",
-        "Tera Blast",
-        "Counter",
-        "Brave Bird",
-        "Protect",
-    ],
+
+
+def _ensure_move_full(
+    name,
+    mtype,
+    cat,
+    power,
+    acc=1.0,
+    *,
+    contact=False,
+    priority=0,
+    is_punch=False,
+):
+    if name not in MOVE_DB:
+        MOVE_DB[name] = Move(
+            name=name,
+            mtype=mtype,
+            category=cat,
+            power=power,
+            accuracy=acc,
+            contact=contact,
+            priority=priority,
+            is_punch=is_punch,
+        )
+
+
+# --- Shared staples already present in the DB (safe no-ops if already defined)
+_ensure_move_full("Protect", "Normal", "Status", 0, 1.0)
+_ensure_move_full("Swords Dance", "Normal", "Status", 0, 1.0)
+_ensure_move_full("Counter", "Fighting", "Physical", 0, 1.0, priority=-5)
+_ensure_move_full("Detect", "Normal", "Status", 0, 1.0)
+_ensure_move_full("Encore", "Normal", "Status", 0, 1.0)
+_ensure_move_full("Taunt", "Dark", "Status", 0, 1.0)
+
+# --- Water / Ground / Rock / Ice coverage family (Swampert + Quaquaval)
+_ensure_move_full("Waterfall", "Water", "Physical", 80, 1.0, contact=True)
+_ensure_move_full("Liquidation", "Water", "Physical", 85, 1.0, contact=True)
+_ensure_move_full("Aqua Tail", "Water", "Physical", 90, 0.9, contact=True)
+_ensure_move_full("Flip Turn", "Water", "Physical", 60, 1.0, contact=True)
+_ensure_move_full("Aqua Jet", "Water", "Physical", 40, 1.0, contact=True, priority=1)
+
+_ensure_move_full("Earthquake", "Ground", "Physical", 100, 1.0)
+_ensure_move_full("Bulldoze", "Ground", "Physical", 60, 1.0)
+_ensure_move_full("Stomping Tantrum", "Ground", "Physical", 75, 1.0, contact=True)
+_ensure_move_full("High Horsepower", "Ground", "Physical", 95, 0.95, contact=True)
+
+_ensure_move_full("Rock Slide", "Rock", "Physical", 75, 0.9)
+_ensure_move_full("Stone Edge", "Rock", "Physical", 100, 0.8)
+_ensure_move_full("Rock Tomb", "Rock", "Physical", 60, 0.95)
+
+_ensure_move_full("Ice Punch", "Ice", "Physical", 75, 1.0, contact=True, is_punch=True)
+_ensure_move_full("Ice Fang", "Ice", "Physical", 65, 0.95, contact=True)
+_ensure_move_full("Avalanche", "Ice", "Physical", 60, 1.0, contact=True)
+_ensure_move_full("Ice Spinner", "Ice", "Physical", 80, 1.0, contact=True)
+_ensure_move_full("Icicle Crash", "Ice", "Physical", 85, 0.9, contact=True)
+
+# --- Fire / Fighting / Flying / Dark / Electric / Poison coverage (Blaziken + Quaquaval)
+_ensure_move_full("Flare Blitz", "Fire", "Physical", 120, 1.0, contact=True)
+_ensure_move_full("Blaze Kick", "Fire", "Physical", 85, 0.9, contact=True)
+_ensure_move_full("Fire Punch", "Fire", "Physical", 75, 1.0, contact=True, is_punch=True)
+
+_ensure_move_full("Close Combat", "Fighting", "Physical", 120, 1.0, contact=True)
+_ensure_move_full("Brick Break", "Fighting", "Physical", 75, 1.0, contact=True)
+_ensure_move_full("Low Kick", "Fighting", "Physical", 60, 1.0, contact=True)
+_ensure_move_full("Drain Punch", "Fighting", "Physical", 75, 1.0, contact=True, is_punch=True)
+_ensure_move_full("Sacred Sword", "Fighting", "Physical", 90, 1.0, contact=True)
+
+_ensure_move_full("Brave Bird", "Flying", "Physical", 120, 1.0, contact=True)
+_ensure_move_full("Acrobatics", "Flying", "Physical", 55, 1.0, contact=True)
+
+_ensure_move_full("Knock Off", "Dark", "Physical", 65, 1.0, contact=True)
+_ensure_move_full("Sucker Punch", "Dark", "Physical", 70, 1.0, contact=True, priority=1)
+
+_ensure_move_full("Thunder Punch", "Electric", "Physical", 75, 1.0, contact=True, is_punch=True)
+_ensure_move_full("Poison Jab", "Poison", "Physical", 80, 1.0, contact=True)
+
+_ensure_move_full("Shadow Claw", "Ghost", "Physical", 70, 1.0, contact=True)
+_ensure_move_full("Aqua Cutter", "Water", "Physical", 70, 1.0, contact=True)
+_ensure_move_full("Aqua Step", "Water", "Physical", 80, 1.0, contact=True)
+
+_ensure_move_full("U-turn", "Bug", "Physical", 70, 1.0, contact=True)
+
+# --- Utility that matters for physical 1v1 sets
+_ensure_move_full("Roost", "Flying", "Status", 0, 1.0)
+
+
+LEGAL_MOVES_SWAMPERT = [
+    "Waterfall",
+    "Liquidation",
+    "Aqua Tail",
+    "Flip Turn",
+    "Aqua Jet",
+    "Earthquake",
+    "Bulldoze",
+    "Stomping Tantrum",
+    "High Horsepower",
+    "Ice Punch",
+    "Ice Fang",
+    "Avalanche",
+    "Rock Slide",
+    "Stone Edge",
+    "Rock Tomb",
+    "Protect",
+    "Counter",
+]
+
+LEGAL_MOVES_BLAZIKEN = [
+    "Flare Blitz",
+    "Blaze Kick",
+    "Fire Punch",
+    "Close Combat",
+    "Brick Break",
+    "Low Kick",
+    "Drain Punch",
+    "Brave Bird",
+    "Acrobatics",
+    "Rock Slide",
+    "Stone Edge",
+    "Earthquake",
+    "Knock Off",
+    "Sucker Punch",
+    "Shadow Claw",
+    "Poison Jab",
+    "Thunder Punch",
+    "U-turn",
+    "Protect",
+    "Swords Dance",
+    "Counter",
+    "Detect",
+    "Encore",
+    "Taunt",
+]
+
+LEGAL_MOVES_QUAQUAVAL = [
+    "Aqua Step",
+    "Liquidation",
+    "Waterfall",
+    "Aqua Cutter",
+    "Flip Turn",
+    "Aqua Jet",
+    "Close Combat",
+    "Brick Break",
+    "Low Kick",
+    "Drain Punch",
+    "Sacred Sword",
+    "Ice Spinner",
+    "Icicle Crash",
+    "Brave Bird",
+    "Acrobatics",
+    "Knock Off",
+    "U-turn",
+    "Swords Dance",
+    "Protect",
+    "Detect",
+    "Encore",
+    "Taunt",
+]
+
+LEGAL_MOVES = {
+    "Swampert": LEGAL_MOVES_SWAMPERT,
+    "Blaziken": LEGAL_MOVES_BLAZIKEN,
+    "Quaquaval": LEGAL_MOVES_QUAQUAVAL,
 }
+
+MOVE_POOLS = {k: list(v) for k, v in LEGAL_MOVES.items()}
 FOUR_PHYSICAL_ONLY: Dict[str, bool] = {
     "Swampert": True,
     "Blaziken": True,
     "Quaquaval": True,
 }
 
-# =========================
-# PATCH: SV 1v1 — Legality-correct movepools + Aqua Step speed buff
-# (Overrides original definitions below.)
-# =========================
 
-LEGAL_MOVES = {
-    "Swampert": [
-        # Water STAB
-        "Waterfall",
-        "Liquidation",
-        # Ground STAB
-        "Earthquake",
-        "Bulldoze",
-        "Stomping Tantrum",  # Tantrum modeled at base 75 for now
-        # Ice coverage
-        "Ice Punch",
-        "Ice Fang",
-        "Avalanche",
-        # Rock coverage
-        "Rock Slide",
-        "Stone Edge",
-        "Rock Tomb",
-        # Utility
-        "Protect",
-    ],
-    "Blaziken": [
-        # Fire STAB
-        "Flare Blitz",
-        "Blaze Kick",
-        "Fire Punch",
-        # Fighting STAB
-        "Close Combat",
-        "Brick Break",
-        # Ground/Rock coverage
-        "Earthquake",
-        "Rock Slide",
-        "Stone Edge",
-        # Other physical coverage
-        "Thunder Punch",
-        "Shadow Claw",
-        "Brave Bird",
-        "Knock Off",
-        "U-turn",
-        # Utility
-        "Swords Dance",
-        "Protect",
-    ],
-    "Quaquaval": [
-        # Water STAB
-        "Aqua Step",
-        "Liquidation",
-        "Waterfall",
-        "Aqua Cutter",
-        # Fighting STAB
-        "Close Combat",
-        "Brick Break",
-        # Ice/Flying coverage
-        "Ice Spinner",
-        "Brave Bird",
-        "Acrobatics",
-        # Dark/Bug/Pivot
-        "Knock Off",
-        "U-turn",
-        # Utility
-        "Swords Dance",
-        "Protect",
-    ],
-}
-
-MOVE_POOLS = {k: list(LEGAL_MOVES[k]) for k in ["Swampert", "Blaziken", "Quaquaval"]}
-
-if "Waterfall" not in MOVE_DB:
-    MOVE_DB["Waterfall"] = Move("Waterfall", "Water", "Physical", 80, 1.0, contact=True)
-if "Aqua Cutter" not in MOVE_DB:
-    MOVE_DB["Aqua Cutter"] = Move("Aqua Cutter", "Water", "Physical", 70, 1.0, contact=True)
-if "Bulldoze" not in MOVE_DB:
-    MOVE_DB["Bulldoze"] = Move("Bulldoze", "Ground", "Physical", 60, 1.0, contact=False)
-if "Stomping Tantrum" not in MOVE_DB:
-    MOVE_DB["Stomping Tantrum"] = Move(
-        "Stomping Tantrum", "Ground", "Physical", 75, 1.0, contact=True
-    )
-if "Ice Fang" not in MOVE_DB:
-    MOVE_DB["Ice Fang"] = Move("Ice Fang", "Ice", "Physical", 65, 0.95, contact=True)
-if "Avalanche" not in MOVE_DB:
-    MOVE_DB["Avalanche"] = Move("Avalanche", "Ice", "Physical", 60, 1.0, contact=True)
-if "Rock Tomb" not in MOVE_DB:
-    MOVE_DB["Rock Tomb"] = Move("Rock Tomb", "Rock", "Physical", 60, 0.95, contact=False)
-if "Blaze Kick" not in MOVE_DB:
-    MOVE_DB["Blaze Kick"] = Move("Blaze Kick", "Fire", "Physical", 85, 0.9, contact=True)
-if "Fire Punch" not in MOVE_DB:
-    MOVE_DB["Fire Punch"] = Move(
-        "Fire Punch", "Fire", "Physical", 75, 1.0, contact=True, is_punch=True
-    )
-if "Thunder Punch" not in MOVE_DB:
-    MOVE_DB["Thunder Punch"] = Move(
-        "Thunder Punch", "Electric", "Physical", 75, 1.0, contact=True, is_punch=True
-    )
-if "Brick Break" not in MOVE_DB:
-    MOVE_DB["Brick Break"] = Move("Brick Break", "Fighting", "Physical", 75, 1.0, contact=True)
-if "Aerial Ace" not in MOVE_DB:
-    MOVE_DB["Aerial Ace"] = Move("Aerial Ace", "Flying", "Physical", 60, 1.0, contact=True)
-if "Acrobatics" not in MOVE_DB:
-    MOVE_DB["Acrobatics"] = Move("Acrobatics", "Flying", "Physical", 55, 1.0, contact=True)
-if "U-turn" not in MOVE_DB:
-    MOVE_DB["U-turn"] = Move("U-turn", "Bug", "Physical", 70, 1.0, contact=True)
-
-
-def assert_legal_moves(species: str, moves: List[str]) -> None:
+def assert_legal_moves(species: str, moves: list[str]) -> None:
     legal = set(LEGAL_MOVES.get(species, []))
     bad = [m for m in moves if m not in legal]
     if bad:
         raise ValueError(f"Illegal moves for {species}: {bad}")
+
+
+def _sample_movesets_broaden(ms: list[list[str]]) -> list[list[str]]:
+    primary = ms[:32]
+    secondary = ms[32:96:2]
+    return primary + secondary
+
+
+def _print_trio_movepool_summary():
+    for s in ["Swampert", "Blaziken", "Quaquaval"]:
+        print(f"[movepool:{s}] {len(LEGAL_MOVES[s])} moves, physical-only search={FOUR_PHYSICAL_ONLY[s]}")
 
 
 # =========================
@@ -3683,88 +3722,14 @@ def branch_on_move(
 # 3) Legality-correct movepools (SV) for the trio
 # ------------------------------
 LEGAL_MOVES = {
-    # Swampert — SV learnset (damaging + core utility)
-    "Swampert": [
-        # STAB Water
-        "Liquidation",
-        "Waterfall",
-        "Surf",
-        # STAB Ground
-        "Earthquake",
-        "Earth Power",
-        "Stomping Tantrum",
-        "Bulldoze",
-        # Fighting / Body-based
-        "Hammer Arm",
-        "Superpower",
-        "Body Press",
-        # Ice coverage
-        "Ice Punch",
-        "Ice Beam",
-        "Avalanche",
-        "Ice Spinner",
-        # Rock coverage
-        "Stone Edge",
-        "Rock Slide",
-        "Rock Tomb",
-        # Utility / setup
-        "Protect",
-    ],
-    # Blaziken — SV learnset (damaging + core utility)
-    "Blaziken": [
-        # Fire STAB
-        "Flare Blitz",
-        "Blaze Kick",
-        "Fire Punch",
-        # Fighting STAB
-        "High Jump Kick",
-        "Close Combat",
-        "Brick Break",
-        # Coverage
-        "Thunder Punch",
-        "Earthquake",
-        "Rock Slide",
-        "Stone Edge",
-        "Shadow Claw",
-        "Knock Off",
-        "Brave Bird",
-        "Aerial Ace",
-        "U-turn",
-        # Utility / setup
-        "Swords Dance",
-        "Protect",
-    ],
-    # Quaquaval — SV learnset (damaging + core utility)
-    "Quaquaval": [
-        # Water STAB
-        "Aqua Step",
-        "Liquidation",
-        "Waterfall",
-        "Aqua Cutter",
-        "Wave Crash",
-        "Surf",
-        "Aqua Jet",
-        # Fighting STAB
-        "Close Combat",
-        "Brick Break",
-        # Coverage
-        "Ice Spinner",
-        "Brave Bird",
-        "Acrobatics",
-        "Aerial Ace",
-        "Knock Off",
-        "U-turn",
-        # Utility / setup
-        "Swords Dance",
-        "Protect",
-    ],
+    "Swampert": LEGAL_MOVES_SWAMPERT,
+    "Blaziken": LEGAL_MOVES_BLAZIKEN,
+    "Quaquaval": LEGAL_MOVES_QUAQUAVAL,
 }
 
-# Assign MOVE_POOLS directly from LEGAL_MOVES for the trio
-MOVE_POOLS = {k: list(LEGAL_MOVES[k]) for k in ["Swampert", "Blaziken", "Quaquaval"]}
+MOVE_POOLS = {k: list(LEGAL_MOVES[k]) for k in LEGAL_MOVES}
 
-# IMPORTANT: allow special/mixed sets — remove physical-only restriction
-FOUR_PHYSICAL_ONLY = {"Swampert": False, "Blaziken": False, "Quaquaval": False}
+FOUR_PHYSICAL_ONLY = {k: True for k in LEGAL_MOVES}
 
 
 def assert_legal_moves(species: str, moves: List[str]) -> None:
@@ -3934,48 +3899,13 @@ _ensure_move("U-turn", "Bug", "Physical", 70, 1.0, contact=True)
 
 # Complete, SV-legal movepools for the trio (damaging moves + core tech the engine models)
 LEGAL_MOVES = {
-    "Swampert": [
-        # Water STAB
-        "Liquidation", "Waterfall", "Surf", "Hydro Pump", "Flip Turn",
-        # Ground STAB
-        "Earthquake", "Earth Power", "Stomping Tantrum", "Bulldoze",
-        # Ice coverage
-        "Ice Punch", "Ice Beam", "Avalanche", "Ice Spinner", "Ice Fang",
-        # Rock coverage
-        "Stone Edge", "Rock Slide", "Rock Tomb",
-        # Fighting / body blows
-        "Hammer Arm", "Superpower", "Body Press",
-        # Dark utility
-        "Knock Off",
-        # Utility
-        "Protect",
-    ],
-    "Blaziken": [
-        # Fire STAB
-        "Flare Blitz", "Blaze Kick", "Fire Punch", "Flamethrower", "Overheat",
-        # Fighting STAB
-        "Close Combat", "Brick Break",
-        # Coverage
-        "Earthquake", "Rock Slide", "Stone Edge",
-        "Thunder Punch", "Shadow Claw", "Knock Off",
-        "Brave Bird", "Aerial Ace", "U-turn",
-        # Setup / utility
-        "Swords Dance", "Protect",
-    ],
-    "Quaquaval": [
-        # Water STAB
-        "Aqua Step", "Liquidation", "Waterfall", "Wave Crash", "Surf", "Aqua Jet",
-        # Fighting STAB
-        "Close Combat", "Brick Break",
-        # Coverage
-        "Ice Spinner", "Brave Bird", "Acrobatics", "Aerial Ace", "Knock Off", "U-turn",
-        # Tech / utility
-        "Counter", "Swords Dance", "Protect",
-    ],
+    "Swampert": LEGAL_MOVES_SWAMPERT,
+    "Blaziken": LEGAL_MOVES_BLAZIKEN,
+    "Quaquaval": LEGAL_MOVES_QUAQUAVAL,
 }
 
-MOVE_POOLS = {k: list(LEGAL_MOVES[k]) for k in ["Swampert", "Blaziken", "Quaquaval"]}
-FOUR_PHYSICAL_ONLY = {k: False for k in ["Swampert", "Blaziken", "Quaquaval"]}
+MOVE_POOLS = {k: list(LEGAL_MOVES[k]) for k in LEGAL_MOVES}
+FOUR_PHYSICAL_ONLY = {k: True for k in LEGAL_MOVES}
 
 
 def assert_legal_moves(species: str, moves: list[str]) -> None:
@@ -4073,12 +4003,11 @@ def enumerate_candidates_for_species(species: str) -> list[SetBuild]:
     pool = MOVE_POOLS[species]
     items = ITEM_CANDIDATES[species]
     teras = TERA_POOLS[species]
-    all_movesets = movesets_from_pool(pool, False, species=species)
+    all_movesets = movesets_from_pool(pool, FOUR_PHYSICAL_ONLY[species], species=species)
+    sampled_movesets = _sample_movesets_broaden(all_movesets)
 
     if species == "Swampert":
-        nature_pool = ["Adamant", "Jolly", "Modest", "Timid", "Careful", "Impish"]
-    elif species == "Blaziken":
-        nature_pool = ["Jolly", "Adamant", "Naive", "Hasty"]
+        nature_pool = ["Adamant", "Careful", "Impish"]
     else:
         nature_pool = ["Jolly", "Adamant"]
 
@@ -4099,7 +4028,7 @@ def enumerate_candidates_for_species(species: str) -> list[SetBuild]:
     for item in items:
         for tera in teras:
             for nature in nature_pool:
-                for mv in all_movesets:
+                for mv in sampled_movesets:
                     if not filter_moveset_by_item(item, mv):
                         continue
                     assert_legal_moves(species, mv)
