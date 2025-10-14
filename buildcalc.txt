@@ -3356,64 +3356,75 @@ def _is_damaging_move(mname: str) -> bool:
     return mv.category in ("Physical", "Special")
 
 
-def _moveset_offense_profile(moves: list[str]) -> str:
+def _move_category(mname: str) -> str:
+    mv = MOVE_DB[mname]
+    if mv.is_tera_blast:
+        # Live category decided later by current Atk vs SpA; treat as "both" so we explore both EV axes.
+        return "Both"
+    if mv.name == "Psyshock":
+        # Still Special for Atk stat (SpA), but defends vs Def; keep as Special for EV-axis purposes.
+        return "Special"
+    return mv.category
+
+
+def offense_profile_for_moveset(moves: list[str]) -> str:
     """
-    Returns 'physical' | 'special' | 'mixed' based on damaging moves in the 4-slot set.
-    If no damaging moves (shouldn’t pass filtering for Choice/AV anyway), default to 'physical'.
+    Returns "Physical", "Special", or "Mixed" based on damaging moves present.
+    Any presence of 'Both' (Tera Blast) forces 'Mixed' so EV search can alter Atk/SpA.
     """
-    has_phys = any(_is_damaging_move(m) and MOVE_DB[m].category == "Physical" for m in moves)
-    has_spec = any(_is_damaging_move(m) and MOVE_DB[m].category == "Special"  for m in moves)
+
+    has_phys = False
+    has_spec = False
+    for m in moves:
+        if not _is_damaging_move(m):
+            continue
+        cat = _move_category(m)
+        if cat == "Physical":
+            has_phys = True
+        elif cat == "Special":
+            has_spec = True
+        else:  # "Both" -> Mixed pressure
+            return "Mixed"
     if has_phys and has_spec:
-        return "mixed"
+        return "Mixed"
+    if has_phys:
+        return "Physical"
     if has_spec:
-        return "special"
-    return "physical"
+        return "Special"
+    # Extremely rare: fully-status sets; keep broad to avoid pruning real options elsewhere.
+    return "Mixed"
 
 
-def _axes_for_profile(profile: str) -> tuple[str, ...]:
-    """
-    EV axes to enumerate. For mixed, allow both offenses & both defenses. This removes the
-    structural bias without over-bloating the grid (Pareto filter + speed targets keep it sane).
-    """
-    if profile == "physical":
+def ev_axes_for_moveset(species: str, moves: list[str]) -> tuple[str, ...]:
+    prof = offense_profile_for_moveset(moves)
+    if prof == "Physical":
         return ("HP", "Atk", "Def", "Spe")
-    if profile == "special":
+    if prof == "Special":
         return ("HP", "SpA", "SpD", "Spe")
-    # mixed:
-    return ("HP", "Atk", "Def", "SpA", "SpD", "Spe")
+    # Mixed: enable both offenses and both bulks (still bounded by Pareto + local refine).
+    return ("HP", "Atk", "SpA", "Def", "SpD", "Spe")
 
 
-def _natures_for_profile(species: str, profile: str) -> list[str]:
-    """
-    Nature pools per profile. Keep them concise but expressive so the search can find
-    the right direction without unnecessary bloat.
-    """
-    if profile == "physical":
-        # speed control + bulk options already elsewhere via EVs
-        return ["Jolly", "Adamant", "Impish", "Careful"]
-    if profile == "special":
-        return ["Timid", "Modest", "Bold", "Calm"]
-    # mixed: include split-defense speed-boosting and attack-leaning options
-    return ["Naive", "Hasty", "Naughty", "Mild", "Jolly", "Timid"]
+# Safety: keep original symbol available (if present) for reference
+if "_orig_enumerate_candidates_for_species" not in globals():
+    _orig_enumerate_candidates_for_species = enumerate_candidates_for_species
 
 
-# ----------------------------
-# 1) Replace enumerate_candidates_for_species with a per–moveset EV axis implementation
-# ----------------------------
 def enumerate_candidates_for_species(species: str) -> list["SetBuild"]:
     """
-    Cartesians: items × tera types × (per-moveset nature pool) × (per-moveset EV Pareto) × movesets.
-    KEY CHANGE: EV Pareto and nature pools are computed PER MOVESET based on the offense profile.
+    ITEMS × TERA × NATURES × MOVESETS, then per-moveset EV Pareto using axes chosen from the moves.
+    This REPLACES the species-base-stat heuristic so Special/Mixed sets can be genuinely optimal.
     """
+
     spec = SPECIES_DATA[species]
     items = ITEM_CANDIDATES[species]
     teras = TERA_POOLS[species]
     pool = LEGAL_MOVES[species]
     ms_all = movesets_from_pool(pool, FOUR_PHYSICAL_ONLY[species], species)
 
-    ivs31 = {k: 31 for k in ["HP", "Atk", "Def", "SpA", "SpD", "Spe"]}
+    ivs31 = {k: 31 for k in ("HP", "Atk", "Def", "SpA", "SpD", "Spe")}
 
-    # Build a compact set of representative opponent builds for speed breakpoints
+    # Compact representative opponent builds for speed targets (your existing heuristic)
     rep_opp: list["SetBuild"] = []
     seen = set()
     for t in THREAT_LIST:
@@ -3430,54 +3441,63 @@ def enumerate_candidates_for_species(species: str) -> list["SetBuild"]:
             break
 
     cands: list["SetBuild"] = []
-
     for item in items:
+        # Restrict legal natures per species (as you already do)
+        if species == "Swampert":
+            natures = ["Adamant", "Careful", "Impish", "Jolly", "Modest", "Timid"]
+        elif species == "Blaziken":
+            natures = ["Jolly", "Adamant", "Naive", "Hasty", "Timid", "Modest"]
+        else:  # Quaquaval
+            natures = ["Jolly", "Adamant", "Naive", "Hasty", "Timid", "Modest"]
+
         for tera in teras:
-            # Iterate movesets first so we can choose EV axes and nature pools based on the actual 4 moves
-            for mv in ms_all:
-                # Skip illegal sets for the item (e.g., no status on Assault Vest; no status on Choice)
-                if not filter_moveset_by_item(item, mv):
-                    continue
-                assert_legal_moves(species, mv)
+            for nature in natures:
+                # Enumerate all legality-pruned movecores
+                for mv in ms_all:
+                    if not filter_moveset_by_item(item, mv):
+                        continue
+                    assert_legal_moves(species, mv)
 
-                profile = _moveset_offense_profile(mv)
-                ev_axes = _axes_for_profile(profile)
-                nature_pool = _natures_for_profile(species, profile)
+                    # === NEW: choose EV axes *for this exact moveset* ===
+                    axes = ev_axes_for_moveset(species, mv)
 
-                # Compute a Pareto set of EVs for THIS (item, tera, moveset, nature) family,
-                # but speed targets depend on item & nature so we must recompute per-nature.
-                for nature in nature_pool:
-                    ev_pareto = iterate_evs_axes_matchup_aware(
-                        ev_axes, species, nature, item, rep_opp
-                    )
+                    # Matchup-aware EV lattice with Speed-tier pruning, then Pareto
+                    ev_pareto = iterate_evs_axes_matchup_aware(axes, species, nature, item, rep_opp)
                     for evs in ev_pareto:
                         if not valid_evs(evs):
                             continue
-                        cands.append(
-                            SetBuild(
-                                species=species,
-                                item=item,
-                                ability=spec.ability_hint,
-                                tera_type=tera,
-                                nature=nature,
-                                evs=evs,
-                                ivs=ivs31,
-                                moves=mv,
-                            )
+                        sb = SetBuild(
+                            species=species,
+                            item=item,
+                            ability=spec.ability_hint,
+                            tera_type=tera,
+                            nature=nature,
+                            evs=evs,
+                            ivs=ivs31,
+                            moves=mv,
                         )
+
+                        # Optional: brief local EV refinement right here (cheap) to steer Atk/SpA on Mixed
+                        def _quick_eval(x: "SetBuild") -> float:
+                            # Use a tiny, cheap proxy over a small subset of threats to avoid huge slowdown.
+                            _names = [n for n in THREAT_LIST[:8] if resolve_species_name(n)]
+                            tv = prebuild_threat_variants(_names)
+                            wrs = []
+                            for nm in _names:
+                                v, w = tv[nm]
+                                wrs.append(weighted_mean([simulate(x, opp) for opp in v], w))
+                            return sum(wrs) / len(wrs) if wrs else 0.0
+
+                        # Only refine when Mixed or when item implies special bias contrary to base stats
+                        _needs_refine = ("SpA" in axes and "Atk" in axes)
+                        if _needs_refine:
+                            sb = refine_evs_local(sb, _quick_eval, axes, passes=32)
+
+                        cands.append(sb)
+
     return cands
 
-# ----------------------------
-# 2) (Optional but recommended) tighten speed pruning for mixed sets with self-boosts
-# ----------------------------
-# If you want even more faithful speed targeting, add the following hint inside _speed_targets_for:
-#   - If the attacker has Aqua Step (Quaquaval) or Flame Charge (Blaziken) in *mv*, plus_one_possible=True already covers
-#     +1 timing. The current code handles Aqua Step via species hint; that’s sufficient for accuracy in 1v1’s 3-turn window.
-
-# ----------------------------
-# 3) (Optional) sanity assertions ensuring move legality tables are aligned to SV Gen 9
-# ----------------------------
-# If needed, refresh LEGAL_MOVES_* (Swampert/Blaziken/Quaquaval) from PokémonDB Gen 9 pages (cited above).
+print("[patch v5.1] EV axes now chosen per moveset (Physical/Special/Mixed). Mixed sets can allocate Atk+SpA + both bulks.")
 # Examples of high-impact SV-legal moves you should be sure are present:
 #   - Swampert: Earthquake, Earth Power, Surf, Hydro Pump, Liquidation, Waterfall, Ice Beam, Ice Punch, Avalanche,
 #               Rock Slide, Stone Edge, Body Press, Stomping Tantrum, Knock Off, Bulldoze, Icy Wind, Protect, Substitute,
