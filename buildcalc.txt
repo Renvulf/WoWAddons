@@ -50,6 +50,48 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
+# Canonical Gen 3+ damage roll distribution: uniform over 16 integers (85..100)
+ROLL_TABLE: tuple[float, ...] = tuple(r / 100.0 for r in range(85, 101))  # 0.85..1.00
+ROLL_PROB: float = 1.0 / 16.0
+
+
+def _packed_state_signature(build: "SetBuild", st: "BattleState") -> tuple:
+    """Compact signature used to merge equivalent branches after damage roll expansion."""
+
+    return (
+        st.hp,
+        st.max_hp,
+        st.stages["Atk"],
+        st.stages["Def"],
+        st.stages["SpA"],
+        st.stages["SpD"],
+        st.stages["Spe"],
+        st.sash_intact,
+        st.sturdy_intact,
+        st.tera_used,
+        st.tera_type,
+        bool(st.ability_active.get("Protect", False)),
+        st.locked_move,
+        st.multiscale_on,
+        tuple(sorted(k for k, v in st.consumed_item.items() if v)),
+    )
+
+
+def _merge_branch_states(
+    branches: list[tuple[float, "BattleState", "BattleState"]]
+) -> list[tuple[float, "BattleState", "BattleState"]]:
+    """Merge branches that are state-equivalent to control branching growth."""
+
+    merged: dict[tuple, tuple[float, "BattleState", "BattleState"]] = {}
+    for p, A, B in branches:
+        sig = (_packed_state_signature(None, A), _packed_state_signature(None, B))
+        if sig in merged:
+            oldp, oldA, oldB = merged[sig]
+            merged[sig] = (oldp + p, A, B)
+        else:
+            merged[sig] = (p, A, B)
+    return list(merged.values())
+
 # === PATCH FOR CODEX: "MAIN FIX TO MAKE RESULTS ACCURATE" =========================================
 # GOAL
 # The single biggest accuracy gap in your optimizer is EV search. Right now EV_STEPS = [0, 84, 168, 252]
@@ -1480,10 +1522,6 @@ def base_power(move: Move) -> int:
     return 80 if move.is_tera_blast else move.power
 
 
-def average_roll() -> float:
-    return 0.925  # average of 85..100 over 16 rolls
-
-
 def move_item_mult(item: str, move: Move, atk_cat: str) -> float:
     if item == "Life Orb":
         return 1.3
@@ -1510,6 +1548,7 @@ def damage(
     multiscale_on: bool,
     field_mult: float,
     crit: bool,
+    roll_mult: float,
 ) -> int:
     A = math.floor((2 * level) / 5) + 2
     B = math.floor(A * power * atk / max(1, deff))
@@ -1518,10 +1557,10 @@ def damage(
         C = math.floor(C * 0.5)
     if multiscale_on:
         C = math.floor(C * 0.5)
-    M = stab * type_m * item_mult * field_mult * average_roll()
+    M = stab * type_m * item_mult * field_mult
     if crit:
         M *= 1.5
-    return max(1, int(math.floor(C * M)))
+    return max(1, int(math.floor(C * M * roll_mult)))
 
 
 # =========================
@@ -2755,33 +2794,35 @@ def is_contact_effective(move: Move, attacker_item: str) -> bool:
 
 
 # ---- Core: apply a damaging move that HITS (no accuracy randomness here) ----
-def perform_damage_hit(
-    self_build: SetBuild,
-    opp_build: SetBuild,
-    self_state: BattleState,
-    opp_state: BattleState,
-    mv: Move,
+def perform_damage_hit_distribution(
+    self_build: "SetBuild",
+    opp_build: "SetBuild",
+    self_state: "BattleState",
+    opp_state: "BattleState",
+    mv: "Move",
     tera: bool,
-    ttype: Optional[str],
+    ttype: str | None,
     weather,
     terrain,
-    stats_self: Dict[str, int],
-    stats_opp: Dict[str, int],
-    opp_selected_move: Optional[Move] = None,
-) -> int:
-    # Sucker Punch failure against Status, Counter, Mirror Coat
+    stats_self: dict[str, int],
+    stats_opp: dict[str, int],
+    opp_selected_move: "Move | None" = None,
+) -> list[tuple[float, "BattleState", "BattleState"]]:
+    """Returns a list of (prob, new_self_state, new_opp_state) conditioned on the move CONNECTING.
+    Expands over the exact damage-roll distribution (and multi-hit if applicable).
+    """
+
+    # Sucker Punch failure against Status/Counter/MirrorCoat
     if mv.name == "Sucker Punch" and opp_selected_move is not None:
         if (
             opp_selected_move.category == "Status"
             or opp_selected_move.is_counter
             or opp_selected_move.is_mirror_coat
         ):
-            # still record nothing received
-            opp_state.ability_active["last_received"] = {
-                "category": mv.category,
-                "damage": 0,
-            }
-            return 0
+            sA = copy.deepcopy(self_state)
+            sD = copy.deepcopy(opp_state)
+            sD.ability_active["last_received"] = {"category": mv.category, "damage": 0}
+            return [(1.0, sA, sD)]
 
     # Choice lock after first used damaging move
     if (
@@ -2790,60 +2831,51 @@ def perform_damage_hit(
     ):
         self_state.locked_move = mv.name
 
-    # Decide Tera state BEFORE damage (offense + defense this turn)
-    tera_now = False
+    # Apply Tera BEFORE damage for both offense and defense this turn
+    sA0 = copy.deepcopy(self_state)
+    sD0 = copy.deepcopy(opp_state)
     if tera and ttype:
-        self_state.tera_used = True
-        self_state.tera_type = ttype
-        tera_now = True
+        sA0.tera_used = True
+        sA0.tera_type = ttype
 
-    # Determine move type and (dynamic) category
+    # Determine used type and live category (Tera Blast handling)
     orig_types = effective_types_offense(self_build)
     used_type = mv.mtype
-    if mv.is_tera_blast and (self_state.tera_used or tera_now) and ttype:
+    if mv.is_tera_blast and (sA0.tera_used) and ttype:
         used_type = ttype
         used_cat = "Physical" if stats_self["Atk"] >= stats_self["SpA"] else "Special"
     else:
         used_cat = mv.category
 
     atk_stat, def_stat = category_stat_names(used_cat)
-    if mv.name == "Psyshock":  # SpA vs Def
+    if mv.name == "Psyshock":
         def_stat = "Def"
 
-    # Multipliers
-    a_mult = 1.0
-    s_mult = 1.0
-    spe_mult = 1.0
-    a_mult, s_mult, spe_mult, _, _, _ = apply_choice(
-        self_build.item, a_mult, s_mult, spe_mult
-    )
+    # Choice multipliers
+    a_mult, s_mult, spe_mult, _, _, _ = apply_choice(self_build.item, 1.0, 1.0, 1.0)
 
-    # Hadron/Orichalcum stat-side boost
+    # Engine passives
     if SPECIES_DATA[self_build.species].ability_hint == "Hadron Engine":
         s_mult *= 1.3
     if SPECIES_DATA[self_build.species].ability_hint == "Orichalcum Pulse":
         a_mult *= 1.3
+    pq = pq_activation(self_build, weather, terrain, sA0, stats_self, dry_run=False)
 
-    pq = pq_activation(
-        self_build, weather, terrain, self_state, stats_self, dry_run=False
-    )
-
-    # Crit handling for stage ignore (only for always-crit moves modeled)
+    # Crit stage behavior (your existing rule: only always-crit moves are crits)
     crit = is_crit(mv)
-    a_stage = self_state.stages[atk_stat]
-    d_stage = opp_state.stages[def_stat]
+    a_stage = sA0.stages[atk_stat]
+    d_stage = sD0.stages[def_stat]
     if crit:
         a_stage = max(0, a_stage)
         d_stage = min(0, d_stage)
 
     # Unaware handling
-    if SPECIES_DATA[opp_build.species].ability_hint == "Unaware":
-        if a_stage > 0:
-            a_stage = 0
-    if SPECIES_DATA[self_build.species].ability_hint == "Unaware":
-        if d_stage > 0:
-            d_stage = 0
+    if SPECIES_DATA[opp_build.species].ability_hint == "Unaware" and a_stage > 0:
+        a_stage = 0
+    if SPECIES_DATA[self_build.species].ability_hint == "Unaware" and d_stage > 0:
+        d_stage = 0
 
+    # Attacking and defending stats
     if atk_stat == "Atk":
         atk_val = int(stats_self["Atk"] * stage_mult(a_stage) * a_mult * pq["Atk"])
     else:
@@ -2854,108 +2886,143 @@ def perform_damage_hit(
         def_base *= 1.5
     def_val = int(def_base)
 
+    # STAB and field
     offensive_stab = tera_stab_mult(
-        used_type, orig_types, self_state.tera_type if self_state.tera_used else None
+        used_type, orig_types, sA0.tera_type if sA0.tera_used else None
     )
-    opp_types_now = effective_types_defense(opp_build, opp_state)
     item_m = move_item_mult(self_build.item, mv, atk_stat)
-    field_m = field_power_mult(used_type, self_build, self_state, weather, terrain)
-
-    # Ability offense/defense multipliers
-    atk_ability_mult, stab_adj = ability_offense_mult(
-        self_build, self_state, mv, stats_self, offensive_stab
-    )
+    field_m = field_power_mult(used_type, self_build, sA0, weather, terrain)
+    atk_ability_mult, stab_adj = ability_offense_mult(self_build, sA0, mv, stats_self, offensive_stab)
     offensive_stab *= stab_adj
     def_ability_mult = ability_defense_mult(opp_build, mv)
+    opp_types_now = effective_types_defense(opp_build, sD0)
 
-    # Compute total damage across hits (Multiscale only on the first hit that connects)
-    total_dealt = 0
+    # Multi-hit handling via independent roll branching
+    total_branches: list[tuple[float, "BattleState", "BattleState"]] = [(1.0, sA0, sD0)]
+
     hits = mv.multi_hits if mv.multi_hits > 1 else 1
-    ms = opp_state.multiscale_on
+    for _h in range(hits):
+        step_out: list[tuple[float, "BattleState", "BattleState"]] = []
+        for prob_so_far, SA_in, SD_in in total_branches:
+            if SD_in.hp <= 0 or SA_in.hp <= 0:
+                step_out.append((prob_so_far, SA_in, SD_in))
+                continue
 
-    for _ in range(hits):
-        tmult = type_mult(used_type, opp_types_now)
-        d = damage(
-            100,
-            base_power(mv),
-            max(1, int(atk_val * atk_ability_mult)),
-            def_val,
-            offensive_stab,
-            tmult * def_ability_mult,
-            item_m,
-            False,
-            ms,
-            field_m,
-            crit,
-        )
+            # Multiscale applies on the *first* hit that connects in a turn for Dragonite
+            ms_flag = SD_in.multiscale_on
 
-        # Focus Sash / Sturdy timing per hit
-        if (
-            opp_build.item == "Focus Sash"
-            and opp_state.sash_intact
-            and opp_state.hp == opp_state.max_hp
-            and d >= opp_state.hp
-        ):
-            opp_state.hp = 1
-            opp_state.sash_intact = False
-            dealt = 1
-        elif (
-            SPECIES_DATA[opp_build.species].ability_hint == "Sturdy"
-            and opp_state.sturdy_intact
-            and opp_state.hp == opp_state.max_hp
-            and d >= opp_state.hp
-        ):
-            opp_state.hp = 1
-            opp_state.sturdy_intact = False
-            dealt = 1
-        else:
-            opp_state.hp = max(0, opp_state.hp - d)
-            dealt = d
+            # Per-roll expansion
+            tmult = type_mult(used_type, opp_types_now) * def_ability_mult
+            for roll_mult in ROLL_TABLE:
+                d = damage(
+                    100,
+                    base_power(mv),
+                    max(1, int(atk_val * atk_ability_mult)),
+                    def_val,
+                    offensive_stab,
+                    tmult,
+                    item_m,
+                    False,
+                    ms_flag,
+                    field_m,
+                    crit,
+                    roll_mult,
+                )
 
-        total_dealt += dealt
-        ms = False
-        opp_state.multiscale_on = False
-        try_sitrus(opp_state, opp_build)
+                SA = copy.deepcopy(SA_in)
+                SD = copy.deepcopy(SD_in)
 
-        if opp_state.hp <= 0:
+                # Focus Sash / Sturdy timing *per hit*
+                if (
+                    opp_build.item == "Focus Sash"
+                    and SD.sash_intact
+                    and SD.hp == SD.max_hp
+                    and d >= SD.hp
+                ):
+                    SD.hp = 1
+                    SD.sash_intact = False
+                    dealt = 1
+                elif (
+                    SPECIES_DATA[opp_build.species].ability_hint == "Sturdy"
+                    and SD.sturdy_intact
+                    and SD.hp == SD.max_hp
+                    and d >= SD.hp
+                ):
+                    SD.hp = 1
+                    SD.sturdy_intact = False
+                    dealt = 1
+                else:
+                    SD.hp = max(0, SD.hp - d)
+                    dealt = d
+
+                # After first successful connection, Multiscale turns off
+                ms_flag = False
+                SD.multiscale_on = False
+
+                # Sitrus timing for defender
+                try_sitrus(SD, opp_build)
+
+                # Early stop if defender fainted
+                if SD.hp <= 0:
+                    # Recoil (Wave Crash/Flare Blitz/etc.) & LO after final damage
+                    apply_recoil_move(SA, mv, dealt)
+                    if (
+                        dealt > 0
+                        and is_contact_effective(mv, self_build.item)
+                        and opp_build.item == "Rocky Helmet"
+                        and SA.hp > 0
+                    ):
+                        rh = max(1, SA.max_hp // 6)
+                        SA.hp = max(0, SA.hp - rh)
+                    apply_recoil_life_orb(SA, self_build, dealt)
+                    try_sitrus(SA, self_build)
+
+                    SA.ability_active["last_received"] = SA.ability_active.get("last_received", None)
+                    SD.ability_active["last_received"] = {"category": used_cat, "damage": dealt}
+                    step_out.append((prob_so_far * ROLL_PROB, SA, SD))
+                    continue
+
+                # Weakness Policy (triggered if first SE hit dealt damage this turn)
+                tm_first = type_mult(used_type, effective_types_defense(opp_build, SD))
+                if (
+                    dealt > 0
+                    and tm_first > 1.0
+                    and opp_build.item == "Weakness Policy"
+                    and not SD.consumed_item.get("Weakness Policy", False)
+                ):
+                    SD.consumed_item["Weakness Policy"] = True
+                    SD.stages["Atk"] = min(6, SD.stages["Atk"] + 2)
+                    SD.stages["SpA"] = min(6, SD.stages["SpA"] + 2)
+
+                # Record last received for Counter/Mirror Coat
+                SD.ability_active["last_received"] = {"category": used_cat, "damage": dealt}
+
+                # Recoil & chip on attacker
+                apply_recoil_move(SA, mv, dealt)
+                if (
+                    dealt > 0
+                    and is_contact_effective(mv, self_build.item)
+                    and opp_build.item == "Rocky Helmet"
+                    and SA.hp > 0
+                ):
+                    rh = max(1, SA.max_hp // 6)
+                    SA.hp = max(0, SA.hp - rh)
+                apply_recoil_life_orb(SA, self_build, dealt)
+                try_sitrus(SA, self_build)
+
+                # User-side stage drops after connection
+                if dealt > 0:
+                    apply_stat_side_effects_after(SA, mv)
+
+                step_out.append((prob_so_far * ROLL_PROB, SA, SD))
+        # Merge equivalent states after this hit
+        total_branches = _merge_branch_states(step_out)
+
+        # If all branches already KO'd the defender, no need to continue remaining hits
+        if all(SD.hp <= 0 for _, _, SD in total_branches):
             break
 
-    # Weakness Policy (if hit and first-hit was SE)
-    if total_dealt > 0:
-        tm_first = type_mult(used_type, effective_types_defense(opp_build, opp_state))
-        if (
-            tm_first > 1.0
-            and opp_build.item == "Weakness Policy"
-            and not opp_state.consumed_item.get("Weakness Policy", False)
-        ):
-            opp_state.consumed_item["Weakness Policy"] = True
-            opp_state.stages["Atk"] = min(6, opp_state.stages["Atk"] + 2)
-            opp_state.stages["SpA"] = min(6, opp_state.stages["SpA"] + 2)
-
-    # Record last RECEIVED (for Counter/Mirror Coat)
-    opp_state.ability_active["last_received"] = {
-        "category": used_cat,
-        "damage": total_dealt,
-    }
-
-    # Recoil sequence (only if we actually hit for >0)
-    apply_recoil_move(self_state, mv, total_dealt)
-    if (
-        total_dealt > 0
-        and is_contact_effective(mv, self_build.item)
-        and opp_build.item == "Rocky Helmet"
-        and self_state.hp > 0
-    ):
-        rh = max(1, self_state.max_hp // 6)
-        self_state.hp = max(0, self_state.hp - rh)
-    apply_recoil_life_orb(self_state, self_build, total_dealt)
-    try_sitrus(self_state, self_build)
-
-    # User-side stage drops after successful connection
-    if total_dealt > 0:
-        apply_stat_side_effects_after(self_state, mv)
-
-    return total_dealt
+    return total_branches
 
 
 def do_status_action(mv: Move, self_state: BattleState):
@@ -3042,32 +3109,37 @@ ChanceBranch = Tuple[float, Optional[float], BattleState, BattleState]
 
 
 def branch_on_move(
-    build_att: SetBuild,
-    state_att: BattleState,
-    stats_att: Dict[str, int],
-    build_def: SetBuild,
-    state_def: BattleState,
-    stats_def: Dict[str, int],
+    build_att: "SetBuild",
+    state_att: "BattleState",
+    stats_att: dict[str, int],
+    build_def: "SetBuild",
+    state_def: "BattleState",
+    stats_def: dict[str, int],
     weather,
     terrain,
-    mv: Move,
+    mv: "Move",
     tera: bool,
-    ttype: Optional[str],
-    opp_selected_move: Optional[Move],
-) -> List[Tuple[float, BattleState, BattleState]]:
+    ttype: str | None,
+    opp_selected_move: "Move | None",
+) -> list[tuple[float, "BattleState", "BattleState"]]:
     """
-    Returns a list of (probability, new_att_state, new_def_state) after ATTACKER acts (hit/miss).
+    Return list of (probability, new_att_state, new_def_state) after ATTACKER acts.
+    Now expands: hit/miss accuracy and per-roll damage distributions.
     """
-    out: List[Tuple[float, BattleState, BattleState]] = []
+    out: list[tuple[float, "BattleState", "BattleState"]] = []
 
     # First-turn-only moves (e.g., First Impression)
     if mv.first_turn_only and (state_att.turns_elapsed > 0):
         sA = copy.deepcopy(state_att)
         sD = copy.deepcopy(state_def)
+        if tera and ttype:
+            sA.tera_used = True
+            sA.tera_type = ttype
         sD.ability_active["last_received"] = {"category": mv.category, "damage": 0}
         out.append((1.0, sA, sD))
         return out
 
+    # Status moves (no damage RNG)
     if mv.category == "Status":
         sA = copy.deepcopy(state_att)
         sD = copy.deepcopy(state_def)
@@ -3078,6 +3150,7 @@ def branch_on_move(
         out.append((1.0, sA, sD))
         return out
 
+    # Counter / Mirror Coat (no damage RNG; uses stored damage)
     if mv.is_counter or mv.is_mirror_coat:
         sA = copy.deepcopy(state_att)
         sD = copy.deepcopy(state_def)
@@ -3088,7 +3161,7 @@ def branch_on_move(
         out.append((1.0, sA, sD))
         return out
 
-    # If defender has Protect active, the hit is blocked
+    # Protect blocks damage entirely
     if state_def.ability_active.get("Protect", False):
         sA = copy.deepcopy(state_att)
         sD = copy.deepcopy(state_def)
@@ -3099,36 +3172,41 @@ def branch_on_move(
         out.append((1.0, sA, sD))
         return out
 
-    # Accuracy branching (one check per move)
+    # Accuracy RNG split
     acc = max(0.0, min(1.0, mv.accuracy))
-    # MISS branch
-    if acc < 1.0:
+    miss_p = 1.0 - acc
+    if miss_p > 0:
         sA_m = copy.deepcopy(state_att)
         sD_m = copy.deepcopy(state_def)
         if tera and ttype:
             sA_m.tera_used = True
             sA_m.tera_type = ttype
         sD_m.ability_active["last_received"] = {"category": mv.category, "damage": 0}
-        out.append((1.0 - acc, sA_m, sD_m))
-    # HIT branch
-    sA_h = copy.deepcopy(state_att)
-    sD_h = copy.deepcopy(state_def)
-    dmg = perform_damage_hit(
-        build_att,
-        build_def,
-        sA_h,
-        sD_h,
-        mv,
-        tera,
-        ttype,
-        weather,
-        terrain,
-        stats_att,
-        stats_def,
-        opp_selected_move,
-    )
-    out.append((acc, sA_h, sD_h))
-    return out
+        if mv.name == "High Jump Kick":
+            crash = max(1, sA_m.max_hp // 2)
+            sA_m.hp = max(0, sA_m.hp - crash)
+            try_sitrus(sA_m, build_att)
+        out.append((miss_p, sA_m, sD_m))
+
+    if acc > 0:
+        hit_branches = perform_damage_hit_distribution(
+            build_att,
+            build_def,
+            state_att,
+            state_def,
+            mv,
+            tera,
+            ttype,
+            weather,
+            terrain,
+            stats_att,
+            stats_def,
+            opp_selected_move,
+        )
+        for p2, SA2, SD2 in hit_branches:
+            out.append((acc * p2, SA2, SD2))
+
+    return _merge_branch_states(out)
 
 
 def step_resolution(
@@ -3959,102 +4037,6 @@ RECOIL_RATIO["Wave Crash"] = 1 / 3  # same recoil model as Brave Bird/Flare Blit
 # 2) Critical mechanics patch — High Jump Kick crash on MISS
 # ------------------------------
 # Override branch_on_move to inject crash damage only for the MISS branch of High Jump Kick
-_old_branch_on_move = branch_on_move
-
-
-def branch_on_move(
-    build_att: SetBuild,
-    state_att: BattleState,
-    stats_att: Dict[str, int],
-    build_def: SetBuild,
-    state_def: BattleState,
-    stats_def: Dict[str, int],
-    weather,
-    terrain,
-    mv: Move,
-    tera: bool,
-    ttype: Optional[str],
-    opp_selected_move: Optional[Move],
-) -> List[Tuple[float, BattleState, BattleState]]:
-    # First-turn-only gating, Status, Counter/Mirror Coat, Protect handling as before
-    out = []
-
-    if mv.first_turn_only and (state_att.turns_elapsed > 0):
-        sA = copy.deepcopy(state_att)
-        sD = copy.deepcopy(state_def)
-        sD.ability_active["last_received"] = {"category": mv.category, "damage": 0}
-        out.append((1.0, sA, sD))
-        return out
-
-    if mv.category == "Status":
-        sA = copy.deepcopy(state_att)
-        sD = copy.deepcopy(state_def)
-        if tera and ttype:
-            sA.tera_used = True
-            sA.tera_type = ttype
-        do_status_action(mv, sA)
-        out.append((1.0, sA, sD))
-        return out
-
-    if mv.is_counter or mv.is_mirror_coat:
-        sA = copy.deepcopy(state_att)
-        sD = copy.deepcopy(state_def)
-        if tera and ttype:
-            sA.tera_used = True
-            sA.tera_type = ttype
-        apply_counter_like(mv, sA, sD, build_def)
-        out.append((1.0, sA, sD))
-        return out
-
-    if state_def.ability_active.get("Protect", False):
-        sA = copy.deepcopy(state_att)
-        sD = copy.deepcopy(state_def)
-        if tera and ttype:
-            sA.tera_used = True
-            sA.tera_type = ttype
-        sD.ability_active["last_received"] = {"category": mv.category, "damage": 0}
-        out.append((1.0, sA, sD))
-        return out
-
-    # Accuracy split
-    acc = max(0.0, min(1.0, mv.accuracy))
-    if acc < 1.0:
-        # MISS branch
-        sA_m = copy.deepcopy(state_att)
-        sD_m = copy.deepcopy(state_def)
-        if tera and ttype:
-            sA_m.tera_used = True
-            sA_m.tera_type = ttype
-        sD_m.ability_active["last_received"] = {"category": mv.category, "damage": 0}
-
-        # High Jump Kick: crash for 50% of max HP on miss
-        if mv.name == "High Jump Kick":
-            crash = max(1, sA_m.max_hp // 2)
-            sA_m.hp = max(0, sA_m.hp - crash)
-            try_sitrus(sA_m, build_att)  # crash can trigger Sitrus, then Leftovers at end of turn elsewhere
-
-        out.append(((1.0 - acc), sA_m, sD_m))
-
-    # HIT branch — delegate to original logic to keep correctness
-    sA_h = copy.deepcopy(state_att)
-    sD_h = copy.deepcopy(state_def)
-    dmg = perform_damage_hit(
-        build_att,
-        build_def,
-        sA_h,
-        sD_h,
-        mv,
-        tera,
-        ttype,
-        weather,
-        terrain,
-        stats_att,
-        stats_def,
-        opp_selected_move,
-    )
-    out.append((acc, sA_h, sD_h))
-    return out
-
 
 # ------------------------------
 # 3) Legality-correct movepools (SV) for the trio
@@ -4360,526 +4342,6 @@ def _print_trio_movepool_summary():
 
 LOCAL_REFINE_PASSES = max(LOCAL_REFINE_PASSES, 40)
 
-
-"""SV 1v1 OPTIMIZER — ACCURACY PATCH 5.0 (Exact Damage RNG)"""
-
-# --- Constants & helpers for exact 16-roll RNG ---
-DAMAGE_ROLLS_16 = tuple([x / 100.0 for x in range(85, 101)])  # 0.85..1.00 inclusive, 16 values
-DAMAGE_ROLL_P = 1.0 / 16.0
-MERGE_EPS = 1e-12  # probability floor for branch merging
-
-
-def average_roll() -> float:
-    """Deprecated in accuracy mode; kept for compatibility if referenced elsewhere."""
-
-    return sum(DAMAGE_ROLLS_16) / len(DAMAGE_ROLLS_16)  # 0.925
-
-
-@lru_cache(maxsize=None)
-def _damage_base(
-    level: int,
-    power: int,
-    atk: int,
-    deff: int,
-    burn_half: bool,
-    multiscale_on: bool,
-) -> int:
-    """Deterministic base (pre-multipliers) part of the damage formula independent of the RNG roll."""
-
-    A = (2 * level) // 5 + 2
-    B = (A * power * max(1, atk)) // max(1, deff)
-    C = B // 50 + 2
-    if burn_half:
-        C = C // 2
-    if multiscale_on:
-        C = C // 2
-    return max(1, C)
-
-
-def _final_mult(stab: float, type_m: float, item_mult: float, field_mult: float, crit: bool) -> float:
-    M = stab * type_m * item_mult * field_mult
-    if crit:
-        M *= 1.5
-    return M
-
-
-def _int_damage(c_base: int, mult: float, roll: float) -> int:
-    return max(1, int((c_base * mult * roll) // 1))
-
-
-def damage(
-    level: int,
-    power: int,
-    atk: int,
-    deff: int,
-    stab: float,
-    type_m: float,
-    item_mult: float,
-    burn_half: bool,
-    multiscale_on: bool,
-    field_mult: float,
-    crit: bool,
-) -> int:
-    c_base = _damage_base(level, power, atk, deff, burn_half, multiscale_on)
-    mult = _final_mult(stab, type_m, item_mult, field_mult, crit)
-    median_roll = DAMAGE_ROLLS_16[len(DAMAGE_ROLLS_16) // 2]
-    return _int_damage(c_base, mult, median_roll)
-
-
-def _state_sig(st: BattleState) -> tuple:
-    """Signature for merging identical states after branching within the same move resolution."""
-
-    return (
-        st.hp,
-        st.max_hp,
-        st.stages["Atk"],
-        st.stages["Def"],
-        st.stages["SpA"],
-        st.stages["SpD"],
-        st.stages["Spe"],
-        st.sash_intact,
-        st.sturdy_intact,
-        st.multiscale_on,
-        st.tera_used,
-        st.tera_type or "",
-        st.locked_move or "",
-        bool(st.consumed_item.get("Booster Energy", False)),
-        bool(st.consumed_item.get("Sitrus Berry", False)),
-        bool(st.consumed_item.get("Weakness Policy", False)),
-        st.turns_elapsed,
-    )
-
-
-def _merge_branch_states(
-    branches: list[tuple[float, BattleState, BattleState]]
-) -> list[tuple[float, BattleState, BattleState]]:
-    """Merge branches with identical (A,B) state signatures to keep the tree compact."""
-
-    acc: dict[tuple, tuple[float, BattleState, BattleState]] = {}
-    for p, sA, sB in branches:
-        if p < MERGE_EPS:
-            continue
-        sig = (_state_sig(sA), _state_sig(sB))
-        if sig in acc:
-            accp, a0, b0 = acc[sig]
-            acc[sig] = (accp + p, a0, b0)
-        else:
-            acc[sig] = (p, sA, sB)
-    out = [(p, a, b) for (p, a, b) in acc.values() if p >= MERGE_EPS]
-    total_p = sum(p for p, _, _ in out)
-    if total_p > 0:
-        out = [(p / total_p, a, b) for (p, a, b) in out]
-    return out
-
-
-def _apply_focus_sash_or_sturdy(
-    opp_build: SetBuild, opp_state: BattleState, dmg: int
-) -> int:
-    """Apply Focus Sash/Sturdy to *this hit* if it would otherwise KO from full."""
-
-    if dmg <= 0:
-        return 0
-    if (
-        opp_build.item == "Focus Sash"
-        and opp_state.sash_intact
-        and opp_state.hp == opp_state.max_hp
-        and dmg >= opp_state.hp
-    ):
-        opp_state.hp = 1
-        opp_state.sash_intact = False
-        return 1
-    if (
-        SPECIES_DATA[opp_build.species].ability_hint == "Sturdy"
-        and opp_state.sturdy_intact
-        and opp_state.hp == opp_state.max_hp
-        and dmg >= opp_state.hp
-    ):
-        opp_state.hp = 1
-        opp_state.sturdy_intact = False
-        return 1
-    dealt = min(opp_state.hp, dmg)
-    opp_state.hp -= dealt
-    return dealt
-
-
-def _after_first_successful_hit_side_effects(
-    attacker_state: BattleState,
-    defender_state: BattleState,
-    attacker_build: SetBuild,
-    opp_build: SetBuild,
-    mv: Move,
-    total_dealt_this_action: int,
-) -> None:
-    """Apply post-hit effects after the first successful hit in an action."""
-
-    defender_state.multiscale_on = False
-    try_sitrus(defender_state, opp_build)
-    try_sitrus(attacker_state, attacker_build)
-    if (
-        total_dealt_this_action > 0
-        and is_contact_effective(mv, attacker_build.item)
-        and opp_build.item == "Rocky Helmet"
-        and attacker_state.hp > 0
-    ):
-        rh = max(1, attacker_state.max_hp // 6)
-        attacker_state.hp = max(0, attacker_state.hp - rh)
-    apply_recoil_life_orb(attacker_state, attacker_build, total_dealt_this_action)
-    if total_dealt_this_action > 0:
-        apply_stat_side_effects_after(attacker_state, mv)
-
-
-def _compute_offense_defense_numbers(
-    self_build: SetBuild,
-    opp_build: SetBuild,
-    self_state: BattleState,
-    opp_state: BattleState,
-    mv: Move,
-    tera: bool,
-    ttype: Optional[str],
-    weather,
-    terrain,
-    stats_self: dict,
-    stats_opp: dict,
-    opp_selected_move: Optional[Move] = None,
-):
-    """Precompute shared attack/defense values for enumerating RNG rolls."""
-
-    if (
-        self_build.item in ("Choice Band", "Choice Specs", "Choice Scarf")
-        and self_state.locked_move is None
-    ):
-        self_state.locked_move = mv.name
-    if tera and ttype:
-        self_state.tera_used = True
-        self_state.tera_type = ttype
-    orig_types = effective_types_offense(self_build)
-    used_type = mv.mtype
-    if mv.is_tera_blast and (self_state.tera_used) and self_state.tera_type:
-        used_type = self_state.tera_type
-        used_cat = "Physical" if stats_self["Atk"] >= stats_self["SpA"] else "Special"
-    else:
-        used_cat = mv.category
-    atk_stat, def_stat = category_stat_names(used_cat)
-    if mv.name == "Psyshock":
-        def_stat = "Def"
-    a_mult, s_mult, spe_mult, _, _, _ = apply_choice(
-        self_build.item, 1.0, 1.0, 1.0
-    )
-    if SPECIES_DATA[self_build.species].ability_hint == "Hadron Engine":
-        s_mult *= 1.3
-    if SPECIES_DATA[self_build.species].ability_hint == "Orichalcum Pulse":
-        a_mult *= 1.3
-    pq = pq_activation(
-        self_build, weather, terrain, self_state, stats_self, dry_run=False
-    )
-    crit = is_crit(mv)
-    a_stage = self_state.stages[atk_stat]
-    d_stage = opp_state.stages[def_stat]
-    if crit:
-        a_stage = max(0, a_stage)
-        d_stage = min(0, d_stage)
-    if SPECIES_DATA[opp_build.species].ability_hint == "Unaware" and a_stage > 0:
-        a_stage = 0
-    if SPECIES_DATA[self_build.species].ability_hint == "Unaware" and d_stage > 0:
-        d_stage = 0
-    if atk_stat == "Atk":
-        atk_val = int(
-            stats_self["Atk"] * stage_mult(a_stage) * a_mult * pq["Atk"]
-        )
-    else:
-        atk_val = int(
-            stats_self["SpA"] * stage_mult(a_stage) * s_mult * pq["SpA"]
-        )
-    def_base = stats_opp[def_stat] * stage_mult(d_stage)
-    if def_stat == "SpD" and opp_build.item == "Assault Vest":
-        def_base *= 1.5
-    def_val = int(def_base)
-    offensive_stab = tera_stab_mult(
-        used_type,
-        orig_types,
-        self_state.tera_type if self_state.tera_used else None,
-    )
-    opp_types_now = effective_types_defense(opp_build, opp_state)
-    item_m = move_item_mult(self_build.item, mv, atk_stat)
-    field_m = field_power_mult(
-        used_type, self_build, self_state, weather, terrain
-    )
-    type_m = type_mult(used_type, opp_types_now)
-    c_base = _damage_base(
-        100,
-        base_power(mv),
-        atk_val,
-        max(1, def_val),
-        False,
-        opp_state.multiscale_on,
-    )
-    mult = _final_mult(offensive_stab, type_m, item_m, field_m, crit)
-    return used_type, mv, c_base, mult, crit
-
-
-def _enumerate_hit_single(
-    self_build: SetBuild,
-    opp_build: SetBuild,
-    self_state: BattleState,
-    opp_state: BattleState,
-    mv: Move,
-    used_type: str,
-    c_base: int,
-    mult: float,
-    crit: bool,
-) -> list[tuple[float, int, BattleState, BattleState]]:
-    """Enumerate the 16-roll outcomes for a single-hit move."""
-
-    outcomes: list[tuple[float, int, BattleState, BattleState]] = []
-    for roll in DAMAGE_ROLLS_16:
-        p = DAMAGE_ROLL_P
-        sA = copy.deepcopy(self_state)
-        sB = copy.deepcopy(opp_state)
-        dmg = _int_damage(c_base, mult, roll)
-        dealt = _apply_focus_sash_or_sturdy(opp_build, sB, dmg)
-        sB.ability_active["last_received"] = {
-            "category": mv.category,
-            "damage": dealt,
-        }
-        _after_first_successful_hit_side_effects(
-            sA, sB, self_build, opp_build, mv, dealt
-        )
-        outcomes.append((p, dealt, sA, sB))
-    merged: dict[tuple, tuple[float, int, BattleState, BattleState]] = {}
-    for p, dealt, sA, sB in outcomes:
-        sig = (_state_sig(sA), _state_sig(sB))
-        if sig in merged:
-            accp, ad, a0, b0 = merged[sig]
-            merged[sig] = (accp + p, ad, a0, b0)
-        else:
-            merged[sig] = (p, dealt, sA, sB)
-    return [(p, dealt, sA, sB) for (p, dealt, sA, sB) in merged.values()]
-
-
-def _enumerate_hit_multihit(
-    self_build: SetBuild,
-    opp_build: SetBuild,
-    self_state: BattleState,
-    opp_state: BattleState,
-    mv: Move,
-    used_type: str,
-    c_base: int,
-    mult: float,
-    crit: bool,
-) -> list[tuple[float, int, BattleState, BattleState]]:
-    """Enumerate exact sequential RNG for multi-hit moves."""
-
-    frontier: list[tuple[float, int, BattleState, BattleState]] = [
-        (1.0, 0, copy.deepcopy(self_state), copy.deepcopy(opp_state))
-    ]
-    for hit in range(mv.multi_hits):
-        next_frontier: list[tuple[float, int, BattleState, BattleState]] = []
-        for p0, dealt_so_far, sA0, sB0 in frontier:
-            if sB0.hp <= 0 or sA0.hp <= 0:
-                next_frontier.append((p0, dealt_so_far, sA0, sB0))
-                continue
-            for roll in DAMAGE_ROLLS_16:
-                p = p0 * DAMAGE_ROLL_P
-                sA = copy.deepcopy(sA0)
-                sB = copy.deepcopy(sB0)
-                c_base_hit = _damage_base(
-                    100, base_power(mv), max(1, c_base // 1), 1, False, False
-                )
-                dmg = (
-                    _int_damage(c_base, mult, roll)
-                    if hit == 0
-                    else _int_damage(c_base_hit, mult, roll)
-                )
-                dealt = _apply_focus_sash_or_sturdy(opp_build, sB, dmg)
-                sB.ability_active["last_received"] = {
-                    "category": mv.category,
-                    "damage": dealt,
-                }
-                sB.multiscale_on = False
-                try_sitrus(sB, opp_build)
-                if sB.hp <= 0:
-                    apply_recoil_life_orb(sA, self_build, dealt)
-                    if (
-                        is_contact_effective(mv, self_build.item)
-                        and opp_build.item == "Rocky Helmet"
-                        and sA.hp > 0
-                    ):
-                        rh = max(1, sA.max_hp // 6)
-                        sA.hp = max(0, sA.hp - rh)
-                    if dealt > 0:
-                        apply_stat_side_effects_after(sA, mv)
-                    next_frontier.append((p, dealt_so_far + dealt, sA, sB))
-                    continue
-                apply_recoil_life_orb(sA, self_build, dealt)
-                if (
-                    is_contact_effective(mv, self_build.item)
-                    and opp_build.item == "Rocky Helmet"
-                    and sA.hp > 0
-                ):
-                    rh = max(1, sA.max_hp // 6)
-                    sA.hp = max(0, sA.hp - rh)
-                if dealt > 0:
-                    apply_stat_side_effects_after(sA, mv)
-                next_frontier.append((p, dealt_so_far + dealt, sA, sB))
-        merged: dict[tuple, tuple[float, int, BattleState, BattleState]] = {}
-        for p, dealt_tot, sA, sB in next_frontier:
-            if p < MERGE_EPS:
-                continue
-            sig = (_state_sig(sA), _state_sig(sB))
-            if sig in merged:
-                accp, dprev, a0, b0 = merged[sig]
-                merged[sig] = (accp + p, dprev, a0, b0)
-            else:
-                merged[sig] = (p, dealt_tot, sA, sB)
-        frontier = [(p, dealt, a, b) for (p, dealt, a, b) in merged.values()]
-    return frontier
-
-
-def perform_damage_hit(
-    self_build: SetBuild,
-    opp_build: SetBuild,
-    self_state: BattleState,
-    opp_state: BattleState,
-    mv: Move,
-    tera: bool,
-    ttype: Optional[str],
-    weather,
-    terrain,
-    stats_self: Dict[str, int],
-    stats_opp: Dict[str, int],
-    opp_selected_move: Optional[Move] = None,
-) -> int:
-    """Compatibility helper returning the median roll for deterministic callers."""
-
-    used_type, mv, c_base, mult, crit = _compute_offense_defense_numbers(
-        self_build,
-        opp_build,
-        self_state,
-        opp_state,
-        mv,
-        tera,
-        ttype,
-        weather,
-        terrain,
-        stats_self,
-        stats_opp,
-        opp_selected_move,
-    )
-    median_roll = DAMAGE_ROLLS_16[len(DAMAGE_ROLLS_16) // 2]
-    dmg = _int_damage(c_base, mult, median_roll)
-    dealt = _apply_focus_sash_or_sturdy(opp_build, opp_state, dmg)
-    _after_first_successful_hit_side_effects(
-        self_state, opp_state, self_build, opp_build, mv, dealt
-    )
-    return dealt
-
-
-_old_branch_on_move_exact = branch_on_move
-
-
-def branch_on_move(
-    build_att: SetBuild,
-    state_att: BattleState,
-    stats_att: Dict[str, int],
-    build_def: SetBuild,
-    state_def: BattleState,
-    stats_def: Dict[str, int],
-    weather,
-    terrain,
-    mv: Move,
-    tera: bool,
-    ttype: Optional[str],
-    opp_selected_move: Optional[Move],
-) -> List[Tuple[float, BattleState, BattleState]]:
-    """Exact 16-roll RNG branching for damaging moves."""
-
-    out: List[Tuple[float, BattleState, BattleState]] = []
-    if mv.first_turn_only and (state_att.turns_elapsed > 0):
-        sA = copy.deepcopy(state_att)
-        sD = copy.deepcopy(state_def)
-        sD.ability_active["last_received"] = {"category": mv.category, "damage": 0}
-        out.append((1.0, sA, sD))
-        return out
-    if mv.category == "Status":
-        sA = copy.deepcopy(state_att)
-        sD = copy.deepcopy(state_def)
-        if tera and ttype:
-            sA.tera_used = True
-            sA.tera_type = ttype
-        do_status_action(mv, sA)
-        out.append((1.0, sA, sD))
-        return out
-    if mv.is_counter or mv.is_mirror_coat:
-        sA = copy.deepcopy(state_att)
-        sD = copy.deepcopy(state_def)
-        if tera and ttype:
-            sA.tera_used = True
-            sA.tera_type = ttype
-        apply_counter_like(mv, sA, sD, build_def)
-        out.append((1.0, sA, sD))
-        return out
-    if state_def.ability_active.get("Protect", False):
-        sA = copy.deepcopy(state_att)
-        sD = copy.deepcopy(state_def)
-        if tera and ttype:
-            sA.tera_used = True
-            sA.tera_type = ttype
-        sD.ability_active["last_received"] = {"category": mv.category, "damage": 0}
-        out.append((1.0, sA, sD))
-        return out
-    acc = max(0.0, min(1.0, mv.accuracy))
-    if acc < 1.0:
-        sA_m = copy.deepcopy(state_att)
-        sD_m = copy.deepcopy(state_def)
-        if tera and ttype:
-            sA_m.tera_used = True
-            sA_m.tera_type = ttype
-        sD_m.ability_active["last_received"] = {"category": mv.category, "damage": 0}
-        if mv.name == "High Jump Kick":
-            crash = max(1, sA_m.max_hp // 2)
-            sA_m.hp = max(0, sA_m.hp - crash)
-            try_sitrus(sA_m, build_att)
-        out.append((1.0 - acc, sA_m, sD_m))
-    sA0 = copy.deepcopy(state_att)
-    sD0 = copy.deepcopy(state_def)
-    used_type, mv_eff, c_base, mult, crit = _compute_offense_defense_numbers(
-        build_att,
-        build_def,
-        sA0,
-        sD0,
-        mv,
-        tera,
-        ttype,
-        weather,
-        terrain,
-        stats_att,
-        stats_def,
-        opp_selected_move,
-    )
-    if mv.name == "Sucker Punch" and opp_selected_move is not None:
-        if (
-            opp_selected_move.category == "Status"
-            or opp_selected_move.is_counter
-            or opp_selected_move.is_mirror_coat
-        ):
-            sD0.ability_active["last_received"] = {"category": mv.category, "damage": 0}
-            out.append((acc, sA0, sD0))
-            return _merge_branch_states(out)
-    branches_hit: list[tuple[float, BattleState, BattleState]] = []
-    if mv.multi_hits <= 1:
-        enumerated = _enumerate_hit_single(
-            build_att, build_def, sA0, sD0, mv, used_type, c_base, mult, crit
-        )
-        for p, _, sA, sD in enumerated:
-            branches_hit.append((acc * p, sA, sD))
-    else:
-        enumerated = _enumerate_hit_multihit(
-            build_att, build_def, sA0, sD0, mv, used_type, c_base, mult, crit
-        )
-        for p, _, sA, sD in enumerated:
-            branches_hit.append((acc * p, sA, sD))
-    out.extend(branches_hit)
-    return _merge_branch_states(out)
 
 
 def _print_version_banner_accurate() -> None:
