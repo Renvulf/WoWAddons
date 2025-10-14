@@ -3617,3 +3617,232 @@ if "_svi_banner_override" not in globals() or not globals().get("_svi_banner_ove
     def main():
         _print_version_banner_v6()
         return _orig_main_for_banner_swap() if _orig_main_for_banner_swap else None
+
+# === SV 1v1 OPTIMIZER — CRITICAL ACCURACY PATCH: Dynamic EV Axes Per MOVESET (not per species) ===
+# Safety: ensure the four-physical-only switch is present and disabled for our trio
+try:
+    FOUR_PHYSICAL_ONLY
+except NameError:
+    FOUR_PHYSICAL_ONLY = {}
+for _sp in ("Swampert","Blaziken","Quaquaval"):
+    FOUR_PHYSICAL_ONLY[_sp] = False
+
+# ---- Helpers to classify a moveset’s offense composition
+def _is_damaging_move(mname: str) -> bool:
+    mv = MOVE_DB[mname]
+    return mv.category in ("Physical","Special")
+
+def _moveset_profile(moves: list[str]) -> dict:
+    """Return {'phys': int, 'spec': int, 'status': int, 'damaging': int} counting categories in a 4-move set."""
+    phys = spec = status = 0
+    for m in moves:
+        mv = MOVE_DB[m]
+        if mv.category == "Physical":
+            phys += 1
+        elif mv.category == "Special":
+            spec += 1
+        else:
+            status += 1
+    return {"phys": phys, "spec": spec, "status": status, "damaging": phys + spec}
+
+def _axes_for_moveset(species: str, moves: list[str]) -> tuple[str, ...]:
+    """
+    Choose EV axes per *moveset*:
+      - physical-only damaging: ("HP","Atk","Def","Spe")
+      - special-only damaging:  ("HP","SpA","SpD","Spe")
+      - mixed damaging:         ("HP","Atk","SpA","Spe")
+    Notes:
+      • We always include HP and Spe (1v1 tempo & %HP tiebreaker at 3 turns).
+      • For mixed sets we invest in both offenses and leave bulk to HP (most general benefit),
+        then let hill-climb refine across these axes to capture useful reallocations.
+    """
+    prof = _moveset_profile(moves)
+    if prof["damaging"] == 0:
+        # Defensive/utility-only builds are not meaningful in 3-turn sudden-death; default to physical shell.
+        return ("HP","Atk","Def","Spe")
+    if prof["phys"] > 0 and prof["spec"] == 0:
+        return ("HP","Atk","Def","Spe")
+    if prof["spec"] > 0 and prof["phys"] == 0:
+        return ("HP","SpA","SpD","Spe")
+    # Mixed
+    return ("HP","Atk","SpA","Spe")
+
+# ---- Replace enumerate_candidates_for_species with a per-moveset EV-axes version
+def enumerate_candidates_for_species(species: str) -> list["SetBuild"]:
+    """Items/tera/natures/moves × (matchup-aware EV Pareto chosen per-moveset)"""
+    spec = SPECIES_DATA[species]
+    items = ITEM_CANDIDATES[species]
+    teras = TERA_POOLS[species]
+    pool = LEGAL_MOVES[species]
+    ms_all = movesets_from_pool(pool, FOUR_PHYSICAL_ONLY[species], species)
+
+    ivs31 = {k: 31 for k in ("HP","Atk","Def","SpA","SpD","Spe")}
+
+    # Build a compact representative opp list for Spe tiering (reusing your existing approach)
+    rep_opp: list["SetBuild"] = []
+    seen = set()
+    for t in THREAT_LIST:
+        r = resolve_species_name(t) or t
+        if r in seen:
+            continue
+        seen.add(r)
+        av = adversary_variants(r)
+        if av:
+            builds, _w = av
+            if builds:
+                rep_opp.append(builds[0])
+        if len(rep_opp) >= 12:
+            break
+
+    cands: list["SetBuild"] = []
+
+    # Modest nature pools per species (keep your domain choices; add SpA natures when special/mixed movesets appear)
+    # We’ll pick natures later based on the *moveset* profile to avoid wasting eval on the wrong offense.
+    base_natures_phys = ["Adamant","Jolly","Impish","Careful"]
+    base_natures_spec = ["Modest","Timid","Calm","Bold"]
+
+    for item in items:
+        for tera in teras:
+            # moveset loop first so we can pick natures & EV axes informed by the actual moves used
+            for mv in ms_all:
+                if not filter_moveset_by_item(item, mv):
+                    continue
+                assert_legal_moves(species, mv)
+
+                # Choose EV axes per moveset
+                ev_axes = _axes_for_moveset(species, mv)
+
+                # Choose nature set per moveset to avoid scoring obviously mismatched natures
+                prof = _moveset_profile(mv)
+                if prof["phys"] > 0 and prof["spec"] == 0:
+                    natures = ["Jolly","Adamant","Impish","Careful"]  # speed/atk or bulk-biased for phys
+                elif prof["spec"] > 0 and prof["phys"] == 0:
+                    natures = ["Timid","Modest","Calm","Bold"]        # speed/spa or bulk-biased for spec
+                else:
+                    # Mixed: allow both speed-leaning and neutral offenses; we’ll let EV search decide the split
+                    natures = ["Jolly","Timid","Naive","Hasty","Adamant","Modest"]
+
+                for nature in natures:
+                    # Enumerate EV Pareto on the chosen axes with matchup-aware Spe pruning
+                    ev_pareto = iterate_evs_axes_matchup_aware(ev_axes, species, nature, item, rep_opp)
+                    for evs in ev_pareto:
+                        if not valid_evs(evs):
+                            continue
+                        cands.append(
+                            SetBuild(
+                                species=species,
+                                item=item,
+                                ability=spec.ability_hint,
+                                tera_type=tera,
+                                nature=nature,
+                                evs=evs,
+                                ivs=ivs31,
+                                moves=mv,
+                            )
+                        )
+    return cands
+
+# ---- Patch build_search_for_species to refine on the SAME axes used for the winner moveset
+#     (so the hill-climb is coherent with how the candidate’s EVs were enumerated)
+_old_build_search_for_species = build_search_for_species
+def build_search_for_species(species: str, threats: list[str], conditioned_on: dict[str,"SetBuild"]|None = None):
+    threats_variants = prebuild_threat_variants(threats)
+    if not threats_variants:
+        return None, {}
+    candidates = enumerate_candidates_for_species(species)
+    if not candidates:
+        return None, {}
+
+    best = None
+    per_wr = {}
+    max_workers = max(1, (os.cpu_count() or 1))
+
+    if conditioned_on is None:
+        # Solo objective — shortlist in parallel (unchanged)
+        with ProcessPoolExecutor(max_workers=max_workers) as ex:
+            futures = [ex.submit(eval_candidate_single, c, threats, threats_variants) for c in candidates]
+            for fut in as_completed(futures):
+                score, wrs, cand = fut.result()
+                if (best is None) or (score > best[0]):
+                    best = (score, wrs, cand)
+
+        # Local refine — SOLO on the SAME per-moveset axes
+        def solo_eval_fn(sb: SetBuild) -> float:
+            wrs = []
+            for name in threats:
+                variants, weights = threats_variants[name]
+                results = [simulate(sb, opp) for opp in variants]
+                wrs.append(weighted_mean(results, weights))
+            return sum(wrs) / len(wrs) if wrs else 0.0
+
+        ev_axes = _axes_for_moveset(species, best[2].moves)
+        refined = refine_evs_local(best[2], solo_eval_fn, ev_axes, passes=LOCAL_REFINE_PASSES)
+        if refined.evs != best[2].evs:
+            wrs = []
+            for name in threats:
+                variants, weights = threats_variants[name]
+                results = [simulate(refined, opp) for opp in variants]
+                wrs.append(weighted_mean(results, weights))
+            best = (sum(wrs) / len(wrs) if wrs else 0.0, wrs, refined)
+
+    else:
+        # Trio-conditioned evaluation (unchanged), but refine on the SAME per-moveset axes
+        def trio_eval_fn(sb: SetBuild) -> float:
+            trio = dict(conditioned_on)
+            trio[species] = sb
+            wrs = []
+            for name in threats:
+                variants, weights = threats_variants[name]
+                per_variant = []
+                for opp in variants:
+                    ours = max(simulate(b, opp) for _, b in trio.items())
+                    per_variant.append(ours)
+                wrs.append(weighted_mean(per_variant, weights))
+            return sum(wrs) / len(wrs) if wrs else 0.0
+
+        # shortlist
+        for c in candidates:
+            score, wrs, cand = eval_candidate_trio(c, conditioned_on, threats, threats_variants)
+            if (best is None) or (score > best[0]):
+                best = (score, wrs, cand)
+
+        # refine on per-moveset axes
+        ev_axes = _axes_for_moveset(species, best[2].moves)
+        refined = refine_evs_local(best[2], trio_eval_fn, ev_axes, passes=LOCAL_REFINE_PASSES)
+        if refined.evs != best[2].evs:
+            wrs = []
+            trio_fixed = dict(conditioned_on)
+            trio_fixed[species] = refined
+            for name in threats:
+                variants, weights = threats_variants[name]
+                per_variant = []
+                for opp in variants:
+                    ours = max(simulate(b, opp) for _, b in trio_fixed.items())
+                    per_variant.append(ours)
+                wrs.append(weighted_mean(per_variant, weights))
+            best = (sum(wrs) / len(wrs) if wrs else 0.0, wrs, refined)
+
+    if best is None:
+        return None, {}
+    per_wr = {threats[i]: best[1][i] for i in range(len(threats))}
+    return best[2], per_wr
+
+# ---- Version banner bump so you can confirm at runtime
+def _print_version_banner_v6():
+    print("== SV 1v1 Optimizer — CPU only ==")
+    print("Version:", "6.0 (per-moveset EV axes + coherent refine)")
+    print("Note: EV search and refinement now adapt to each moveset’s offense (phys/spec/mixed).")
+
+try:
+    _old_main
+except NameError:
+    _old_main = main
+
+def main():
+    start = time.time()
+    _print_version_banner_v6()
+    globals()["_svi_banner_override"] = True
+    try:
+        return _old_main()
+    finally:
+        globals().pop("_svi_banner_override", None)
