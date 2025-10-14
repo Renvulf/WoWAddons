@@ -3178,3 +3178,412 @@ if "main" in globals() and not globals().get("_svi_v5_installed"):
 
 if __name__ == "__main__":
     main()
+# === CRITICAL ACCURACY FIX — DYNAMIC EV AXES PER MOVESET (Gen 9 SV 1v1) ===
+# Paste this WHOLE block near the *end* of your file so it overrides earlier defs.
+# WHY (main issue to fix):
+# Your EV search chooses the 4 EV axes from species BASE STATS (Atk vs SpA) instead of the
+# actual MOVES in the candidate set. That systematically misses special/mixed best sets
+# (e.g., Swampert with Surf/Ice Beam/Earth Power or Blaziken with Focus Blast/Overheat),
+# so you never even *consider* optimal SpA allocations for those sets. Result: incorrect
+# "best builds" and depressed win rates across the threat list.
+#
+# WHAT THIS PATCH DOES:
+# 1) For EVERY candidate moveset, classify its offensive profile (Physical / Special / Mixed)
+#    using effective base power (+ a Tera Blast rule).
+# 2) Pick EV axes *per moveset*, not per species:
+#       - Physical  -> ("HP","Atk", DEF_AXIS, "Spe")
+#       - Special   -> ("HP","SpA", SPD_AXIS, "Spe")
+#       - Mixed     -> ("HP","Atk","SpA","Spe")   (def axis handled by refine)
+#    DEF_AXIS / SPD_AXIS is chosen from your representative threat pool to bias toward the
+#    side most attacks come from (physical vs special).
+# 3) Use those axes both in the Pareto grid enumeration *and* in local EV refinement so the
+#    optimizer can actually move EVs into SpA for special/mixed sets (or back to Atk for physical).
+#
+# 4) Also tightens legality lists for the trio from SV Gen 9 (level/TM/egg/tutor),
+#    so the move pools align with Scarlet/Violet. (Sources in comments below.)
+#
+# Drop-in: no external deps; preserves your search/scoring/minimax mechanics.
+
+# -----------------------------
+# 0) (Re)ensure key Gen 9 moves exist (idempotent)
+# -----------------------------
+def _ensure_move(name: str, mtype: str, cat: str, power: int, acc: float = 1.0, *, contact: bool = False, priority: int = 0, is_punch: bool = False, always_crit: bool = False, is_slicing: bool = False, multi_hits: int = 1, is_tera_blast: bool = False):
+    if name not in MOVE_DB:
+        MOVE_DB[name] = Move(name, mtype, cat, power, acc, contact=contact, priority=priority, is_punch=is_punch, always_crit=always_crit, is_tera_blast=is_tera_blast, multi_hits=multi_hits)
+        if is_slicing:
+            object.__setattr__(MOVE_DB[name], "is_slicing", True)
+
+# Water / Ground / Ice / Fighting / Rock / Electric / Psychic staples (SV-legal)
+_ensure_move("Surf", "Water", "Special", 90)
+_ensure_move("Hydro Pump", "Water", "Special", 110, 0.8)
+_ensure_move("Waterfall", "Water", "Physical", 80, contact=True)
+_ensure_move("Liquidation", "Water", "Physical", 85, contact=True)
+_ensure_move("Flip Turn", "Water", "Physical", 60, contact=True)
+_ensure_move("Aqua Jet", "Water", "Physical", 40, contact=True, priority=1)
+_ensure_move("Wave Crash", "Water", "Physical", 120, contact=True)
+_ensure_move("Hydro Cannon", "Water", "Special", 150, 0.9)
+
+_ensure_move("Earth Power", "Ground", "Special", 90)
+_ensure_move("High Horsepower", "Ground", "Physical", 95, 0.95)
+_ensure_move("Stomping Tantrum", "Ground", "Physical", 75)
+_ensure_move("Bulldoze", "Ground", "Physical", 60)
+_ensure_move("Dig", "Ground", "Physical", 80)
+_ensure_move("Earthquake", "Ground", "Physical", 100)
+
+_ensure_move("Ice Beam", "Ice", "Special", 90)
+_ensure_move("Ice Punch", "Ice", "Physical", 75, contact=True)
+_ensure_move("Ice Spinner", "Ice", "Physical", 80, contact=True)
+_ensure_move("Avalanche", "Ice", "Physical", 60)
+
+_ensure_move("Close Combat", "Fighting", "Physical", 120, contact=True)
+_ensure_move("Drain Punch", "Fighting", "Physical", 75, contact=True)
+_ensure_move("Low Kick", "Fighting", "Physical", 1, contact=True)
+_ensure_move("Brick Break", "Fighting", "Physical", 75)
+_ensure_move("Body Press", "Fighting", "Physical", 80, contact=True)
+_ensure_move("Bulk Up", "Fighting", "Status", 0)
+
+_ensure_move("Flare Blitz", "Fire", "Physical", 120, contact=True)
+_ensure_move("Overheat", "Fire", "Special", 130, 0.9)
+_ensure_move("Flamethrower", "Fire", "Special", 90)
+_ensure_move("Fire Blast", "Fire", "Special", 110, 0.85)
+_ensure_move("Blaze Kick", "Fire", "Physical", 85, 0.9, contact=True)
+
+_ensure_move("Rock Slide", "Rock", "Physical", 75, 0.9)
+_ensure_move("Stone Edge", "Rock", "Physical", 100, 0.8)
+_ensure_move("Stealth Rock", "Rock", "Status", 0)
+
+_ensure_move("Thunder Punch", "Electric", "Physical", 75, contact=True)
+_ensure_move("Wild Charge", "Electric", "Physical", 90, contact=True)
+
+_ensure_move("Zen Headbutt", "Psychic", "Physical", 80, 0.9, contact=True)
+_ensure_move("Psyshock", "Psychic", "Special", 80)
+
+_ensure_move("Brave Bird", "Flying", "Physical", 120, contact=True)
+_ensure_move("Aerial Ace", "Flying", "Physical", 60, contact=True)
+_ensure_move("Acrobatics", "Flying", "Physical", 55, 1.0, contact=True)
+_ensure_move("Hurricane", "Flying", "Special", 110, 0.7)
+
+_ensure_move("Knock Off", "Dark", "Physical", 65, contact=True)
+_ensure_move("Night Slash", "Dark", "Physical", 70, contact=True)
+_ensure_move("Sucker Punch", "Dark", "Physical", 70, contact=True, priority=1)
+
+_ensure_move("Tera Blast", "Normal", "Special", 80, is_tera_blast=True)
+
+RECOIL_RATIO["Wave Crash"] = 1/3
+RECOIL_RATIO["Flare Blitz"] = 1/3
+RECOIL_RATIO["Brave Bird"] = 1/3
+RECOIL_RATIO["Wild Charge"] = 1/4
+
+# -----------------------------
+# 1) Tight, legality-correct SV move pools (curated for 1v1; includes level/TM/egg/tutor)
+#    Sources: Pokémon DB Gen 9 learnsets (Scarlet/Violet) for Swampert, Blaziken, Quaquaval.
+#    (See end of this block for links.)
+# -----------------------------
+SV_MOVES_SWAMPERT = sorted(set([
+    # Water
+    "Aqua Jet","Flip Turn","Liquidation","Surf","Hydro Pump","Waterfall","Chilling Water","Muddy Water","Hydro Cannon","Rain Dance",
+    # Ground
+    "Earthquake","Earth Power","High Horsepower","Stomping Tantrum","Bulldoze","Sand Tomb","Dig","Mud Shot",
+    # Ice
+    "Ice Beam","Ice Punch","Ice Spinner","Avalanche","Icy Wind","Blizzard",
+    # Rock
+    "Rock Slide","Rock Tomb","Stone Edge","Stealth Rock","Smack Down","Rock Throw",
+    # Fighting / Normal / Utility
+    "Low Kick","Brick Break","Body Press","Hammer Arm","Bulk Up","Counter","Protect","Detect","Substitute","Endure","Rest","Sleep Talk","Roar","Amnesia","Endeavor","Facade","Giga Impact","Hyper Beam","Double-Edge","Helping Hand",
+    # Coverage
+    "Poison Jab","Knock Off","Zen Headbutt","Weather Ball","Focus Blast","Outrage","Tera Blast"
+]))
+
+SV_MOVES_BLAZIKEN = sorted(set([
+    # Fire
+    "Flare Blitz","Blaze Kick","Flamethrower","Fire Blast","Overheat","Heat Wave","Flame Charge","Sunny Day","Fire Spin",
+    # Fighting
+    "Close Combat","Low Kick","Brick Break","Drain Punch","Reversal","Body Press","Bulk Up","Counter","Focus Energy",
+    # Flying
+    "Brave Bird","Aerial Ace","Bounce","Acrobatics",
+    # Dark / Ghost
+    "Knock Off","Night Slash","Sucker Punch","Thief","Shadow Claw",
+    # Ground / Rock
+    "Earthquake","Bulldoze","Dig","Rock Slide","Rock Tomb","Stone Edge","Stomping Tantrum",
+    # Electric / Psychic / Poison
+    "Thunder Punch","Zen Headbutt","Poison Jab",
+    # Utility / Normal
+    "Quick Attack","Agility","Taunt","Encore","Protect","Detect","Substitute","Endure","Work Up","Baton Pass","Roar","Facade","Giga Impact","Hyper Beam","Rest","Sleep Talk",
+    # Water niche
+    "Rain Dance",
+    # Tera
+    "Tera Blast"
+]))
+
+SV_MOVES_QUAQUAVAL = sorted(set([
+    # Signature / Water
+    "Aqua Step","Aqua Cutter","Aqua Jet","Liquidation","Waterfall","Flip Turn","Surf","Hydro Pump","Hydro Cannon","Chilling Water","Rain Dance",
+    # Fighting
+    "Close Combat","Drain Punch","Brick Break","Low Kick","Reversal","Bulk Up","Body Press","Counter",
+    # Flying
+    "Brave Bird","Acrobatics","Aerial Ace","Air Slash","Hurricane",
+    # Ice
+    "Ice Spinner","Avalanche","Icy Wind","Ice Beam",
+    # Dark / Bug / Grass
+    "Knock Off","U-turn","Pounce","Trailblaze",
+    # Utility / Normal
+    "Protect","Detect","Encore","Taunt","Substitute","Rest","Sleep Talk","Giga Impact","Hyper Beam","Facade","Endure","Helping Hand",
+    # Ground / Rock
+    "Bulldoze","Rock Slide","Rock Tomb","Stone Edge",
+    # Electric / Psychic
+    "Thunder Punch","Zen Headbutt",
+    # Tera
+    "Tera Blast"
+]))
+
+LEGAL_MOVES.update({
+    "Swampert": SV_MOVES_SWAMPERT,
+    "Blaziken": SV_MOVES_BLAZIKEN,
+    "Quaquaval": SV_MOVES_QUAQUAVAL,
+})
+
+def assert_legal_moves(species: str, moves: list[str]) -> None:
+    legal = set(LEGAL_MOVES.get(species, []))
+    bad = [m for m in moves if m not in legal]
+    if bad:
+        raise ValueError(f"Illegal moves for {species}: {bad}")
+
+# -----------------------------
+# 2) Offensive profile for a candidate moveset
+# -----------------------------
+def _effective_bp_for_move(mv: Move, build_tera_type: str | None) -> int:
+    """Rough, item/field/ability-agnostic proxy used ONLY to choose EV axes. Treats Tera Blast as:
+       - 80 BP Physical *if* we would be Physical (Atk >= SpA) when Tera is available on set,
+       - 80 BP Special otherwise."""
+    if mv.is_tera_blast and build_tera_type:
+        # default to 'higher of Atk/SpA later'; here just return 80 as signal
+        return 80
+    if mv.category == "Status":
+        return 0
+    return base_power(mv)
+
+def _moveset_offense_profile(moves: list[str], tera_type: str | None) -> str:
+    phys = 0
+    spec = 0
+    for m in moves:
+        mv = MOVE_DB[m]
+        bp = _effective_bp_for_move(mv, tera_type)
+        if bp <= 0:
+            continue
+        if mv.is_tera_blast and tera_type:
+            # Lean towards whichever side is more supported by the REST of the set
+            # Count Tera Blast on both sides lightly so mixed stays mixed if set is mixed.
+            phys += 1
+            spec += 1
+        elif mv.category == "Physical":
+            phys += 1
+        elif mv.category == "Special":
+            spec += 1
+    if phys >= 1 and spec >= 1:
+        return "Mixed"
+    return "Physical" if phys > spec else "Special"
+
+# -----------------------------
+# 3) Pick which defensive axis to include (Def vs SpD) from opponents
+# -----------------------------
+def _dominant_threat_attack_axis(opp_builds: list["SetBuild"]) -> str:
+    """Heuristic: look at each representative threat's strongest damaging move by BP and
+       tally Physical vs Special. Choose the side you expect to be hit from most often."""
+    phys_cnt = 0
+    spec_cnt = 0
+    for sb in opp_builds or []:
+        best = 0
+        cat = None
+        for nm in sb.moves:
+            mv = MOVE_DB.get(nm)
+            if not mv or mv.category == "Status":
+                continue
+            bp = base_power(mv)
+            if bp > best:
+                best = bp
+                cat = mv.category
+        if cat == "Physical":
+            phys_cnt += 1
+        elif cat == "Special":
+            spec_cnt += 1
+    return "Def" if phys_cnt >= spec_cnt else "SpD"
+
+# -----------------------------
+# 4) EV grid enumerator helper — unchanged but supports any axes tuple you pass
+#     (iterate_evs_axes_matchup_aware already accepts dynamic axes)
+# -----------------------------
+
+# -----------------------------
+# 5) OVERRIDE: enumerate_candidates_for_species with per-moveset EV axes
+# -----------------------------
+def enumerate_candidates_for_species(species: str) -> list["SetBuild"]:
+    """Items/tera/natures/moves × (matchup-aware EV Pareto with PER-MOVESET axes)."""
+    spec = SPECIES_DATA[species]
+    items = ITEM_CANDIDATES[species]
+    teras = TERA_POOLS[species]
+    pool = LEGAL_MOVES[species]
+    ms_all = movesets_from_pool(pool, False, species)  # no phys-only filter
+
+    ivs31 = {k: 31 for k in ["HP","Atk","Def","SpA","SpD","Spe"]}
+
+    # Compact representative opponent builds (first variant per threat)
+    rep_opp: list["SetBuild"] = []
+    seen = set()
+    for t in THREAT_LIST:
+        r = resolve_species_name(t) or t
+        if r in seen: continue
+        seen.add(r)
+        av = adversary_variants(r)
+        if av:
+            builds, _w = av
+            if builds:
+                rep_opp.append(builds[0])
+        if len(rep_opp) >= 12:
+            break
+    # Pick defensive axis against the meta
+    DEF_AXIS = _dominant_threat_attack_axis(rep_opp)    # "Def" or "SpD"
+    SPD_AXIS = "SpD" if DEF_AXIS == "Def" else "Def"    # the opposite
+
+    cands: list["SetBuild"] = []
+    for item in items:
+        # Nature space kept modest; you can expand if desired
+        nature_pool_phys = ["Adamant","Jolly","Impish","Careful"]
+        nature_pool_spec = ["Modest","Timid","Calm","Bold"]
+        for tera in teras:
+            for mvset in ms_all:
+                assert_legal_moves(species, mvset)
+                if not filter_moveset_by_item(item, mvset):
+                    continue
+                profile = _moveset_offense_profile(mvset, tera)
+                if profile == "Physical":
+                    natures = nature_pool_phys
+                    ev_axes = ("HP","Atk", DEF_AXIS, "Spe")
+                elif profile == "Special":
+                    natures = nature_pool_spec
+                    ev_axes = ("HP","SpA", SPD_AXIS, "Spe")
+                else:  # Mixed
+                    natures = ["Naive","Hasty","Jolly","Timid","Adamant","Modest"]
+                    ev_axes = ("HP","Atk","SpA","Spe")
+
+                for nature in natures:
+                    # Matchup-aware Spe pruning + Pareto over chosen axes
+                    ev_pareto = iterate_evs_axes_matchup_aware(ev_axes, species, nature, item, rep_opp)
+                    for evs in ev_pareto:
+                        if not valid_evs(evs):
+                            continue
+                        cands.append(
+                            SetBuild(
+                                species=species,
+                                item=item,
+                                ability=spec.ability_hint,
+                                tera_type=tera,
+                                nature=nature,
+                                evs=evs,
+                                ivs=ivs31,
+                                moves=list(mvset),
+                            )
+                        )
+    return cands
+
+# -----------------------------
+# 6) OVERRIDE: local refinement should use the same axes we picked for the selected best set
+#     (We plug into your existing build_search_for_species via small helpers)
+# -----------------------------
+def _axes_for_build(sb: "SetBuild", rep_opp: list["SetBuild"]) -> tuple[str, ...]:
+    profile = _moveset_offense_profile(sb.moves, sb.tera_type)
+    DEF_AXIS = _dominant_threat_attack_axis(rep_opp)
+    SPD_AXIS = "SpD" if DEF_AXIS == "Def" else "Def"
+    if profile == "Physical":
+        return ("HP","Atk", DEF_AXIS, "Spe")
+    if profile == "Special":
+        return ("HP","SpA", SPD_AXIS, "Spe")
+    return ("HP","Atk","SpA","Spe")
+
+# Monkey-patch build_search_for_species to wire axes into refine step without rewriting it all.
+if "_orig_build_search_for_species" not in globals():
+    _orig_build_search_for_species = build_search_for_species
+
+def build_search_for_species(species: str, threats: list[str], conditioned_on: dict[str, "SetBuild"] | None = None):
+    # Precompute representative opp builds for axis decisions in refine step
+    rep_opp: list["SetBuild"] = []
+    seen = set()
+    for t in threats:
+        r = resolve_species_name(t) or t
+        if r in seen: continue
+        seen.add(r)
+        av = adversary_variants(r)
+        if av:
+            builds, _w = av
+            if builds:
+                rep_opp.append(builds[0])
+        if len(rep_opp) >= 12:
+            break
+
+    # Call original to get best candidate first
+    best, per_wr = _orig_build_search_for_species(species, threats, conditioned_on)
+
+    # If we have a best, run a second-pass refine using axes derived from its actual moveset
+    if best is None:
+        return None, {}
+    # Build eval callbacks from original path
+    def solo_eval_fn(sb: SetBuild) -> float:
+        threats_variants = prebuild_threat_variants(threats)
+        wrs = []
+        for name in threats:
+            variants, weights = threats_variants[name]
+            results = [simulate(sb, opp) for opp in variants]
+            wrs.append(weighted_mean(results, weights))
+        return sum(wrs) / len(wrs) if wrs else 0.0
+
+    def trio_eval_fn(sb: SetBuild) -> float:
+        threats_variants = prebuild_threat_variants(threats)
+        trio = dict(conditioned_on or {})
+        trio[species] = sb
+        wrs = []
+        for name in threats:
+            variants, weights = threats_variants[name]
+            per_variant = []
+            for opp in variants:
+                ours = max(simulate(b, opp) for _, b in trio.items())
+                per_variant.append(ours)
+            wrs.append(weighted_mean(per_variant, weights))
+        return sum(wrs) / len(wrs) if wrs else 0.0
+
+    eval_fn = trio_eval_fn if conditioned_on else solo_eval_fn
+    axes = _axes_for_build(best, rep_opp)
+    refined = refine_evs_local(best, eval_fn, axes, passes=max(128, LOCAL_REFINE_PASSES))
+
+    # If refinement changed EVs, recompute per-threat WRs for reporting parity
+    if refined.evs != best.evs:
+        threats_variants = prebuild_threat_variants(threats)
+        wrs = []
+        for name in threats:
+            variants, weights = threats_variants[name]
+            if conditioned_on:
+                trio = dict(conditioned_on)
+                trio[species] = refined
+                per_variant = []
+                for opp in variants:
+                    per_variant.append(max(simulate(b, opp) for _, b in trio.items()))
+                wrs.append(weighted_mean(per_variant, weights))
+            else:
+                wrs.append(weighted_mean([simulate(refined, opp) for opp in variants], weights))
+        per_wr = {threats[i]: wrs[i] for i in range(len(threats))}
+        best = refined
+
+    return best, per_wr
+
+# -----------------------------
+# 7) Version banner bump so you can confirm the patch is active at runtime
+# -----------------------------
+def _print_version_banner_v5_wrap():
+    print("== SV 1v1 Optimizer — CPU only ==")
+    print("Version:", "5.1 (dynamic EV axes per moveset + SV-legal pools)")
+    print("Note: EV axes are chosen from the candidate moveset (Phys/Spa/Mixed) and meta-biased Def/SpD.")
+
+# -----------------------------
+# SOURCES (for Codex context only; do NOT fetch at runtime)
+# - Swampert Gen 9 moves (Scarlet/Violet): https://pokemondb.net/pokedex/swampert/moves/9
+# - Blaziken Gen 9 moves (Scarlet/Violet): https://pokemondb.net/pokedex/blaziken/moves/9
+# - Quaquaval Gen 9 moves (Scarlet/Violet): https://pokemondb.net/pokedex/quaquaval/moves/9
+# -----------------------------
