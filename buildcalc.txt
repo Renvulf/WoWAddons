@@ -120,15 +120,13 @@ def _merge_branch_states(
 #
 # ================================================================================================
 
-# --- REPLACEMENT 1: use the full legal EV grid (Gen 9) ------------------------------------------
-# Delete your current EV_STEPS definition and replace it with the following:
-EV_STEPS = list(range(0, 253, 4))  # 0,4,8,...,252
+# === EV SEARCH — FULL GRID + MATCHUP-AWARE TIERS + PARETO + LOCAL REFINEMENT ===================
+
+EV_STEPS = list(range(0, 253, 4))  # 0..252, legal 4-EV granularity
+EV_TOTAL_MAX = 510  # keep existing constant in sync
 
 
-# --- Helper: fast stat calculators are already present; we reuse calc_stats(...) -----------------
-# We’ll introduce compact helpers for speed tiers and frontier pruning.
-
-
+# Helper: nature multiplier (reuse your NATURES mapping)
 def _nature_mult(nat: str, stat: str) -> float:
     up, down = NATURES.get(nat, (None, None))
     if up == stat:
@@ -138,22 +136,19 @@ def _nature_mult(nat: str, stat: str) -> float:
     return 1.0
 
 
+# Compute effective Speed (used to pick Spe EV breakpoints)
 def _spe_after_mod(
-    spec_name: str,
     base_stats: dict,
     nature: str,
-    evs: dict,
-    ivs: dict,
+    ev: int,
+    iv: int,
     item: str,
     stages: int,
     pq_speed_mult: float,
 ) -> float:
     from math import floor
 
-    base = base_stats["Spe"]
-    iv = ivs.get("Spe", 31)
-    ev = evs.get("Spe", 0)
-    raw = floor(((2 * base + iv + ev // 4) * 100) / 100) + 5
+    raw = floor(((2 * base_stats["Spe"] + iv + ev // 4) * 100) / 100) + 5
     raw = floor(raw * _nature_mult(nature, "Spe"))
     scarf = 1.5 if item == "Choice Scarf" else 1.0
     s = max(-6, min(6, stages))
@@ -161,83 +156,83 @@ def _spe_after_mod(
     return raw * scarf * stage_m * pq_speed_mult
 
 
+# Derive matchup-driven Speed targets for our attacker vs representative opponent builds
 def _speed_targets_for(
-    self_species: str,
-    opp_species: str,
-    self_item: str,
-    self_nature: str,
+    attacker_species: str,
+    attacker_item: str,
+    attacker_nature: str,
+    opp_builds: list["SetBuild"],
 ) -> list[int]:
-    self_spec = SPECIES_DATA[self_species]
-    opp_spec = SPECIES_DATA[opp_species]
-    ivs = {k: 31 for k in ["HP", "Atk", "Def", "SpA", "SpD", "Spe"]}
-    max_spe_evs = {"HP": 0, "Atk": 0, "Def": 0, "SpA": 0, "SpD": 0, "Spe": 252}
-
-    opp_fast_plus = _spe_after_mod(
-        opp_spec.name,
-        opp_spec.base,
-        "Jolly",
-        max_spe_evs,
-        ivs,
-        "",
-        0,
-        1.0,
-    )
-    opp_fast_neut = _spe_after_mod(
-        opp_spec.name,
-        opp_spec.base,
-        "Adamant",
-        max_spe_evs,
-        ivs,
-        "",
-        0,
-        1.0,
-    )
-
-    plus_one = SPECIES_DATA[self_species].ability_hint == "Speed Boost"
-    pq_mults = (
+    iv31 = 31
+    pq_candidates = (
         (1.0, 1.3)
-        if SPECIES_DATA[self_species].ability_hint in ("Protosynthesis", "Quark Drive")
+        if SPECIES_DATA[attacker_species].ability_hint
+        in ("Protosynthesis", "Quark Drive")
         else (1.0,)
     )
+    plus_one_possible = (
+        SPECIES_DATA[attacker_species].ability_hint == "Speed Boost"
+    )
 
+    # Build opponent upper-bound Spe baselines (assume 252 Spe, fast nature vs neutral)
     targets = set()
-    for base in (opp_fast_plus, opp_fast_neut):
-        for margin in (0, 1, 2):
-            targets.add(int(base) + margin)
-    if plus_one:
-        for base in (opp_fast_plus, opp_fast_neut):
-            targets.add(int(base) + 1)
+    for ob in (opp_builds or []):
+        ob_spec = SPECIES_DATA[ob.species]
+        ob_fast = _spe_after_mod(ob_spec.base, "Jolly", 252, iv31, "", 0, 1.0)
+        ob_neut = _spe_after_mod(ob_spec.base, "Adamant", 252, iv31, "", 0, 1.0)
+        for b in (ob_fast, ob_neut):
+            for margin in (0, 1, 2):  # small safety margin
+                targets.add(int(b) + margin)
 
-    for pq in pq_mults:
+    # If we can be +1 Speed (e.g., Speed Boost after T1), include those tiers
+    if plus_one_possible:
+        targets |= {t + 1 for t in list(targets)}
+
+    # Expand by PQ Spe multiplier (Electric Terrain / Sun + Booster Energy choose best stat -> Spe case)
+    for pqm in pq_candidates:
         for t in list(targets):
-            targets.add(int(t * pq))
+            targets.add(int(t * pqm))
 
-    cand_spe_evs = set([0, 252])
-    stages = (0, 1) if plus_one else (0,)
-    for pq in pq_mults:
-        for stg in stages:
+    if not targets:
+        return EV_STEPS.copy()
+
+    # Finally, for our attacker, find minimal Spe EVs to hit each target (also include one tick below)
+    cand_evs = {0, 252}
+    for pqm in pq_candidates:
+        for stg in ((0, 1) if plus_one_possible else (0,)):
             for tgt in sorted(targets):
-                best_ev = None
+                best = None
                 for ev in EV_STEPS:
-                    probe = {"HP": 0, "Atk": 0, "Def": 0, "SpA": 0, "SpD": 0, "Spe": ev}
                     eff = _spe_after_mod(
-                        self_spec.name,
-                        self_spec.base,
-                        self_nature,
-                        probe,
-                        ivs,
-                        self_item,
+                        SPECIES_DATA[attacker_species].base,
+                        attacker_nature,
+                        ev,
+                        iv31,
+                        attacker_item,
                         stg,
-                        pq,
+                        pqm,
                     )
                     if eff >= tgt:
-                        best_ev = ev
+                        best = ev
                         break
-                if best_ev is not None:
-                    cand_spe_evs.add(best_ev)
-                    if best_ev >= 4:
-                        cand_spe_evs.add(best_ev - 4)
-    return sorted(cand_spe_evs)
+                if best is not None:
+                    cand_evs.add(best)
+                    if best >= 4:
+                        cand_evs.add(best - 4)
+    return sorted(cand_evs)
+
+
+# Pareto-proxy over (Atk, SpA, HP×Def, HP×SpD, Spe) — fast dominance filter
+def _proxy_tuple(spec: "Species", nature: str, evs: dict[str, int]) -> tuple[int, int, int, int, int]:
+    ivs = {"HP": 31, "Atk": 31, "Def": 31, "SpA": 31, "SpD": 31, "Spe": 31}
+    st = calc_stats(spec, nature, evs, ivs)
+    return (
+        st["Atk"],
+        st["SpA"],
+        st["HP"] * st["Def"],
+        st["HP"] * st["SpD"],
+        st["Spe"],
+    )
 
 
 def iterate_evs_axes_matchup_aware(
@@ -247,83 +242,67 @@ def iterate_evs_axes_matchup_aware(
     item: str,
     opp_builds: list["SetBuild"],
 ) -> list[dict[str, int]]:
-    spe_values = EV_STEPS
-    if "Spe" in axes:
-        cand = set()
-        sample = opp_builds[:8] if opp_builds else []
-        for ob in sample:
-            for v in _speed_targets_for(species, ob.species, item, nature):
-                cand.add(v)
-        spe_values = sorted(cand) if cand else EV_STEPS
-
-    order = [a for a in axes if a != "Spe"] + (["Spe"] if "Spe" in axes else [])
-    grids = [spe_values if a == "Spe" else EV_STEPS for a in order]
+    spec = SPECIES_DATA[species]
+    # Candidate Spe EVs driven by matchup; other axes use full legal grid
+    spe_values = (
+        _speed_targets_for(species, item, nature, opp_builds)
+        if "Spe" in axes
+        else []
+    )
+    grid_per_axis = []
+    for a in axes:
+        grid_per_axis.append(spe_values if a == "Spe" and spe_values else EV_STEPS)
 
     def _valid(e: dict[str, int]) -> bool:
-        if any(v % 4 for v in e.values()):
-            return False
-        if any(v > 252 for v in e.values()):
+        if any((v % 4) != 0 or v > 252 for v in e.values()):
             return False
         return sum(e.values()) <= EV_TOTAL_MAX
 
-    def _proxy(e: dict[str, int]) -> tuple[int, int, int, int, int]:
-        st = calc_stats(
-            SPECIES_DATA[species],
-            nature,
-            e,
-            {k: 31 for k in ["HP", "Atk", "Def", "SpA", "SpD", "Spe"]},
-        )
-        atk_like = st["Atk"]
-        spa_like = st["SpA"]
-        physbulk = st["HP"] * st["Def"]
-        spclbulk = st["HP"] * st["SpD"]
-        speed = st["Spe"]
-        return (atk_like, spa_like, physbulk, spclbulk, speed)
-
     pareto: list[tuple[tuple[int, int, int, int, int], int, dict[str, int]]] = []
-
     import itertools
 
-    for vals in itertools.product(*grids):
-        e = {"HP": 0, "Atk": 0, "Def": 0, "SpA": 0, "SpD": 0, "Spe": 0}
-        for idx, ax in enumerate(order):
-            e[ax] = vals[idx]
+    for vals in itertools.product(*grid_per_axis):
+        e = {ax: vals[i] for i, ax in enumerate(axes)}
+        # fill missing axes (if any) with 0
+        for k in ("HP", "Atk", "Def", "SpA", "SpD", "Spe"):
+            e.setdefault(k, 0)
         if not _valid(e):
             continue
-        key = _proxy(e)
+        key = _proxy_tuple(spec, nature, e)
+
         dominated = False
-        remove_idx = []
+        to_remove = []
         for idx, (ok, _, oe) in enumerate(pareto):
             ge_all = all(k >= o for k, o in zip(key, ok))
             gt_any = any(k > o for k, o in zip(key, ok))
             le_all = all(k <= o for k, o in zip(key, ok))
             lt_any = any(k < o for k, o in zip(key, ok))
-            if ge_all and gt_any:
-                remove_idx.append(idx)
-            elif le_all and lt_any:
+            if ge_all and gt_any:  # new dominates old
+                to_remove.append(idx)
+            elif le_all and lt_any:  # new is dominated
                 dominated = True
                 break
         if dominated:
             continue
-        for j in reversed(remove_idx):
+        for j in reversed(to_remove):
             pareto.pop(j)
         pareto.append((key, sum(e.values()), e))
-
+    # Return only the EV dicts
     return [e for _, _, e in pareto]
 
 
+# Local exact improvement by swapping 4 EVs among selected axes, scored by the TRUE simulator
 def refine_evs_local(
     base: "SetBuild",
     eval_fn: Callable[["SetBuild"], float],
-    axes: Tuple[str, ...],
+    axes: tuple[str, ...],
     passes: int = 128,
 ) -> "SetBuild":
     best = copy.deepcopy(base)
     best_score = eval_fn(best)
-    tabu: set[Tuple[int, int, int, int, int, int]] = set()
-    step = 4
+    tabu: set[tuple[int, int, int, int, int, int]] = set()
 
-    def _pack(ev: Dict[str, int]) -> Tuple[int, int, int, int, int, int]:
+    def pack(ev: dict[str, int]) -> tuple[int, int, int, int, int, int]:
         return (
             ev["HP"],
             ev["Atk"],
@@ -333,11 +312,11 @@ def refine_evs_local(
             ev["Spe"],
         )
 
+    step = 4
     for _ in range(passes):
         improved = False
         cur = best.evs
-        cur_key = _pack(cur)
-        tabu.add(cur_key)
+        tabu.add(pack(cur))
 
         for i in range(len(axes)):
             for j in range(len(axes)):
@@ -351,16 +330,15 @@ def refine_evs_local(
                 cand_evs[b] -= step
                 if sum(cand_evs.values()) > EV_TOTAL_MAX:
                     continue
-                key = _pack(cand_evs)
+                key = pack(cand_evs)
                 if key in tabu:
                     continue
+
                 cand = copy.deepcopy(best)
                 cand.evs = cand_evs
                 score = eval_fn(cand)
                 if score > best_score + 1e-9:
-                    best = cand
-                    best_score = score
-                    improved = True
+                    best, best_score, improved = cand, score, True
                     break
             if improved:
                 break
@@ -1566,7 +1544,6 @@ def damage(
 # =========================
 #  SEARCH / EVAL KNOBS
 # =========================
-EV_TOTAL_MAX = 510
 LOCAL_REFINE_PASSES = 32  # keep modest for speed
 SEARCH_TURNS = 3  # official 1v1 window
 ALPHA_INIT = -1e9
