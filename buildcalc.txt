@@ -1657,28 +1657,30 @@ def _ensure_move_full(
         )
 
 
-# Shared utility / status
 _ensure_move_full("Protect", "Normal", "Status", 0, 1.0)
 _ensure_move_full("Detect", "Normal", "Status", 0, 1.0)
 _ensure_move_full("Swords Dance", "Normal", "Status", 0, 1.0)
+_ensure_move_full("Bulk Up", "Fighting", "Status", 0, 1.0)
 _ensure_move_full("Encore", "Normal", "Status", 0, 1.0)
 _ensure_move_full("Taunt", "Dark", "Status", 0, 1.0)
 _ensure_move_full("Counter", "Fighting", "Physical", 0, 1.0, priority=-5)
-_ensure_move_full("Bulk Up", "Fighting", "Status", 0, 1.0)
-_ensure_move_full("Yawn", "Normal", "Status", 0, 1.0)
 _ensure_move_full("Endeavor", "Normal", "Physical", 1, 1.0)
+_ensure_move_full("Yawn", "Normal", "Status", 0, 1.0)
+_ensure_move_full("Curse", "Ghost", "Status", 0, 1.0)
 
-# Priority / staples already covered elsewhere, but ensure here too
 _ensure_move_full("Aqua Jet", "Water", "Physical", 40, 1.0, contact=True, priority=1)
-_ensure_move_full("Extreme Speed", "Normal", "Physical", 80, 1.0, contact=True, priority=2)
 _ensure_move_full("Bullet Punch", "Steel", "Physical", 40, 1.0, contact=True, priority=1)
+_ensure_move_full("Mach Punch", "Fighting", "Physical", 40, 1.0, contact=True, priority=1)
+_ensure_move_full("Extreme Speed", "Normal", "Physical", 80, 1.0, contact=True, priority=2)
+_ensure_move_full("Sucker Punch", "Dark", "Physical", 70, 1.0, contact=True, priority=1)
+_ensure_move_full("Ice Shard", "Ice", "Physical", 40, 1.0, priority=1)
 
-# Water / Ground / Ice / Rock family (Swampert + Quaquaval)
-_ensure_move_full("Waterfall", "Water", "Physical", 80, 1.0, contact=True)
 _ensure_move_full("Liquidation", "Water", "Physical", 85, 1.0, contact=True)
+_ensure_move_full("Waterfall", "Water", "Physical", 80, 1.0, contact=True)
 _ensure_move_full("Aqua Tail", "Water", "Physical", 90, 0.9, contact=True)
-_ensure_move_full("Flip Turn", "Water", "Physical", 60, 1.0, contact=True)
 _ensure_move_full("Aqua Cutter", "Water", "Physical", 70, 1.0, contact=True)
+_ensure_move_full("Flip Turn", "Water", "Physical", 60, 1.0, contact=True)
+_ensure_move_full("Aqua Step", "Water", "Physical", 80, 1.0, contact=True)
 
 _ensure_move_full("Earthquake", "Ground", "Physical", 100, 1.0)
 _ensure_move_full("High Horsepower", "Ground", "Physical", 95, 0.95, contact=True)
@@ -1694,10 +1696,10 @@ _ensure_move_full("Rock Slide", "Rock", "Physical", 75, 0.9)
 _ensure_move_full("Rock Tomb", "Rock", "Physical", 60, 0.95)
 _ensure_move_full("Stone Edge", "Rock", "Physical", 100, 0.8)
 
-# Fighting / Fire / Flying / Dark / Electric / Poison (Blaziken + Quaquaval)
 _ensure_move_full("Close Combat", "Fighting", "Physical", 120, 1.0, contact=True)
 _ensure_move_full("Brick Break", "Fighting", "Physical", 75, 1.0, contact=True)
 _ensure_move_full("Low Kick", "Fighting", "Physical", 60, 1.0, contact=True)
+_ensure_move_full("Low Sweep", "Fighting", "Physical", 65, 1.0, contact=True)
 _ensure_move_full("Drain Punch", "Fighting", "Physical", 75, 1.0, contact=True, is_punch=True)
 
 _ensure_move_full("Flare Blitz", "Fire", "Physical", 120, 1.0, contact=True)
@@ -1708,17 +1710,14 @@ _ensure_move_full("Brave Bird", "Flying", "Physical", 120, 1.0, contact=True)
 _ensure_move_full("Acrobatics", "Flying", "Physical", 55, 1.0, contact=True)
 
 _ensure_move_full("Knock Off", "Dark", "Physical", 65, 1.0, contact=True)
-_ensure_move_full("Sucker Punch", "Dark", "Physical", 70, 1.0, contact=True, priority=1)
 
 _ensure_move_full("Thunder Punch", "Electric", "Physical", 75, 1.0, contact=True, is_punch=True)
 _ensure_move_full("Wild Charge", "Electric", "Physical", 90, 1.0, contact=True)
+
 _ensure_move_full("Poison Jab", "Poison", "Physical", 80, 1.0, contact=True)
 _ensure_move_full("Shadow Claw", "Ghost", "Physical", 70, 1.0, contact=True)
 
-# A few utility/edge picks that matter in 1v1
-_ensure_move_full("Aqua Step", "Water", "Physical", 80, 1.0, contact=True)
 _ensure_move_full("U-turn", "Bug", "Physical", 70, 1.0, contact=True)
-_ensure_move_full("Roost", "Flying", "Status", 0, 1.0)
 
 
 LEGAL_MOVES_SWAMPERT = [
@@ -1733,18 +1732,20 @@ LEGAL_MOVES_SWAMPERT = [
     "High Horsepower",
     "Stomping Tantrum",
     "Bulldoze",
-    # Coverage
+    # Coverage (Ice/Rock)
     "Ice Punch",
     "Ice Fang",
     "Avalanche",
     "Rock Slide",
     "Stone Edge",
     "Rock Tomb",
-    # Utility / tech
-    "Protect",
+    # Niche/tech
     "Counter",
-    "Yawn",
     "Endeavor",
+    "Protect",
+    "Detect",
+    "Yawn",
+    "Curse",
 ]
 
 LEGAL_MOVES_BLAZIKEN = [
@@ -1756,8 +1757,9 @@ LEGAL_MOVES_BLAZIKEN = [
     "Close Combat",
     "Brick Break",
     "Low Kick",
+    "Low Sweep",
     "Drain Punch",
-    # Coverage / priority
+    # Coverage / priority / tech
     "Brave Bird",
     "Acrobatics",
     "Rock Slide",
@@ -1768,14 +1770,16 @@ LEGAL_MOVES_BLAZIKEN = [
     "Thunder Punch",
     "Poison Jab",
     "Shadow Claw",
-    # Utility
+    "Bullet Punch",
+    "Mach Punch",
+    # Setup / utility
+    "Swords Dance",
+    "Bulk Up",
     "Protect",
     "Detect",
-    "Swords Dance",
     "Counter",
     "Encore",
     "Taunt",
-    "Bulk Up",
 ]
 
 LEGAL_MOVES_QUAQUAVAL = [
@@ -1791,20 +1795,21 @@ LEGAL_MOVES_QUAQUAVAL = [
     "Drain Punch",
     "Brick Break",
     "Low Kick",
-    # Coverage / tech
+    "Low Sweep",
+    # Coverage / pivot
     "Ice Spinner",
     "Avalanche",
     "Brave Bird",
     "Acrobatics",
     "Knock Off",
     "U-turn",
-    # Utility
+    # Setup / utility
     "Swords Dance",
+    "Bulk Up",
     "Protect",
     "Detect",
     "Encore",
     "Taunt",
-    "Bulk Up",
 ]
 
 LEGAL_MOVES = {
