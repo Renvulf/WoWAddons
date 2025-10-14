@@ -50,6 +50,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
+from math import floor
+
 # Canonical Gen 3+ damage roll distribution: uniform over 16 integers (85..100)
 ROLL_TABLE: tuple[float, ...] = tuple(r / 100.0 for r in range(85, 101))  # 0.85..1.00
 ROLL_PROB: float = 1.0 / 16.0
@@ -146,8 +148,6 @@ def _spe_after_mod(
     stages: int,
     pq_speed_mult: float,
 ) -> float:
-    from math import floor
-
     raw = floor(((2 * base_stats["Spe"] + iv + ev // 4) * 100) / 100) + 5
     raw = floor(raw * _nature_mult(nature, "Spe"))
     scarf = 1.5 if item == "Choice Scarf" else 1.0
@@ -156,39 +156,31 @@ def _spe_after_mod(
     return raw * scarf * stage_m * pq_speed_mult
 
 
-# Derive matchup-driven Speed targets for our attacker vs representative opponent builds
 def _speed_targets_for(
     attacker_species: str,
     attacker_item: str,
     attacker_nature: str,
     opp_builds: list["SetBuild"],
 ) -> list[int]:
-    iv31 = 31
-    pq_candidates = (
-        (1.0, 1.3)
-        if SPECIES_DATA[attacker_species].ability_hint
-        in ("Protosynthesis", "Quark Drive")
-        else (1.0,)
-    )
-    plus_one_possible = (
-        SPECIES_DATA[attacker_species].ability_hint == "Speed Boost"
-    )
+    """Derive realistic Speed targets for the attacker against threat representatives."""
 
-    # Build opponent upper-bound Spe baselines (assume 252 Spe, fast nature vs neutral)
+    iv31 = 31
+    ability = SPECIES_DATA[attacker_species].ability_hint
+    pq_candidates = (1.0, 1.3) if ability in ("Protosynthesis", "Quark Drive") else (1.0,)
+    plus_one_possible = ability == "Speed Boost" or attacker_species == "Quaquaval"
+
     targets = set()
     for ob in (opp_builds or []):
         ob_spec = SPECIES_DATA[ob.species]
         ob_fast = _spe_after_mod(ob_spec.base, "Jolly", 252, iv31, "", 0, 1.0)
         ob_neut = _spe_after_mod(ob_spec.base, "Adamant", 252, iv31, "", 0, 1.0)
         for b in (ob_fast, ob_neut):
-            for margin in (0, 1, 2):  # small safety margin
+            for margin in (0, 1, 2):
                 targets.add(int(b) + margin)
 
-    # If we can be +1 Speed (e.g., Speed Boost after T1), include those tiers
     if plus_one_possible:
         targets |= {t + 1 for t in list(targets)}
 
-    # Expand by PQ Spe multiplier (Electric Terrain / Sun + Booster Energy choose best stat -> Spe case)
     for pqm in pq_candidates:
         for t in list(targets):
             targets.add(int(t * pqm))
@@ -196,8 +188,7 @@ def _speed_targets_for(
     if not targets:
         return EV_STEPS.copy()
 
-    # Finally, for our attacker, find minimal Spe EVs to hit each target (also include one tick below)
-    cand_evs = {0, 252}
+    cand = {0, 252}
     for pqm in pq_candidates:
         for stg in ((0, 1) if plus_one_possible else (0,)):
             for tgt in sorted(targets):
@@ -216,10 +207,10 @@ def _speed_targets_for(
                         best = ev
                         break
                 if best is not None:
-                    cand_evs.add(best)
+                    cand.add(best)
                     if best >= 4:
-                        cand_evs.add(best - 4)
-    return sorted(cand_evs)
+                        cand.add(best - 4)
+    return sorted(cand)
 
 
 # Pareto-proxy over (Atk, SpA, HP×Def, HP×SpD, Spe) — fast dominance filter
@@ -242,28 +233,18 @@ def iterate_evs_axes_matchup_aware(
     item: str,
     opp_builds: list["SetBuild"],
 ) -> list[dict[str, int]]:
+    """Enumerate EVs on the legal lattice with matchup-aware Speed pruning and Pareto filtering."""
+
     spec = SPECIES_DATA[species]
-    # Candidate Spe EVs driven by matchup; other axes use full legal grid
-    spe_values = (
-        _speed_targets_for(species, item, nature, opp_builds)
-        if "Spe" in axes
-        else []
-    )
-    grid_per_axis = []
-    for a in axes:
-        grid_per_axis.append(spe_values if a == "Spe" and spe_values else EV_STEPS)
+    spe_values = _speed_targets_for(species, item, nature, opp_builds) if "Spe" in axes else []
+    grid_per_axis = [spe_values if (a == "Spe" and spe_values) else EV_STEPS for a in axes]
 
     def _valid(e: dict[str, int]) -> bool:
-        if any((v % 4) != 0 or v > 252 for v in e.values()):
-            return False
-        return sum(e.values()) <= EV_TOTAL_MAX
+        return sum(e.values()) <= EV_TOTAL_MAX and all((v % 4) == 0 and v <= 252 for v in e.values())
 
     pareto: list[tuple[tuple[int, int, int, int, int], int, dict[str, int]]] = []
-    import itertools
-
     for vals in itertools.product(*grid_per_axis):
         e = {ax: vals[i] for i, ax in enumerate(axes)}
-        # fill missing axes (if any) with 0
         for k in ("HP", "Atk", "Def", "SpA", "SpD", "Spe"):
             e.setdefault(k, 0)
         if not _valid(e):
@@ -271,15 +252,15 @@ def iterate_evs_axes_matchup_aware(
         key = _proxy_tuple(spec, nature, e)
 
         dominated = False
-        to_remove = []
-        for idx, (ok, _, oe) in enumerate(pareto):
+        to_remove: list[int] = []
+        for idx, (ok, _, _) in enumerate(pareto):
             ge_all = all(k >= o for k, o in zip(key, ok))
             gt_any = any(k > o for k, o in zip(key, ok))
             le_all = all(k <= o for k, o in zip(key, ok))
             lt_any = any(k < o for k, o in zip(key, ok))
-            if ge_all and gt_any:  # new dominates old
+            if ge_all and gt_any:
                 to_remove.append(idx)
-            elif le_all and lt_any:  # new is dominated
+            elif le_all and lt_any:
                 dominated = True
                 break
         if dominated:
@@ -287,7 +268,6 @@ def iterate_evs_axes_matchup_aware(
         for j in reversed(to_remove):
             pareto.pop(j)
         pareto.append((key, sum(e.values()), e))
-    # Return only the EV dicts
     return [e for _, _, e in pareto]
 
 
@@ -298,6 +278,8 @@ def refine_evs_local(
     axes: tuple[str, ...],
     passes: int = 128,
 ) -> "SetBuild":
+    """Hill-climb by moving 4 EVs among axes using the true simulator until no improvement."""
+
     best = copy.deepcopy(base)
     best_score = eval_fn(best)
     tabu: set[tuple[int, int, int, int, int, int]] = set()
@@ -337,7 +319,7 @@ def refine_evs_local(
                 cand = copy.deepcopy(best)
                 cand.evs = cand_evs
                 score = eval_fn(cand)
-                if score > best_score + 1e-9:
+                if score > best_score + 1e-12:
                     best, best_score, improved = cand, score, True
                     break
             if improved:
@@ -348,17 +330,15 @@ def refine_evs_local(
 
 
 def enumerate_candidates_for_species(species: str) -> list["SetBuild"]:
+    """Enumerate item/tera/nature/move candidates with matchup-aware EV generation."""
+
     spec = SPECIES_DATA[species]
     items = ITEM_CANDIDATES[species]
     teras = TERA_POOLS[species]
     pool = LEGAL_MOVES[species]
     ms_all = movesets_from_pool(pool, FOUR_PHYSICAL_ONLY[species], species)
 
-    if spec.base["Atk"] >= spec.base["SpA"]:
-        ev_axes = ("HP", "Atk", "Def", "Spe")
-    else:
-        ev_axes = ("HP", "SpA", "SpD", "Spe")
-
+    ev_axes = ("HP", "Atk", "Def", "Spe") if spec.base["Atk"] >= spec.base["SpA"] else ("HP", "SpA", "SpD", "Spe")
     ivs31 = {k: 31 for k in ["HP", "Atk", "Def", "SpA", "SpD", "Spe"]}
 
     rep_opp: list["SetBuild"] = []
@@ -379,15 +359,14 @@ def enumerate_candidates_for_species(species: str) -> list["SetBuild"]:
     cands: list["SetBuild"] = []
     for item in items:
         for tera in teras:
-            natures = (
-                ["Jolly", "Adamant"]
-                if species != "Swampert"
-                else ["Adamant", "Careful", "Impish"]
-            )
+            if species == "Swampert":
+                natures = ["Adamant", "Careful", "Impish"]
+            elif species == "Blaziken":
+                natures = ["Jolly", "Adamant"]
+            else:
+                natures = ["Jolly", "Adamant"]
             for nature in natures:
-                ev_pareto = iterate_evs_axes_matchup_aware(
-                    ev_axes, species, nature, item, rep_opp
-                )
+                ev_pareto = iterate_evs_axes_matchup_aware(ev_axes, species, nature, item, rep_opp)
                 for evs in ev_pareto:
                     if not valid_evs(evs):
                         continue
