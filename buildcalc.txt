@@ -2671,8 +2671,9 @@ def canonical_name(name: str) -> Optional[str]:
 
 def main():
     start = time.time()
-    print("== SV 1v1 Optimizer — CPU only ==")
-    print("Version:", "3.0.1")
+    if not globals().get("_svi_banner_override", False):
+        print("== SV 1v1 Optimizer — CPU only ==")
+        print("Version:", "3.0.1")
     print("Threats listed:", len(THREAT_LIST))
 
     # Dedup threats (avoid overweighting duplicates) and canonicalize names
@@ -2731,6 +2732,344 @@ def main():
     print(
         "- SEARCH_TURNS is set to 3 to match official 1v1 sudden-death; keep it at 3 for fidelity."
     )
+
+
+# === SV 1v1 OPTIMIZER — PATCH 3.1.0 ===
+# Purpose: remove physical-only bias, use legality-correct movepools, add missing meta moves,
+#          and (CRITICAL) choose EV axes dynamically per *moveset* (not species base stats).
+# Sources for movepools (Gen 9 / SV):
+#   - Swampert moves (SV): https://pokemondb.net/pokedex/swampert/moves/9
+#   - Blaziken moves (SV): https://pokemondb.net/pokedex/blaziken/moves/9
+#   - Quaquaval moves (SV): https://pokemondb.net/pokedex/quaquaval/moves/9
+# Notes:
+#   - We only include moves that actually matter in 1v1 (damaging STAB, key coverages, Protect, SD, Counter where legal).
+#   - We keep your no-RNG damage roll approximation and 3-turn sudden-death fidelity.
+#   - This patch appends/overrides — paste near the *end* of the file (after all definitions). Later defs win in Python.
+
+# ------------------------------
+# 1) Add/ensure missing moves in MOVE_DB (+ recoil table)
+# ------------------------------
+if "High Jump Kick" not in MOVE_DB:
+    MOVE_DB["High Jump Kick"] = Move("High Jump Kick", "Fighting", "Physical", 130, 0.9, contact=True)
+if "Aqua Jet" not in MOVE_DB:
+    MOVE_DB["Aqua Jet"] = Move("Aqua Jet", "Water", "Physical", 40, 1.0, contact=True, priority=1)
+if "Wave Crash" not in MOVE_DB:
+    MOVE_DB["Wave Crash"] = Move("Wave Crash", "Water", "Physical", 120, 1.0, contact=True)
+if "Hammer Arm" not in MOVE_DB:
+    MOVE_DB["Hammer Arm"] = Move("Hammer Arm", "Fighting", "Physical", 100, 0.9, contact=True)
+if "Superpower" not in MOVE_DB:
+    MOVE_DB["Superpower"] = Move("Superpower", "Fighting", "Physical", 120, 1.0, contact=True)
+if "Body Press" not in MOVE_DB:
+    MOVE_DB["Body Press"] = Move("Body Press", "Fighting", "Physical", 80, 1.0, contact=True)
+if "Earth Power" not in MOVE_DB:
+    MOVE_DB["Earth Power"] = Move("Earth Power", "Ground", "Special", 90, 1.0)
+if "Surf" not in MOVE_DB:
+    MOVE_DB["Surf"] = Move("Surf", "Water", "Special", 90, 1.0)
+if "Waterfall" not in MOVE_DB:
+    MOVE_DB["Waterfall"] = Move("Waterfall", "Water", "Physical", 80, 1.0, contact=True)
+if "Aqua Cutter" not in MOVE_DB:
+    MOVE_DB["Aqua Cutter"] = Move("Aqua Cutter", "Water", "Physical", 70, 1.0, contact=True)
+
+# Recoil table updates
+RECOIL_RATIO["Wave Crash"] = 1 / 3  # same recoil model as Brave Bird/Flare Blitz class
+
+# ------------------------------
+# 2) Critical mechanics patch — High Jump Kick crash on MISS
+# ------------------------------
+# Override branch_on_move to inject crash damage only for the MISS branch of High Jump Kick
+_old_branch_on_move = branch_on_move
+
+
+def branch_on_move(
+    build_att: SetBuild,
+    state_att: BattleState,
+    stats_att: Dict[str, int],
+    build_def: SetBuild,
+    state_def: BattleState,
+    stats_def: Dict[str, int],
+    weather,
+    terrain,
+    mv: Move,
+    tera: bool,
+    ttype: Optional[str],
+    opp_selected_move: Optional[Move],
+) -> List[Tuple[float, BattleState, BattleState]]:
+    # First-turn-only gating, Status, Counter/Mirror Coat, Protect handling as before
+    out = []
+
+    if mv.first_turn_only and (state_att.turns_elapsed > 0):
+        sA = copy.deepcopy(state_att)
+        sD = copy.deepcopy(state_def)
+        sD.ability_active["last_received"] = {"category": mv.category, "damage": 0}
+        out.append((1.0, sA, sD))
+        return out
+
+    if mv.category == "Status":
+        sA = copy.deepcopy(state_att)
+        sD = copy.deepcopy(state_def)
+        if tera and ttype:
+            sA.tera_used = True
+            sA.tera_type = ttype
+        do_status_action(mv, sA)
+        out.append((1.0, sA, sD))
+        return out
+
+    if mv.is_counter or mv.is_mirror_coat:
+        sA = copy.deepcopy(state_att)
+        sD = copy.deepcopy(state_def)
+        if tera and ttype:
+            sA.tera_used = True
+            sA.tera_type = ttype
+        apply_counter_like(mv, sA, sD, build_def)
+        out.append((1.0, sA, sD))
+        return out
+
+    if state_def.ability_active.get("Protect", False):
+        sA = copy.deepcopy(state_att)
+        sD = copy.deepcopy(state_def)
+        if tera and ttype:
+            sA.tera_used = True
+            sA.tera_type = ttype
+        sD.ability_active["last_received"] = {"category": mv.category, "damage": 0}
+        out.append((1.0, sA, sD))
+        return out
+
+    # Accuracy split
+    acc = max(0.0, min(1.0, mv.accuracy))
+    if acc < 1.0:
+        # MISS branch
+        sA_m = copy.deepcopy(state_att)
+        sD_m = copy.deepcopy(state_def)
+        if tera and ttype:
+            sA_m.tera_used = True
+            sA_m.tera_type = ttype
+        sD_m.ability_active["last_received"] = {"category": mv.category, "damage": 0}
+
+        # High Jump Kick: crash for 50% of max HP on miss
+        if mv.name == "High Jump Kick":
+            crash = max(1, sA_m.max_hp // 2)
+            sA_m.hp = max(0, sA_m.hp - crash)
+            try_sitrus(sA_m, build_att)  # crash can trigger Sitrus, then Leftovers at end of turn elsewhere
+
+        out.append(((1.0 - acc), sA_m, sD_m))
+
+    # HIT branch — delegate to original logic to keep correctness
+    sA_h = copy.deepcopy(state_att)
+    sD_h = copy.deepcopy(state_def)
+    dmg = perform_damage_hit(
+        build_att,
+        build_def,
+        sA_h,
+        sD_h,
+        mv,
+        tera,
+        ttype,
+        weather,
+        terrain,
+        stats_att,
+        stats_def,
+        opp_selected_move,
+    )
+    out.append((acc, sA_h, sD_h))
+    return out
+
+
+# ------------------------------
+# 3) Legality-correct movepools (SV) for the trio
+# ------------------------------
+LEGAL_MOVES = {
+    # Swampert — SV learnset (damaging + core utility)
+    "Swampert": [
+        # STAB Water
+        "Liquidation",
+        "Waterfall",
+        "Surf",
+        # STAB Ground
+        "Earthquake",
+        "Earth Power",
+        "Stomping Tantrum",
+        "Bulldoze",
+        # Fighting / Body-based
+        "Hammer Arm",
+        "Superpower",
+        "Body Press",
+        # Ice coverage
+        "Ice Punch",
+        "Ice Beam",
+        "Avalanche",
+        "Ice Spinner",
+        # Rock coverage
+        "Stone Edge",
+        "Rock Slide",
+        "Rock Tomb",
+        # Utility / setup
+        "Protect",
+    ],
+    # Blaziken — SV learnset (damaging + core utility)
+    "Blaziken": [
+        # Fire STAB
+        "Flare Blitz",
+        "Blaze Kick",
+        "Fire Punch",
+        # Fighting STAB
+        "High Jump Kick",
+        "Close Combat",
+        "Brick Break",
+        # Coverage
+        "Thunder Punch",
+        "Earthquake",
+        "Rock Slide",
+        "Stone Edge",
+        "Shadow Claw",
+        "Knock Off",
+        "Brave Bird",
+        "Aerial Ace",
+        "U-turn",
+        # Utility / setup
+        "Swords Dance",
+        "Protect",
+    ],
+    # Quaquaval — SV learnset (damaging + core utility)
+    "Quaquaval": [
+        # Water STAB
+        "Aqua Step",
+        "Liquidation",
+        "Waterfall",
+        "Aqua Cutter",
+        "Wave Crash",
+        "Surf",
+        "Aqua Jet",
+        # Fighting STAB
+        "Close Combat",
+        "Brick Break",
+        # Coverage
+        "Ice Spinner",
+        "Brave Bird",
+        "Acrobatics",
+        "Aerial Ace",
+        "Knock Off",
+        "U-turn",
+        # Utility / setup
+        "Swords Dance",
+        "Protect",
+    ],
+}
+
+# Assign MOVE_POOLS directly from LEGAL_MOVES for the trio
+MOVE_POOLS = {k: list(LEGAL_MOVES[k]) for k in ["Swampert", "Blaziken", "Quaquaval"]}
+
+# IMPORTANT: allow special/mixed sets — remove physical-only restriction
+FOUR_PHYSICAL_ONLY = {"Swampert": False, "Blaziken": False, "Quaquaval": False}
+
+
+def assert_legal_moves(species: str, moves: List[str]) -> None:
+    legal = set(LEGAL_MOVES.get(species, []))
+    bad = [m for m in moves if m not in legal]
+    if bad:
+        raise ValueError(f"Illegal moves for {species}: {bad}")
+
+
+# ------------------------------
+# 4) EV axes must depend on the MOVES used (CRITICAL FIX)
+# ------------------------------
+def _is_damaging(mname: str) -> bool:
+    return MOVE_DB[mname].category in ("Physical", "Special")
+
+
+def _moveset_profile(moves: List[str]) -> str:
+    cats = {MOVE_DB[m].category for m in moves if _is_damaging(m)}
+    if not cats:
+        return "none"
+    if cats == {"Physical"}:
+        return "phys"
+    if cats == {"Special"}:
+        return "spec"
+    return "mixed"
+
+
+def _ev_axes_for_moveset(moves: List[str]) -> Tuple[str, ...]:
+    prof = _moveset_profile(moves)
+    if prof == "phys":
+        return ("HP", "Atk", "Def", "Spe")
+    if prof == "spec":
+        return ("HP", "SpA", "SpD", "Spe")
+    return ("HP", "Atk", "SpA", "Spe")
+
+
+def movesets_from_pool(pool: List[str], four_physical_only: bool) -> List[List[str]]:
+    # Override: ignore four_physical_only; we already globally set it False above.
+    base = list(pool)
+    out = []
+    for combo in itertools.combinations(base, 4):
+        if not any(MOVE_DB[n].category != "Status" for n in combo):
+            continue
+        out.append(list(combo))
+    return out
+
+
+def enumerate_candidates_for_species(species: str) -> List[SetBuild]:
+    spec = SPECIES_DATA[species]
+    items = ITEM_CANDIDATES[species]
+    teras = TERA_POOLS[species]
+    movesets = movesets_from_pool(MOVE_POOLS[species], False)
+
+    def sample_movesets(ms: List[List[str]]) -> List[List[str]]:
+        return ms[:16] + ms[16:64:2]
+
+    ivs = {k: 31 for k in ["HP", "Atk", "Def", "SpA", "SpD", "Spe"]}
+
+    nature_pool = (
+        ["Jolly", "Adamant"] if species != "Swampert" else ["Adamant", "Careful", "Impish"]
+    ) + (["Modest", "Timid"] if species in ("Swampert",) else [])
+
+    cands: List[SetBuild] = []
+    for item in items:
+        for tera in teras:
+            for nature in nature_pool:
+                for mv in sample_movesets(movesets):
+                    if not filter_moveset_by_item(item, mv):
+                        continue
+                    assert_legal_moves(species, mv)
+                    axes = _ev_axes_for_moveset(mv)
+                    ev_packs = iterate_evs_axes(axes)
+                    for evs in ev_packs:
+                        cands.append(
+                            SetBuild(
+                                species=species,
+                                item=item,
+                                ability=spec.ability_hint,
+                                tera_type=tera,
+                                nature=nature,
+                                evs=evs,
+                                ivs=ivs,
+                                moves=mv,
+                            )
+                        )
+    return cands
+
+
+# ------------------------------
+# 6) Bump version label for clarity at runtime
+# ------------------------------
+def _print_version_banner():
+    print("== SV 1v1 Optimizer — CPU only ==")
+    print("Version:", "3.1.0")
+    print("Note: 3.1.0 enables legality-correct movepools and dynamic EV axes per moveset (phys/spec/mixed).")
+
+
+_old_main = main
+
+
+def main():
+    start = time.time()
+    _print_version_banner()
+    globals()["_svi_banner_override"] = True
+    try:
+        return _old_main()
+    finally:
+        globals().pop("_svi_banner_override", None)
+
+
 
 
 if __name__ == "__main__":
