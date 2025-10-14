@@ -800,6 +800,164 @@ class BattleState:
     turns_elapsed: int = 0  # full turns completed
 
 
+# ------------------------------------------------------
+# 0) ENSURE MISSING MOVES (used in your THREAT_PRESETS)
+# ------------------------------------------------------
+def _ensure_move_basic(name, mtype, cat, power, acc=1.0, *, contact=False):
+    if name not in MOVE_DB:
+        MOVE_DB[name] = Move(name, mtype, cat, power, acc, contact=contact)
+
+
+# Common special/coverage used in presets
+_ensure_move_basic("Earth Power", "Ground", "Special", 90, 1.0, contact=False)
+_ensure_move_basic("Sludge Bomb", "Poison", "Special", 90, 1.0, contact=False)
+_ensure_move_basic("Surf", "Water", "Special", 90, 1.0, contact=False)
+_ensure_move_basic("Energy Ball", "Grass", "Special", 90, 1.0, contact=False)
+_ensure_move_basic("Grass Knot", "Grass", "Special", 60, 1.0, contact=False)  # weight-based; treat as 60BP baseline
+_ensure_move_basic("Tri Attack", "Normal", "Special", 80, 1.0, contact=False)
+_ensure_move_basic("Low Kick", "Fighting", "Physical", 60, 1.0, contact=True)  # weight-based; treat as 60BP baseline
+_ensure_move_basic("Body Press", "Fighting", "Physical", 80, 1.0, contact=False)  # (uses Def as Atk IRL; modeled as standard BP)
+_ensure_move_basic("Rest", "Psychic", "Status", 0, 1.0, contact=False)
+
+
+# ------------------------------------------------------
+# 1) MOVE TAGS — needed for ability interactions
+# ------------------------------------------------------
+# Add "slicing" tag set for Sharpness; expand 'is_punch' already present; 'contact' already present (for Tough Claws).
+SLICING_MOVES = {
+    "Aqua Cutter",
+    "Leaf Blade",
+    "Psycho Cut",
+    "Night Slash",
+    "Sacred Sword",
+    "Ceaseless Edge",
+    "Razor Shell",
+    "Slash",
+}
+for _mv_name in list(SLICING_MOVES):
+    if _mv_name in MOVE_DB:
+        object.__setattr__(MOVE_DB[_mv_name], "is_slicing", True)
+
+
+def _is_slicing(mv: Move) -> bool:
+    return bool(getattr(mv, "is_slicing", False)) or (mv.name in SLICING_MOVES)
+
+
+# ------------------------------------------------------
+# 2) SPECIES ABILITY HINT CORRECTIONS (impactful + used)
+# ------------------------------------------------------
+# These hints are only used by the engine when present; fill in the ones that materially alter damage.
+if "Iron Bundle" in SPECIES_DATA and SPECIES_DATA["Iron Bundle"].ability_hint is None:
+    SPECIES_DATA["Iron Bundle"] = Species(
+        "Iron Bundle",
+        ("Ice", "Water"),
+        {"HP": 56, "Atk": 80, "Def": 114, "SpA": 124, "SpD": 60, "Spe": 136},
+        "Quark Drive",
+    )
+if "Iron Hands" in SPECIES_DATA and SPECIES_DATA["Iron Hands"].ability_hint is None:
+    SPECIES_DATA["Iron Hands"] = Species(
+        "Iron Hands",
+        ("Fighting", "Electric"),
+        {"HP": 154, "Atk": 140, "Def": 108, "SpA": 50, "SpD": 68, "Spe": 50},
+        "Quark Drive",
+    )
+if "Azumarill" in SPECIES_DATA and SPECIES_DATA["Azumarill"].ability_hint is None:
+    SPECIES_DATA["Azumarill"] = Species(
+        "Azumarill",
+        ("Water", "Fairy"),
+        {"HP": 100, "Atk": 50, "Def": 80, "SpA": 60, "SpD": 80, "Spe": 50},
+        "Huge Power",
+    )
+if "Scizor" in SPECIES_DATA and SPECIES_DATA["Scizor"].ability_hint is None:
+    SPECIES_DATA["Scizor"] = Species(
+        "Scizor",
+        ("Bug", "Steel"),
+        {"HP": 70, "Atk": 130, "Def": 100, "SpA": 55, "SpD": 80, "Spe": 65},
+        "Technician",
+    )
+# Porygon-Z commonly runs Adaptability in 1v1
+if "Porygon-Z" in SPECIES_DATA:
+    SPECIES_DATA["Porygon-Z"] = Species(
+        "Porygon-Z",
+        ("Normal", None),
+        {"HP": 85, "Atk": 80, "Def": 70, "SpA": 135, "SpD": 75, "Spe": 90},
+        "Adaptability",
+    )
+
+
+# -----------------------------------------------------------------
+# 3) ABILITY MULTIPLIERS — OFFENSE and DEFENSE (ACCURACY CRITICAL)
+# -----------------------------------------------------------------
+# We *multiply* the already-computed values in the damage path.
+# These cover the biggest effect-size abilities that appear in your species and presets.
+def ability_offense_mult(
+    self_build: SetBuild,
+    self_state: BattleState,
+    mv: Move,
+    stats_self: Dict[str, int],
+    current_stab_mult: float,
+) -> Tuple[float, float]:
+    """
+    Returns (atk_like_multiplier, stab_like_multiplier_adjustment).
+    - atk_like_multiplier multiplies the effective attacking stat AFTER stages/choice/PQ.
+    - stab_like_multiplier_adjustment multiplies the STAB term (for Adaptability etc).
+    """
+    name = SPECIES_DATA[self_build.species].ability_hint or ""
+    atk_mult = 1.0
+    stab_adj = 1.0
+
+    # 3.1 Huge Power — doubles attacking stat (physical only; we approximate by doubling regardless, move category gate below)
+    if name == "Huge Power" and mv.category == "Physical":
+        atk_mult *= 2.0
+
+    # 3.2 Technician — moves with base_power <= 60 get 1.5x (applies to both phys/spec)
+    if mv.category != "Status" and base_power(mv) <= 60 and name == "Technician":
+        atk_mult *= 1.5
+
+    # 3.3 Tough Claws — contact moves 1.3x
+    if name == "Tough Claws" and is_contact_effective(mv, self_build.item):
+        atk_mult *= 1.3
+
+    # 3.4 Iron Fist — punching moves 1.2x (you already tag punches)
+    if name == "Iron Fist" and mv.is_punch:
+        atk_mult *= 1.2
+
+    # 3.5 Sharpness — slicing moves 1.5x
+    if name == "Sharpness" and _is_slicing(mv):
+        atk_mult *= 1.5
+
+    # 3.6 Torrent/Blaze/Overgrow/Swarm — < 1/3 HP boosts type
+    low_hp = (self_state.hp * 3) <= self_state.max_hp
+    if low_hp:
+        if name == "Torrent" and mv.mtype == "Water":
+            atk_mult *= 1.5
+        elif name == "Blaze" and mv.mtype == "Fire":
+            atk_mult *= 1.5
+        elif name == "Overgrow" and mv.mtype == "Grass":
+            atk_mult *= 1.5
+        elif name == "Swarm" and mv.mtype == "Bug":
+            atk_mult *= 1.5
+
+    # 3.7 Adaptability — same-type attacks get 2.0 STAB instead of 1.5
+    # We apply as a ratio on *whatever* STAB logic produced (1.5→2.0, 2.0→(approx) 2.66 if double-stab),
+    # but to stay conservative in SV Tera edge-cases, multiply by (2.0/1.5)=1.333 if current STAB > 1.
+    if name == "Adaptability" and current_stab_mult > 1.0 and mv.category != "Status":
+        stab_adj *= (2.0 / 1.5)  # 1.333...
+
+    return atk_mult, stab_adj
+
+
+def ability_defense_mult(opp_build: SetBuild, mv: Move) -> float:
+    """
+    Returns defender-side damage multiplier (<=1 reduces damage).
+    Thick Fat is the big one seen in formats; others like Filter/Solid Rock are rarer among your threats.
+    """
+    name = SPECIES_DATA[opp_build.species].ability_hint or ""
+    # 3.D Thick Fat — halve Fire/Ice damage
+    if name == "Thick Fat" and mv.mtype in ("Fire", "Ice"):
+        return 0.5
+    return 1.0
+
 # =========================
 #       STAT FORMULAS
 # =========================
@@ -2299,6 +2457,13 @@ def perform_damage_hit(
     item_m = move_item_mult(self_build.item, mv, atk_stat)
     field_m = field_power_mult(used_type, self_build, self_state, weather, terrain)
 
+    # Ability offense/defense multipliers
+    atk_ability_mult, stab_adj = ability_offense_mult(
+        self_build, self_state, mv, stats_self, offensive_stab
+    )
+    offensive_stab *= stab_adj
+    def_ability_mult = ability_defense_mult(opp_build, mv)
+
     # Compute total damage across hits (Multiscale only on the first hit that connects)
     total_dealt = 0
     hits = mv.multi_hits if mv.multi_hits > 1 else 1
@@ -2309,10 +2474,10 @@ def perform_damage_hit(
         d = damage(
             100,
             base_power(mv),
-            atk_val,
+            max(1, int(atk_val * atk_ability_mult)),
             def_val,
             offensive_stab,
-            tmult,
+            tmult * def_ability_mult,
             item_m,
             False,
             ms,
@@ -3329,7 +3494,7 @@ def main():
     _ev_count_phys = len(iterate_evs_axes(("HP", "Atk", "Def", "Spe")))
     _ev_count_spec = len(iterate_evs_axes(("HP", "SpA", "SpD", "Spe")))
     _mv_counts = {
-        sp: len(movesets_from_pool(MOVE_POOLS[sp], FOUR_PHYSICAL_ONLY[sp], species=sp))
+        sp: len(movesets_from_pool(MOVE_POOLS[sp], FOUR_PHYSICAL_ONLY[sp]))
         for sp in order
     }
     print(
