@@ -1608,16 +1608,17 @@ TERA_POOLS: Dict[str, List[str]] = {
 }
 
 
-def _ensure_move_full(
+def _add_move(
     name,
     mtype,
     cat,
-    power,
+    power=0,
     acc=1.0,
     *,
     contact=False,
     priority=0,
     is_punch=False,
+    first_turn_only=False,
 ):
     if name not in MOVE_DB:
         MOVE_DB[name] = Move(
@@ -1629,177 +1630,262 @@ def _ensure_move_full(
             contact=contact,
             priority=priority,
             is_punch=is_punch,
+            first_turn_only=first_turn_only,
         )
 
 
-_ensure_move_full("Protect", "Normal", "Status", 0, 1.0)
-_ensure_move_full("Detect", "Normal", "Status", 0, 1.0)
-_ensure_move_full("Swords Dance", "Normal", "Status", 0, 1.0)
-_ensure_move_full("Bulk Up", "Fighting", "Status", 0, 1.0)
-_ensure_move_full("Encore", "Normal", "Status", 0, 1.0)
-_ensure_move_full("Taunt", "Dark", "Status", 0, 1.0)
-_ensure_move_full("Counter", "Fighting", "Physical", 0, 1.0, priority=-5)
-_ensure_move_full("Endeavor", "Normal", "Physical", 1, 1.0)
-_ensure_move_full("Yawn", "Normal", "Status", 0, 1.0)
-_ensure_move_full("Curse", "Ghost", "Status", 0, 1.0)
+_add_move("Quick Attack", "Normal", "Physical", 40, 1.0, contact=True, priority=1)
+_add_move("Double Kick", "Fighting", "Physical", 30, 1.0, contact=True)
+_add_move("Scratch", "Normal", "Physical", 40, 1.0, contact=True)
+_add_move("Flame Charge", "Fire", "Physical", 50, 1.0, contact=True)
+_add_move("Detect", "Normal", "Status", 0, 1.0, priority=4)
+_add_move("Focus Energy", "Normal", "Status", 0, 1.0)
+_add_move("Reversal", "Fighting", "Physical", 1, 1.0, contact=True)
+_add_move("Blaze Kick", "Fire", "Physical", 85, 0.9, contact=True)
+_add_move("Aerial Ace", "Flying", "Physical", 60, 1.0, contact=True)
+_add_move("Bounce", "Flying", "Physical", 85, 0.85, contact=True)
+_add_move("Sand Attack", "Ground", "Status", 0, 1.0)
+_add_move("Agility", "Psychic", "Status", 0, 1.0)
+_add_move("Mud-Slap", "Ground", "Special", 20, 1.0)
+_add_move("Take Down", "Normal", "Physical", 90, 0.85, contact=True)
+_add_move("Acrobatics", "Flying", "Physical", 55, 1.0, contact=True)
+_add_move("Thief", "Dark", "Physical", 60, 1.0, contact=True)
+_add_move("Fire Spin", "Fire", "Special", 35, 0.85)
+_add_move("Facade", "Normal", "Physical", 70, 1.0, contact=True)
+_add_move("Bulldoze", "Ground", "Physical", 60, 1.0)
+_add_move("Swift", "Normal", "Special", 60, 1.0)
+_add_move("Rock Tomb", "Rock", "Physical", 60, 0.95)
+_add_move("Fling", "Dark", "Physical", 1, 1.0)
+_add_move("Endure", "Normal", "Status", 0, 1.0, priority=4)
+_add_move("Sunny Day", "Fire", "Status", 0, 1.0)
+_add_move("Dig", "Ground", "Physical", 80, 1.0, contact=True)
+_add_move("Substitute", "Normal", "Status", 0, 1.0)
+_add_move("Will-O-Wisp", "Fire", "Status", 0, 0.85)
+_add_move("Aura Sphere", "Fighting", "Special", 80, 1.0)
+_add_move("Heat Wave", "Fire", "Special", 95, 0.9)
+_add_move("Helping Hand", "Normal", "Status", 0, 1.0)
+_add_move("Baton Pass", "Normal", "Status", 0, 1.0)
+_add_move("Fire Blast", "Fire", "Special", 110, 0.85)
+_add_move("Fire Pledge", "Fire", "Special", 80, 1.0)
+_add_move("Overheat", "Fire", "Special", 130, 0.9)
+_add_move("Solar Beam", "Grass", "Special", 120, 1.0)
+_add_move("Roar", "Normal", "Status", 0, 1.0)
+_add_move("Hyper Beam", "Normal", "Special", 150, 0.9)
+_add_move("Giga Impact", "Normal", "Physical", 150, 0.9, contact=True)
 
-_ensure_move_full("Aqua Jet", "Water", "Physical", 40, 1.0, contact=True, priority=1)
-_ensure_move_full("Bullet Punch", "Steel", "Physical", 40, 1.0, contact=True, priority=1)
-_ensure_move_full("Mach Punch", "Fighting", "Physical", 40, 1.0, contact=True, priority=1)
-_ensure_move_full("Extreme Speed", "Normal", "Physical", 80, 1.0, contact=True, priority=2)
-_ensure_move_full("Sucker Punch", "Dark", "Physical", 70, 1.0, contact=True, priority=1)
-_ensure_move_full("Ice Shard", "Ice", "Physical", 40, 1.0, priority=1)
+_add_move("Aqua Cutter", "Water", "Physical", 70, 1.0, contact=True)
+_add_move("Aqua Jet", "Water", "Physical", 40, 1.0, contact=True, priority=1)
+_add_move("Waterfall", "Water", "Physical", 80, 1.0, contact=True)
+_add_move("Aqua Tail", "Water", "Physical", 90, 0.9, contact=True)
+_add_move("Hydro Cannon", "Water", "Special", 150, 0.9)
+_add_move("Hydro Pump", "Water", "Special", 110, 0.8)
+_add_move("Surf", "Water", "Special", 90, 1.0)
+_add_move("Chilling Water", "Water", "Special", 50, 1.0)
+_add_move("Rain Dance", "Water", "Status", 0, 1.0)
 
-_ensure_move_full("Liquidation", "Water", "Physical", 85, 1.0, contact=True)
-_ensure_move_full("Waterfall", "Water", "Physical", 80, 1.0, contact=True)
-_ensure_move_full("Aqua Tail", "Water", "Physical", 90, 0.9, contact=True)
-_ensure_move_full("Aqua Cutter", "Water", "Physical", 70, 1.0, contact=True)
-_ensure_move_full("Flip Turn", "Water", "Physical", 60, 1.0, contact=True)
-_ensure_move_full("Aqua Step", "Water", "Physical", 80, 1.0, contact=True)
+_add_move("Trailblaze", "Grass", "Physical", 50, 1.0, contact=True)
+_add_move("Pounce", "Bug", "Physical", 50, 1.0, contact=True)
+_add_move("Air Slash", "Flying", "Special", 75, 0.95)
+_add_move("Hurricane", "Flying", "Special", 110, 0.7)
 
-_ensure_move_full("Earthquake", "Ground", "Physical", 100, 1.0)
-_ensure_move_full("High Horsepower", "Ground", "Physical", 95, 0.95, contact=True)
-_ensure_move_full("Stomping Tantrum", "Ground", "Physical", 75, 1.0, contact=True)
-_ensure_move_full("Bulldoze", "Ground", "Physical", 60, 1.0)
+_add_move("Stomping Tantrum", "Ground", "Physical", 75, 1.0, contact=True)
+_add_move("High Horsepower", "Ground", "Physical", 95, 0.95, contact=True)
+_add_move("Mud Shot", "Ground", "Special", 55, 0.95)
+_add_move("Sandstorm", "Rock", "Status", 0, 1.0)
+_add_move("Stealth Rock", "Rock", "Status", 0, 1.0)
 
-_ensure_move_full("Ice Punch", "Ice", "Physical", 75, 1.0, contact=True, is_punch=True)
-_ensure_move_full("Ice Fang", "Ice", "Physical", 65, 0.95, contact=True)
-_ensure_move_full("Ice Spinner", "Ice", "Physical", 80, 1.0, contact=True)
-_ensure_move_full("Avalanche", "Ice", "Physical", 60, 1.0, contact=True)
+_add_move("Ice Fang", "Ice", "Physical", 65, 0.95, contact=True)
+_add_move("Avalanche", "Ice", "Physical", 60, 1.0, contact=True)
+_add_move("Icy Wind", "Ice", "Special", 55, 0.95)
 
-_ensure_move_full("Rock Slide", "Rock", "Physical", 75, 0.9)
-_ensure_move_full("Rock Tomb", "Rock", "Physical", 60, 0.95)
-_ensure_move_full("Stone Edge", "Rock", "Physical", 100, 0.8)
+_add_move("Flash Cannon", "Steel", "Special", 80, 1.0)
 
-_ensure_move_full("Close Combat", "Fighting", "Physical", 120, 1.0, contact=True)
-_ensure_move_full("Brick Break", "Fighting", "Physical", 75, 1.0, contact=True)
-_ensure_move_full("Low Kick", "Fighting", "Physical", 60, 1.0, contact=True)
-_ensure_move_full("Low Sweep", "Fighting", "Physical", 65, 1.0, contact=True)
-_ensure_move_full("Drain Punch", "Fighting", "Physical", 75, 1.0, contact=True, is_punch=True)
+_add_move("Endeavor", "Normal", "Physical", 1, 1.0)
+_add_move("Yawn", "Normal", "Status", 0, 1.0)
+_add_move("Curse", "Ghost", "Status", 0, 1.0)
 
-_ensure_move_full("Flare Blitz", "Fire", "Physical", 120, 1.0, contact=True)
-_ensure_move_full("Blaze Kick", "Fire", "Physical", 85, 0.9, contact=True)
-_ensure_move_full("Fire Punch", "Fire", "Physical", 75, 1.0, contact=True, is_punch=True)
+_add_move("Close Combat", "Fighting", "Physical", 120, 1.0, contact=True)
+_add_move("Swords Dance", "Normal", "Status", 0, 1.0)
+_add_move("Bulk Up", "Fighting", "Status", 0, 1.0)
+_add_move("Taunt", "Dark", "Status", 0, 1.0)
+_add_move("Encore", "Normal", "Status", 0, 1.0)
+_add_move("Thunder Punch", "Electric", "Physical", 75, 1.0, contact=True, is_punch=True)
+_add_move("Poison Jab", "Poison", "Physical", 80, 1.0, contact=True)
+_add_move("Fire Punch", "Fire", "Physical", 75, 1.0, contact=True, is_punch=True)
+_add_move("Flare Blitz", "Fire", "Physical", 120, 1.0, contact=True)
+_add_move("Brave Bird", "Flying", "Physical", 120, 1.0, contact=True)
+_add_move("Low Kick", "Fighting", "Physical", 1, 1.0, contact=True)
+_add_move("Low Sweep", "Fighting", "Physical", 65, 1.0, contact=True)
+_add_move("Shadow Claw", "Ghost", "Physical", 70, 1.0, contact=True)
+_add_move("U-turn", "Bug", "Physical", 70, 1.0, contact=True)
+_add_move("Rock Slide", "Rock", "Physical", 75, 0.9)
+_add_move("Stone Edge", "Rock", "Physical", 100, 0.8)
+_add_move("Earthquake", "Ground", "Physical", 100, 1.0)
+_add_move("Liquidation", "Water", "Physical", 85, 1.0, contact=True)
+_add_move("Aqua Step", "Water", "Physical", 80, 1.0, contact=True)
+_add_move("Ice Spinner", "Ice", "Physical", 80, 1.0, contact=True)
+_add_move("Knock Off", "Dark", "Physical", 65, 1.0, contact=True)
+_add_move("Protect", "Normal", "Status", 0, 1.0, priority=4)
+_add_move("Rest", "Psychic", "Status", 0, 1.0)
+_add_move("Sleep Talk", "Normal", "Status", 0, 1.0)
+_add_move("Tera Blast", "Normal", "Special", 80, 1.0)
 
-_ensure_move_full("Brave Bird", "Flying", "Physical", 120, 1.0, contact=True)
-_ensure_move_full("Acrobatics", "Flying", "Physical", 55, 1.0, contact=True)
+LEGAL_MOVES_SWAMPERT = sorted(
+    set(
+        [
+            "Liquidation",
+            "Waterfall",
+            "Aqua Tail",
+            "Aqua Jet",
+            "Chilling Water",
+            "Hydro Pump",
+            "Surf",
+            "Rain Dance",
+            "Hydro Cannon",
+            "Earthquake",
+            "High Horsepower",
+            "Stomping Tantrum",
+            "Bulldoze",
+            "Mud Shot",
+            "Dig",
+            "Ice Punch",
+            "Ice Fang",
+            "Ice Spinner",
+            "Avalanche",
+            "Icy Wind",
+            "Rock Slide",
+            "Stone Edge",
+            "Rock Tomb",
+            "Sandstorm",
+            "Stealth Rock",
+            "Flash Cannon",
+            "Endeavor",
+            "Protect",
+            "Detect",
+            "Yawn",
+            "Curse",
+            "Rest",
+            "Sleep Talk",
+            "Substitute",
+            "Take Down",
+            "Facade",
+        ]
+    )
+)
 
-_ensure_move_full("Knock Off", "Dark", "Physical", 65, 1.0, contact=True)
+LEGAL_MOVES_BLAZIKEN = sorted(
+    set(
+        [
+            "Flare Blitz",
+            "Blaze Kick",
+            "Fire Punch",
+            "Flamethrower",
+            "Fire Blast",
+            "Overheat",
+            "Heat Wave",
+            "Flame Charge",
+            "Fire Pledge",
+            "Close Combat",
+            "Low Kick",
+            "Low Sweep",
+            "Reversal",
+            "Aura Sphere",
+            "Brick Break",
+            "Bulk Up",
+            "Brave Bird",
+            "Aerial Ace",
+            "Bounce",
+            "Quick Attack",
+            "Detect",
+            "Protect",
+            "Endure",
+            "Swords Dance",
+            "Substitute",
+            "Will-O-Wisp",
+            "Agility",
+            "Sunny Day",
+            "Baton Pass",
+            "Roar",
+            "Knock Off",
+            "Shadow Claw",
+            "Earthquake",
+            "Bulldoze",
+            "Dig",
+            "Rock Slide",
+            "Rock Tomb",
+            "Stone Edge",
+            "Poison Jab",
+            "Thunder Punch",
+            "Facade",
+            "Fling",
+            "Take Down",
+            "U-turn",
+            "Giga Impact",
+            "Hyper Beam",
+            "Solar Beam",
+            "Heat Wave",
+            "Helping Hand",
+            "Fire Spin",
+            "Swift",
+            "Sleep Talk",
+            "Rest",
+            "Tera Blast",
+        ]
+    )
+)
 
-_ensure_move_full("Thunder Punch", "Electric", "Physical", 75, 1.0, contact=True, is_punch=True)
-_ensure_move_full("Wild Charge", "Electric", "Physical", 90, 1.0, contact=True)
-
-_ensure_move_full("Poison Jab", "Poison", "Physical", 80, 1.0, contact=True)
-_ensure_move_full("Shadow Claw", "Ghost", "Physical", 70, 1.0, contact=True)
-
-_ensure_move_full("U-turn", "Bug", "Physical", 70, 1.0, contact=True)
-
-
-LEGAL_MOVES_SWAMPERT = [
-    # Water STAB
-    "Liquidation",
-    "Waterfall",
-    "Aqua Tail",
-    "Aqua Jet",
-    "Flip Turn",
-    # Ground STAB
-    "Earthquake",
-    "High Horsepower",
-    "Stomping Tantrum",
-    "Bulldoze",
-    # Coverage (Ice/Rock)
-    "Ice Punch",
-    "Ice Fang",
-    "Avalanche",
-    "Rock Slide",
-    "Stone Edge",
-    "Rock Tomb",
-    # Niche/tech
-    "Counter",
-    "Endeavor",
-    "Protect",
-    "Detect",
-    "Yawn",
-    "Curse",
-]
-
-LEGAL_MOVES_BLAZIKEN = [
-    # Fire STAB
-    "Flare Blitz",
-    "Blaze Kick",
-    "Fire Punch",
-    # Fighting STAB
-    "Close Combat",
-    "Brick Break",
-    "Low Kick",
-    "Low Sweep",
-    "Drain Punch",
-    # Coverage / priority / tech
-    "Brave Bird",
-    "Acrobatics",
-    "Rock Slide",
-    "Stone Edge",
-    "Earthquake",
-    "Knock Off",
-    "Sucker Punch",
-    "Thunder Punch",
-    "Poison Jab",
-    "Shadow Claw",
-    "Bullet Punch",
-    "Mach Punch",
-    # Setup / utility
-    "Swords Dance",
-    "Bulk Up",
-    "Protect",
-    "Detect",
-    "Counter",
-    "Encore",
-    "Taunt",
-]
-
-LEGAL_MOVES_QUAQUAVAL = [
-    # Water STAB
-    "Aqua Step",
-    "Liquidation",
-    "Waterfall",
-    "Aqua Cutter",
-    "Aqua Jet",
-    "Flip Turn",
-    # Fighting STAB
-    "Close Combat",
-    "Drain Punch",
-    "Brick Break",
-    "Low Kick",
-    "Low Sweep",
-    # Coverage / pivot
-    "Ice Spinner",
-    "Avalanche",
-    "Brave Bird",
-    "Acrobatics",
-    "Knock Off",
-    "U-turn",
-    # Setup / utility
-    "Swords Dance",
-    "Bulk Up",
-    "Protect",
-    "Detect",
-    "Encore",
-    "Taunt",
-]
-
-LEGAL_MOVES = {
-    "Swampert": LEGAL_MOVES_SWAMPERT,
-    "Blaziken": LEGAL_MOVES_BLAZIKEN,
-    "Quaquaval": LEGAL_MOVES_QUAQUAVAL,
-}
-
-# If you keep FOUR_PHYSICAL_ONLY, these pools are already physical+utility.
-FOUR_PHYSICAL_ONLY = {"Swampert": True, "Blaziken": True, "Quaquaval": True}
+LEGAL_MOVES_QUAQUAVAL = sorted(
+    set(
+        [
+            "Aqua Step",
+            "Liquidation",
+            "Waterfall",
+            "Aqua Cutter",
+            "Aqua Jet",
+            "Flip Turn",
+            "Surf",
+            "Hydro Pump",
+            "Hydro Cannon",
+            "Chilling Water",
+            "Rain Dance",
+            "Close Combat",
+            "Drain Punch",
+            "Brick Break",
+            "Low Kick",
+            "Low Sweep",
+            "Reversal",
+            "Bulk Up",
+            "Swords Dance",
+            "Ice Spinner",
+            "Avalanche",
+            "Icy Wind",
+            "Brave Bird",
+            "Acrobatics",
+            "U-turn",
+            "Knock Off",
+            "Air Slash",
+            "Hurricane",
+            "Aerial Ace",
+            "Trailblaze",
+            "Pounce",
+            "Encore",
+            "Taunt",
+            "Protect",
+            "Detect",
+            "Substitute",
+            "Rest",
+            "Sleep Talk",
+            "Helping Hand",
+            "Giga Impact",
+            "Hyper Beam",
+            "Tera Blast",
+        ]
+    )
+)
 
 RECOIL_RATIO.setdefault("Flare Blitz", 1 / 3)
 RECOIL_RATIO.setdefault("Brave Bird", 1 / 3)
-RECOIL_RATIO.setdefault("Wild Charge", 1 / 4)
-RECOIL_RATIO.setdefault("Wave Crash", 1 / 3)
+RECOIL_RATIO.setdefault("Take Down", 1 / 4)
 
 
 def assert_legal_moves(species: str, moves: list[str]) -> None:
@@ -4049,7 +4135,7 @@ LEGAL_MOVES = {
 
 MOVE_POOLS = {k: list(LEGAL_MOVES[k]) for k in LEGAL_MOVES}
 
-FOUR_PHYSICAL_ONLY = {k: True for k in LEGAL_MOVES}
+FOUR_PHYSICAL_ONLY = {k: False for k in LEGAL_MOVES}
 
 
 def assert_legal_moves(species: str, moves: List[str]) -> None:
@@ -4153,7 +4239,7 @@ LEGAL_MOVES = {
 }
 
 MOVE_POOLS = {k: list(LEGAL_MOVES[k]) for k in LEGAL_MOVES}
-FOUR_PHYSICAL_ONLY = {k: True for k in LEGAL_MOVES}
+FOUR_PHYSICAL_ONLY = {k: False for k in LEGAL_MOVES}
 
 
 if "Quaquaval" in LEGAL_MOVES:
