@@ -1396,6 +1396,646 @@ def adversary_variants(spec_name: str) -> Optional[Tuple[List[SetBuild], List[fl
     return variants, w
 
 
+# === SV 1v1 OPTIMIZER — CRITICAL ACCURACY PATCH: REAL THREAT SETS (v5.0) ===
+# PURPOSE
+# The largest source of inaccuracy is adversary modeling: threats are currently auto-built
+# with generic STAB + two coverages and equal item variants. That dramatically mis-scores our
+# builds because real 1v1 sets (items/EVs/moves/tera) differ a lot from "generic".
+
+# FIX
+# 1) Add signature moves the engine was missing (so real sets are representable).
+# 2) Define a curated, legality-correct THREAT_PRESETS for the threats you evaluate against.
+#    Each preset is an actual 1v1-style set (item, nature, EVs, tera, 4 moves). You can add
+#    more as needed; missing threats fall back to the existing generator.
+# 3) Make adversary_variants() prefer presets (optionally with a *small* item variant mix),
+#    and only fall back to the generic builder if no preset is supplied.
+
+# Notes
+# - Keep this block near the bottom of your file so it overrides earlier definitions.
+# - All moves used here are added to MOVE_DB if missing; simple flags (always_crit, priority)
+#   are included where needed. Damage side effects (SpA drops etc.) are already supported by
+#   your engine for common moves; for new signature moves we keep simple power/accuracy models.
+# - EVs are standard 252/252 spreads unless noted; feel free to refine later.
+# - If a listed move doesn’t have modeled side effects in your engine, it’s still fine: its BP,
+#   typing, and accuracy dominate 1v1 3-turn outcomes; perfect modeling can be layered later.
+
+
+def _ensure_move(
+    name,
+    mtype,
+    cat,
+    power,
+    acc=1.0,
+    *,
+    contact=False,
+    is_punch=False,
+    priority=0,
+    always_crit=False,
+    multi_hits=1,
+):
+    if name not in MOVE_DB:
+        MOVE_DB[name] = Move(
+            name,
+            mtype,
+            cat,
+            power,
+            acc,
+            contact=contact,
+            is_punch=is_punch,
+            priority=priority,
+            always_crit=always_crit,
+            multi_hits=multi_hits,
+        )
+
+
+# Priority / utility / staples
+_ensure_move("Bullet Punch", "Steel", "Physical", 40, 1.0, contact=True, priority=1)
+_ensure_move("Mach Punch", "Fighting", "Physical", 40, 1.0, contact=True, priority=1)
+_ensure_move("Aqua Jet", "Water", "Physical", 40, 1.0, contact=True, priority=1)
+_ensure_move("Extreme Speed", "Normal", "Physical", 80, 1.0, contact=True, priority=2)
+_ensure_move("Ice Shard", "Ice", "Physical", 40, 1.0, contact=False, priority=1)
+
+# Signature/format-defining
+_ensure_move("Kowtow Cleave", "Dark", "Physical", 85, 1.0, contact=True)
+_ensure_move("Make It Rain", "Steel", "Special", 120, 0.9)
+_ensure_move("Salt Cure", "Rock", "Physical", 40, 1.0)
+_ensure_move("Torch Song", "Fire", "Special", 80, 1.0)
+_ensure_move("Slack Off", "Normal", "Status", 0, 1.0)
+_ensure_move("Fiery Wrath", "Dark", "Special", 90, 1.0)
+_ensure_move("Ivy Cudgel", "Grass", "Physical", 100, 1.0, contact=True)
+_ensure_move("Hydro Steam", "Water", "Special", 80, 1.0)
+_ensure_move("Bullet Seed", "Grass", "Physical", 25, 1.0, contact=True)
+_ensure_move("Wicked Blow", "Dark", "Physical", 80, 1.0, contact=True, always_crit=True)
+_ensure_move(
+    "Surging Strikes",
+    "Water",
+    "Physical",
+    25,
+    1.0,
+    contact=True,
+    always_crit=True,
+    multi_hits=3,
+)
+_ensure_move("Flower Trick", "Grass", "Physical", 70, 1.0, contact=True, always_crit=True)
+_ensure_move("Icicle Crash", "Ice", "Physical", 85, 0.9, contact=True)
+_ensure_move("Sacred Sword", "Fighting", "Physical", 90, 1.0, contact=True)
+_ensure_move("Spirit Break", "Fairy", "Physical", 75, 1.0, contact=True)
+_ensure_move("Blood Moon", "Normal", "Special", 140, 0.9)
+_ensure_move("Steam Eruption", "Water", "Special", 110, 0.95)
+_ensure_move("Tachyon Cutter", "Steel", "Special", 50, 1.0)
+_ensure_move("Draining Kiss", "Fairy", "Special", 50, 1.0)
+_ensure_move("Hyper Voice", "Normal", "Special", 90, 1.0)
+_ensure_move("Moonlight", "Fairy", "Status", 0, 1.0)
+_ensure_move("Roost", "Flying", "Status", 0, 1.0)
+_ensure_move("Play Rough", "Fairy", "Physical", 90, 0.9, contact=True)
+_ensure_move("Wave Crash", "Water", "Physical", 120, 1.0, contact=True)
+_ensure_move("Encore", "Normal", "Status", 0, 1.0)
+_ensure_move("Focus Blast", "Fighting", "Special", 120, 0.7)
+_ensure_move("Bug Buzz", "Bug", "Special", 90, 1.0)
+_ensure_move("Giga Drain", "Grass", "Special", 75, 1.0)
+_ensure_move("Drain Punch", "Fighting", "Physical", 75, 1.0, contact=True, is_punch=True)
+_ensure_move("Dragon Claw", "Dragon", "Physical", 80, 1.0, contact=True)
+_ensure_move("Fire Fang", "Fire", "Physical", 65, 0.95, contact=True)
+_ensure_move("Poison Jab", "Poison", "Physical", 80, 1.0, contact=True)
+_ensure_move("Power Gem", "Rock", "Special", 80, 1.0)
+_ensure_move("Mystical Fire", "Fire", "Special", 75, 1.0)
+_ensure_move("Freeze-Dry", "Ice", "Special", 70, 1.0)
+_ensure_move("Flip Turn", "Water", "Physical", 60, 1.0, contact=True)
+RECOIL_RATIO["Wave Crash"] = 1 / 3
+
+
+def _evs(hp, atk, deff, spa, spd, spe):
+    return {"HP": hp, "Atk": atk, "Def": deff, "SpA": spa, "SpD": spd, "Spe": spe}
+
+
+_IV31 = {"HP": 31, "Atk": 31, "Def": 31, "SpA": 31, "SpD": 31, "Spe": 31}
+
+
+THREAT_PRESETS: dict[str, list[SetBuild]] = {
+    "Dragonite": [
+        SetBuild(
+            "Dragonite",
+            "Choice Band",
+            "Multiscale",
+            "Normal",
+            "Adamant",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            ["Extreme Speed", "Outrage", "Earthquake", "Fire Punch"],
+        ),
+        SetBuild(
+            "Dragonite",
+            "Weakness Policy",
+            "Multiscale",
+            "Normal",
+            "Adamant",
+            _evs(252, 252, 4, 0, 0, 0),
+            _IV31,
+            ["Extreme Speed", "Earthquake", "Fire Punch", "Dragon Claw"],
+        ),
+    ],
+    "Kingambit": [
+        SetBuild(
+            "Kingambit",
+            "Black Glasses",
+            None,
+            "Dark",
+            "Adamant",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            ["Kowtow Cleave", "Sucker Punch", "Iron Head", "Brick Break"],
+        ),
+    ],
+    "Flutter Mane": [
+        SetBuild(
+            "Flutter Mane",
+            "Choice Specs",
+            "Protosynthesis",
+            "Fairy",
+            "Timid",
+            _evs(0, 0, 4, 252, 0, 252),
+            _IV31,
+            ["Moonblast", "Shadow Ball", "Mystical Fire", "Power Gem"],
+        ),
+    ],
+    "Iron Bundle": [
+        SetBuild(
+            "Iron Bundle",
+            "Booster Energy",
+            None,
+            "Ice",
+            "Timid",
+            _evs(0, 0, 4, 252, 0, 252),
+            _IV31,
+            ["Freeze-Dry", "Hydro Pump", "Ice Beam", "Flip Turn"],
+        ),
+        SetBuild(
+            "Iron Bundle",
+            "Focus Sash",
+            None,
+            "Ice",
+            "Timid",
+            _evs(0, 0, 4, 252, 0, 252),
+            _IV31,
+            ["Freeze-Dry", "Hydro Pump", "Ice Beam", "Encore"],
+        ),
+    ],
+    "Urshifu": [
+        SetBuild(
+            "Urshifu",
+            "Choice Band",
+            None,
+            "Dark",
+            "Jolly",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            ["Wicked Blow", "Close Combat", "Sucker Punch", "Iron Head"],
+        ),
+    ],
+    "Urshifu-Rapid-Strike": [
+        SetBuild(
+            "Urshifu-Rapid-Strike",
+            "Choice Band",
+            None,
+            "Water",
+            "Jolly",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            ["Surging Strikes", "Close Combat", "Ice Spinner", "Aqua Jet"],
+        ),
+    ],
+    "Volcarona": [
+        SetBuild(
+            "Volcarona",
+            "Leftovers",
+            None,
+            "Fairy",
+            "Timid",
+            _evs(252, 0, 4, 0, 0, 252),
+            _IV31,
+            ["Flamethrower", "Bug Buzz", "Giga Drain", "Protect"],
+        ),
+    ],
+    "Gholdengo": [
+        SetBuild(
+            "Gholdengo",
+            "Choice Specs",
+            None,
+            "Steel",
+            "Modest",
+            _evs(0, 0, 0, 252, 4, 252),
+            _IV31,
+            ["Make It Rain", "Shadow Ball", "Thunderbolt", "Focus Blast"],
+        ),
+    ],
+    "Garganacl": [
+        SetBuild(
+            "Garganacl",
+            "Leftovers",
+            None,
+            "Water",
+            "Impish",
+            _evs(252, 0, 252, 0, 4, 0),
+            _IV31,
+            ["Salt Cure", "Body Press", "Rock Slide", "Protect"],
+        ),
+    ],
+    "Great Tusk": [
+        SetBuild(
+            "Great Tusk",
+            "Choice Scarf",
+            None,
+            "Ground",
+            "Jolly",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            ["Headlong Rush", "Close Combat", "Ice Spinner", "Rock Slide"],
+        ),
+    ],
+    "Iron Hands": [
+        SetBuild(
+            "Iron Hands",
+            "Assault Vest",
+            None,
+            "Electric",
+            "Adamant",
+            _evs(252, 252, 4, 0, 0, 0),
+            _IV31,
+            ["Drain Punch", "Thunder Punch", "Ice Punch", "Earthquake"],
+        ),
+    ],
+    "Roaring Moon": [
+        SetBuild(
+            "Roaring Moon",
+            "Booster Energy",
+            "Protosynthesis",
+            "Flying",
+            "Jolly",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            ["Acrobatics", "Crunch", "Earthquake", "Dragon Claw"],
+        ),
+    ],
+    "Raging Bolt": [
+        SetBuild(
+            "Raging Bolt",
+            "Choice Specs",
+            "Protosynthesis",
+            "Electric",
+            "Modest",
+            _evs(0, 0, 0, 252, 4, 252),
+            _IV31,
+            ["Thunderbolt", "Draco Meteor", "Dragon Pulse", "Flamethrower"],
+        ),
+    ],
+    "Walking Wake": [
+        SetBuild(
+            "Walking Wake",
+            "Choice Specs",
+            "Protosynthesis",
+            "Water",
+            "Timid",
+            _evs(0, 0, 0, 252, 4, 252),
+            _IV31,
+            ["Hydro Steam", "Draco Meteor", "Flamethrower", "Dragon Pulse"],
+        ),
+    ],
+    "Garchomp": [
+        SetBuild(
+            "Garchomp",
+            "Choice Band",
+            None,
+            "Ground",
+            "Jolly",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            ["Earthquake", "Outrage", "Rock Slide", "Fire Fang"],
+        ),
+    ],
+    "Haxorus": [
+        SetBuild(
+            "Haxorus",
+            "Choice Band",
+            None,
+            "Dragon",
+            "Jolly",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            ["Outrage", "Earthquake", "Poison Jab", "Rock Slide"],
+        ),
+    ],
+    "Primarina": [
+        SetBuild(
+            "Primarina",
+            "Choice Specs",
+            None,
+            "Fairy",
+            "Modest",
+            _evs(0, 0, 0, 252, 4, 252),
+            _IV31,
+            ["Moonblast", "Hydro Pump", "Ice Beam", "Psychic"],
+        ),
+    ],
+    "Moltres-Galar": [
+        SetBuild(
+            "Moltres-Galar",
+            "Weakness Policy",
+            None,
+            "Dark",
+            "Modest",
+            _evs(0, 0, 0, 252, 4, 252),
+            _IV31,
+            ["Fiery Wrath", "Hurricane", "Flamethrower", "Protect"],
+        ),
+    ],
+    "Scizor": [
+        SetBuild(
+            "Scizor",
+            "Life Orb",
+            None,
+            "Steel",
+            "Adamant",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            ["Bullet Punch", "Close Combat", "U-turn", "Knock Off"],
+        ),
+    ],
+    "Skeledirge": [
+        SetBuild(
+            "Skeledirge",
+            "Leftovers",
+            "Unaware",
+            "Fairy",
+            "Bold",
+            _evs(252, 0, 252, 0, 4, 0),
+            _IV31,
+            ["Torch Song", "Shadow Ball", "Slack Off", "Protect"],
+        ),
+    ],
+    "Sneasler": [
+        SetBuild(
+            "Sneasler",
+            "Choice Band",
+            None,
+            "Flying",
+            "Jolly",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            [
+                "Close Combat",
+                "Dire Claw" if "Dire Claw" in MOVE_DB else "Gunk Shot",
+                "Acrobatics",
+                "Ice Punch",
+            ],
+        ),
+    ],
+    "Dondozo": [
+        SetBuild(
+            "Dondozo",
+            "Leftovers",
+            "Unaware",
+            "Water",
+            "Impish",
+            _evs(252, 252, 4, 0, 0, 0),
+            _IV31,
+            [
+                "Wave Crash",
+                "Body Press",
+                "Protect",
+                "Rest" if "Rest" in MOVE_DB else "Rock Slide",
+            ],
+        ),
+    ],
+    "Porygon-Z": [
+        SetBuild(
+            "Porygon-Z",
+            "Choice Specs",
+            None,
+            "Normal",
+            "Timid",
+            _evs(0, 0, 0, 252, 4, 252),
+            _IV31,
+            [
+                "Hyper Voice",
+                "Tri Attack" if "Tri Attack" in MOVE_DB else "Shadow Ball",
+                "Dark Pulse",
+                "Ice Beam",
+            ],
+        ),
+    ],
+    "Kyurem": [
+        SetBuild(
+            "Kyurem",
+            "Choice Specs",
+            None,
+            "Ice",
+            "Timid",
+            _evs(0, 0, 0, 252, 4, 252),
+            _IV31,
+            ["Freeze-Dry", "Ice Beam", "Earth Power", "Draco Meteor"],
+        ),
+    ],
+    "Azumarill": [
+        SetBuild(
+            "Azumarill",
+            "Sitrus Berry",
+            None,
+            "Fairy",
+            "Adamant",
+            _evs(252, 252, 4, 0, 0, 0),
+            _IV31,
+            [
+                "Belly Drum" if "Belly Drum" in MOVE_DB else "Play Rough",
+                "Aqua Jet",
+                "Play Rough",
+                "Liquidation",
+            ],
+        ),
+    ],
+    "Goodra-Hisui": [
+        SetBuild(
+            "Goodra-Hisui",
+            "Assault Vest",
+            None,
+            "Steel",
+            "Modest",
+            _evs(252, 0, 0, 252, 4, 0),
+            _IV31,
+            ["Draco Meteor", "Flash Cannon", "Thunderbolt", "Flamethrower"],
+        ),
+    ],
+    "Landorus-Therian": [
+        SetBuild(
+            "Landorus-Therian",
+            "Choice Scarf",
+            "Intimidate",
+            "Ground",
+            "Jolly",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            ["Earthquake", "Stone Edge", "U-turn", "Knock Off"],
+        ),
+    ],
+    "Ninetales-Alola": [
+        SetBuild(
+            "Ninetales-Alola",
+            "Light Clay",
+            None,
+            "Water",
+            "Timid",
+            _evs(0, 0, 4, 252, 0, 252),
+            _IV31,
+            ["Freeze-Dry", "Moonblast", "Encore", "Protect"],
+        ),
+    ],
+    "Ogerpon-Wellspring": [
+        SetBuild(
+            "Ogerpon-Wellspring",
+            "Life Orb",
+            None,
+            "Water",
+            "Jolly",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            ["Ivy Cudgel", "Power Whip", "Play Rough", "Knock Off"],
+        ),
+    ],
+    "Sylveon": [
+        SetBuild(
+            "Sylveon",
+            "Choice Specs",
+            None,
+            "Fairy",
+            "Modest",
+            _evs(252, 0, 0, 252, 4, 0),
+            _IV31,
+            ["Hyper Voice", "Mystical Fire", "Shadow Ball", "Psyshock"],
+        ),
+    ],
+    "Volcanion": [
+        SetBuild(
+            "Volcanion",
+            "Choice Specs",
+            None,
+            "Water",
+            "Modest",
+            _evs(0, 0, 0, 252, 4, 252),
+            _IV31,
+            [
+                "Steam Eruption",
+                "Flamethrower",
+                "Earth Power",
+                "Sludge Bomb" if "Sludge Bomb" in MOVE_DB else "Flash Cannon",
+            ],
+        ),
+    ],
+    "Manaphy": [
+        SetBuild(
+            "Manaphy",
+            "Leftovers",
+            None,
+            "Water",
+            "Timid",
+            _evs(0, 0, 4, 252, 0, 252),
+            _IV31,
+            [
+                "Surf",
+                "Ice Beam",
+                "Energy Ball" if "Energy Ball" in MOVE_DB else "Grass Knot",
+                "Protect",
+            ],
+        ),
+    ],
+    "Galarian Moltres": [
+        SetBuild(
+            "Moltres-Galar",
+            "Weakness Policy",
+            None,
+            "Dark",
+            "Modest",
+            _evs(0, 0, 0, 252, 4, 252),
+            _IV31,
+            ["Fiery Wrath", "Hurricane", "Flamethrower", "Protect"],
+        ),
+    ],
+    "Cresselia": [
+        SetBuild(
+            "Cresselia",
+            "Leftovers",
+            None,
+            "Fairy",
+            "Calm",
+            _evs(252, 0, 0, 0, 252, 4),
+            _IV31,
+            ["Psychic", "Moonblast", "Moonlight", "Protect"],
+        ),
+    ],
+    "Meowscarada": [
+        SetBuild(
+            "Meowscarada",
+            "Choice Band",
+            None,
+            "Grass",
+            "Jolly",
+            _evs(0, 252, 4, 0, 0, 252),
+            _IV31,
+            [
+                "Flower Trick",
+                "Knock Off",
+                "Play Rough",
+                "Low Kick" if "Low Kick" in MOVE_DB else "Brick Break",
+            ],
+        ),
+    ],
+}
+
+
+if "_orig_make_default_adversary" not in globals():
+    _orig_make_default_adversary = globals().get("make_default_adversary", lambda x: None)
+
+
+def make_default_adversary(spec_name: str) -> Optional[SetBuild]:
+    return _orig_make_default_adversary(spec_name) if _orig_make_default_adversary else None
+
+
+if "_orig_adversary_variants" not in globals():
+    _orig_adversary_variants = globals().get("adversary_variants", lambda x: None)
+
+
+def adversary_variants(spec_name: str) -> Optional[Tuple[List[SetBuild], List[float]]]:
+    key = resolve_species_name(spec_name) or spec_name
+    if key in THREAT_PRESETS and THREAT_PRESETS[key]:
+        variants = []
+        for sb in THREAT_PRESETS[key]:
+            try:
+                for m in sb.moves:
+                    if m not in MOVE_DB:
+                        raise KeyError(m)
+                variants.append(sb)
+            except KeyError:
+                continue
+        if variants:
+            w = [1.0 / len(variants)] * len(variants)
+            return variants, w
+
+    if _orig_adversary_variants:
+        return _orig_adversary_variants(spec_name)
+    return None
+
+
+ALIASES.update({"Galarian Moltres": "Moltres-Galar"})
+
+
+def _print_version_banner_v5_wrap():
+    print("== SV 1v1 Optimizer — CPU only ==")
+    print("Version:", "5.0 (threat presets on)")
+    print(
+        "Note: Using curated 1v1-style threat sets where available; falling back otherwise."
+    )
+
+
+
+
 # =========================
 #  MINI 1V1 SIMULATOR CORE
 # =========================
@@ -3836,6 +4476,8 @@ def branch_on_move(
 
 
 def _print_version_banner_accurate() -> None:
+    if globals().get("_svi_banner_override_v5"):
+        return
     print("== SV 1v1 Optimizer — CPU only ==")
     print("Version:", "4.0 (No moveset sampling; legality + dominance + full enumeration)")
     print("Note: Complete, legality-aware 4-move enumeration with pruning; dynamic EV axes per moveset.")
@@ -3851,6 +4493,20 @@ if "main" in globals():
             return _old_main_v4()
         finally:
             globals().pop("_svi_banner_override", None)
+
+
+if "main" in globals() and not globals().get("_svi_v5_installed"):
+    _prev_main_v5 = main
+
+    def main() -> object:
+        globals()["_svi_banner_override_v5"] = True
+        try:
+            _print_version_banner_v5_wrap()
+            return _prev_main_v5()
+        finally:
+            globals().pop("_svi_banner_override_v5", None)
+
+    globals()["_svi_v5_installed"] = True
 
 
 if __name__ == "__main__":
