@@ -829,7 +829,6 @@ SLICING_MOVES = {
     "Leaf Blade",
     "Psycho Cut",
     "Night Slash",
-    "Sacred Sword",
     "Ceaseless Edge",
     "Razor Shell",
     "Slash",
@@ -1366,7 +1365,6 @@ LEGAL_MOVES_QUAQUAVAL = [
     "Brick Break",
     "Low Kick",
     "Drain Punch",
-    "Sacred Sword",
     "Ice Spinner",
     "Icicle Crash",
     "Brave Bird",
@@ -3908,6 +3906,91 @@ MOVE_POOLS = {k: list(LEGAL_MOVES[k]) for k in LEGAL_MOVES}
 FOUR_PHYSICAL_ONLY = {k: True for k in LEGAL_MOVES}
 
 
+if "Quaquaval" in LEGAL_MOVES:
+    LEGAL_MOVES["Quaquaval"] = [m for m in LEGAL_MOVES["Quaquaval"] if m != "Sacred Sword"]
+    MOVE_POOLS["Quaquaval"] = list(LEGAL_MOVES["Quaquaval"])
+
+
+def _stab_like_for_move(species: str, move_name: str, tera_pool: list[str]) -> float:
+    """Return the best achievable STAB multiplier for this move given base typing and Tera."""
+
+    mv = MOVE_DB[move_name]
+    base_types = tuple(t for t in SPECIES_DATA[species].types if t)
+    base_stab = 1.5 if mv.mtype in base_types else 1.0
+    tera_stab = 1.5 if mv.mtype in tera_pool else 1.0
+    if base_stab > 1.0 and mv.mtype in tera_pool:
+        return 2.0
+    return max(base_stab, tera_stab)
+
+
+def _synergy_mult_for_move(move: Move, species: str) -> float:
+    """Lightweight multipliers to reward broadly good synergies without simulating items."""
+
+    mult = 1.0
+    if move.is_punch:
+        mult *= 1.05
+    if move.priority > 0:
+        mult *= 1.03
+    if move.accuracy < 0.9:
+        mult *= 0.97
+    return mult
+
+
+def _coverage_score_approx(species: str, move_name: str) -> float:
+    """Approximate the incremental type coverage this move brings for the species."""
+
+    mv = MOVE_DB[move_name]
+    spec = SPECIES_DATA[species]
+    primary = spec.types[0] or spec.types[1] or mv.mtype
+    gain = type_coverage_gain(spec, primary, mv.mtype)
+    return max(0.0, gain)
+
+
+def _rank_moves_for_species(species: str, pool: list[str], tera_pool: list[str]) -> list[str]:
+    """Rank moves from best to worst using a fast heuristic that values coverage and STAB."""
+
+    scored: list[tuple[str, float]] = []
+    for name in pool:
+        mv = MOVE_DB[name]
+        if mv.category == "Status":
+            keep_status = mv.is_protect or mv.is_swords_dance or mv.is_counter or mv.is_mirror_coat or (
+                name in {"Detect", "Encore", "Taunt"}
+            )
+            if not keep_status:
+                continue
+            scored.append((name, 0.25))
+            continue
+
+        stab_like = _stab_like_for_move(species, name, tera_pool)
+        cover = _coverage_score_approx(species, name)
+        powr = base_power(mv) / 100.0
+        acc_stat = mv.accuracy if mv.accuracy is not None else 1.0
+        acc = max(0.5, min(1.0, acc_stat))
+        syn = _synergy_mult_for_move(mv, species)
+        score = (1.25 * stab_like) + (1.10 * cover) + (1.00 * powr) + (0.50 * acc)
+        score *= syn
+        scored.append((name, float(score)))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [name for name, _ in scored]
+
+
+TOPK_MOVES_PER_SPECIES = {
+    "Swampert": 14,
+    "Blaziken": 14,
+    "Quaquaval": 14,
+}
+
+
+def _top_moves_subset(species: str) -> list[str]:
+    full = MOVE_POOLS.get(species, LEGAL_MOVES.get(species, []))
+    tera_pool = TERA_POOLS.get(species, [])
+    ranked = _rank_moves_for_species(species, list(full), tera_pool)
+    k = TOPK_MOVES_PER_SPECIES.get(species, 14)
+    pin = [m for m in ["Protect", "Swords Dance", "Counter", "Detect", "Encore", "Taunt"] if m in ranked]
+    head = [m for m in ranked if m not in pin][: max(0, k - len(pin))]
+    return (head + pin)[:k]
+
 def assert_legal_moves(species: str, moves: list[str]) -> None:
     legal = set(LEGAL_MOVES.get(species, []))
     bad = [m for m in moves if m not in legal]
@@ -3975,14 +4058,15 @@ def _ev_axes_for_moveset(moves: list[str]) -> tuple[str, ...]:
     return ("HP", "Atk", "SpA", "Spe")
 
 
-def movesets_from_pool(
+def movesets_from_pool_topk(
     pool: list[str], four_physical_only: bool = False, *, species: Optional[str] = None
 ) -> list[list[str]]:
-    reduced = reduce_pool_by_dominance(pool)
-    out: list[list[str]] = []
-    from itertools import combinations
+    topk = _top_moves_subset(species) if species else list(pool)
+    if four_physical_only:
+        topk = [name for name in topk if MOVE_DB[name].category != "Special"]
 
-    for combo in combinations(reduced, 4):
+    out: list[list[str]] = []
+    for combo in itertools.combinations(topk, 4):
         moves = list(combo)
         if not any(_is_damaging(m) for m in moves):
             continue
@@ -3998,13 +4082,23 @@ def movesets_from_pool(
     return out
 
 
+def _print_trio_movepool_summary():
+    for s in ["Swampert", "Blaziken", "Quaquaval"]:
+        topk = _top_moves_subset(s)
+        print(
+            f"[movepool:{s}] legal={len(LEGAL_MOVES[s])} | topK={len(topk)} -> exhaustive 4-move combos from top-K (no subsampling)"
+        )
+
+
+LOCAL_REFINE_PASSES = max(LOCAL_REFINE_PASSES, 40)
+
+
 def enumerate_candidates_for_species(species: str) -> list[SetBuild]:
     spec = SPECIES_DATA[species]
     pool = MOVE_POOLS[species]
     items = ITEM_CANDIDATES[species]
     teras = TERA_POOLS[species]
-    all_movesets = movesets_from_pool(pool, FOUR_PHYSICAL_ONLY[species], species=species)
-    sampled_movesets = _sample_movesets_broaden(all_movesets)
+    movesets = movesets_from_pool_topk(pool, FOUR_PHYSICAL_ONLY[species], species=species)
 
     if species == "Swampert":
         nature_pool = ["Adamant", "Careful", "Impish"]
@@ -4028,7 +4122,7 @@ def enumerate_candidates_for_species(species: str) -> list[SetBuild]:
     for item in items:
         for tera in teras:
             for nature in nature_pool:
-                for mv in sampled_movesets:
+                for mv in movesets:
                     if not filter_moveset_by_item(item, mv):
                         continue
                     assert_legal_moves(species, mv)
