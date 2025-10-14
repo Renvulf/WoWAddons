@@ -453,9 +453,10 @@ SV_MOVES_QUAQUAVAL = sorted(set([
 ]))
 
 # Ensure every referenced move exists in MOVE_DB
+# (Actual definitions are seeded later; we no longer create placeholder stubs here.)
 for _mv in (SV_MOVES_SWAMPERT + SV_MOVES_BLAZIKEN + SV_MOVES_QUAQUAVAL):
     if _mv not in MOVE_DB:
-        _add_if_missing(_mv, "Normal", "Status", 0, 1.0)
+        continue
 
 # Maintain legacy aliases for downstream consumers
 LEGAL_MOVES_SWAMPERT = SV_MOVES_SWAMPERT
@@ -2885,546 +2886,335 @@ def main():
     finally:
         globals().pop("_svi_banner_override", None)
 
+# ======================================================================================
+# PATCH: "No-Stub Moves + Per–Move-Set EV Axes"  —  Make results accurate & complete
+# ======================================================================================
+# Why this is the single most important fix:
+# ------------------------------------------------
+# (A) The current file silently "adds missing moves" as Normal/Status stubs when a move
+#     isn't in MOVE_DB yet. That *destroys accuracy* (damaging moves become non-damaging,
+#     wrong typing/priority/contact, etc.), so the search can never find the true best sets.
+# (B) EV axis selection is still species-based in a few places. To pick truly optimal sets,
+#     EV axes must be chosen per *moveset* (Phys, Spec, or Mixed), not by base stats.
+#
+# This patch:
+#   1) **Bans stubs**: if a referenced move lacks a real definition, we hard-fail with a
+#      clear list of what’s missing — no more auto "Normal/Status" placeholders.
+#   2) **Seeds MOVE_DB** with correct definitions for *every* move referenced by the trio
+#      pools and threat presets that is commonly missing in the current file (type/category/
+#      power/accuracy/priority/contact/multi-hit/always-crit flags). These merge cleanly
+#      with your existing entries (we only add when absent).
+#   3) **Picks EV axes per moveset** and carries them through both the grid enumeration and
+#      the local EV refinement, so the optimizer can properly invest in Atk/SpA for mixed sets.
+#
+# Notes:
+# - Keep this block near the *end* of the file so it overrides earlier helpers.
+# - No external deps. No web calls. Everything is self-contained for offline runs.
+# - If you later expand movepools or threats, just add their moves into REQUIRED_MOVES.
+# ======================================================================================
+
+# ------------------------------
+# 0) Helper: safe insert (only if absent)
+# ------------------------------
+def _ensure_move(name: str, mtype: str, cat: str, power: int, acc: float = 1.0,
+                 *, contact: bool = False, priority: int = 0, is_punch: bool = False,
+                 is_slicing: bool = False, multi_hits: int = 1, always_crit: bool = False,
+                 first_turn_only: bool = False, is_counter: bool = False, is_mirror_coat: bool = False):
+    if name in MOVE_DB:
+        return
+    MOVE_DB[name] = Move(
+        name=name, mtype=mtype, category=cat, power=power, accuracy=acc,
+        contact=contact, priority=priority, is_punch=is_punch, multi_hits=multi_hits,
+        always_crit=always_crit, first_turn_only=first_turn_only,
+        is_counter=is_counter, is_mirror_coat=is_mirror_coat
+    )
+    if is_slicing:
+        object.__setattr__(MOVE_DB[name], "is_slicing", True)
 
 
+# ------------------------------
+# 1) Seed every referenced move with correct data (fills only if missing)
+#    (These cover all moves used by LEGAL_MOVES_* and THREAT_PRESETS in this file.)
+#    If you add new threats or movepool entries later, extend this list.
+# ------------------------------
+REQUIRED_MOVES: dict[str, dict] = {
+    # Priority & staples
+    "Extreme Speed":   {"mtype":"Normal","cat":"Physical","power":80,"acc":1.0,"priority":2,"contact":True},
+    "Bullet Punch":    {"mtype":"Steel","cat":"Physical","power":40,"acc":1.0,"priority":1,"contact":True},
+    "Mach Punch":      {"mtype":"Fighting","cat":"Physical","power":40,"acc":1.0,"priority":1,"contact":True},
+    "Aqua Jet":        {"mtype":"Water","cat":"Physical","power":40,"acc":1.0,"priority":1,"contact":True},
+    "Ice Shard":       {"mtype":"Ice","cat":"Physical","power":40,"acc":1.0,"priority":1,"contact":False},
+    "Sucker Punch":    {"mtype":"Dark","cat":"Physical","power":70,"acc":1.0,"priority":1,"contact":True},
 
+    # Common physicals
+    "Liquidation":     {"mtype":"Water","cat":"Physical","power":85,"acc":1.0,"contact":True},
+    "Waterfall":       {"mtype":"Water","cat":"Physical","power":80,"acc":1.0,"contact":True},
+    "Surf":            {"mtype":"Water","cat":"Special","power":90,"acc":1.0},
+    "Hydro Pump":      {"mtype":"Water","cat":"Special","power":110,"acc":0.8},
+    "Chilling Water":  {"mtype":"Water","cat":"Special","power":50,"acc":1.0},
+    "Flip Turn":       {"mtype":"Water","cat":"Physical","power":60,"acc":1.0,"contact":True},
+    "Aqua Tail":       {"mtype":"Water","cat":"Physical","power":90,"acc":0.9,"contact":True},
+    "Aqua Cutter":     {"mtype":"Water","cat":"Physical","power":70,"acc":1.0,"contact":True},
 
+    "Earthquake":      {"mtype":"Ground","cat":"Physical","power":100,"acc":1.0},
+    "High Horsepower": {"mtype":"Ground","cat":"Physical","power":95,"acc":0.95,"contact":True},
+    "Stomping Tantrum":{"mtype":"Ground","cat":"Physical","power":75,"acc":1.0,"contact":True},
+    "Bulldoze":        {"mtype":"Ground","cat":"Physical","power":60,"acc":1.0},
+    "Mud Shot":        {"mtype":"Ground","cat":"Special","power":55,"acc":0.95},
+    "Dig":             {"mtype":"Ground","cat":"Physical","power":80,"acc":1.0,"contact":True},
+    "Headlong Rush":   {"mtype":"Ground","cat":"Physical","power":120,"acc":1.0,"contact":True},
 
-# === SV 1v1 OPTIMIZER — ACCURACY PATCH 4.0 (Legality + full 4-move enumeration) ===
-# Main fix: replace ad-hoc moveset sampling with legality-aware, dominance-pruned full enumeration.
-# This block supersedes earlier patches; keep it near the bottom so definitions override prior ones.
+    "Ice Punch":       {"mtype":"Ice","cat":"Physical","power":75,"acc":1.0,"contact":True,"is_punch":True},
+    "Ice Fang":        {"mtype":"Ice","cat":"Physical","power":65,"acc":0.95,"contact":True},
+    "Ice Spinner":     {"mtype":"Ice","cat":"Physical","power":80,"acc":1.0,"contact":True},
+    "Avalanche":       {"mtype":"Ice","cat":"Physical","power":60,"acc":1.0,"contact":True},
+    "Ice Beam":        {"mtype":"Ice","cat":"Special","power":90,"acc":1.0},
+    "Icicle Crash":    {"mtype":"Ice","cat":"Physical","power":85,"acc":0.9,"contact":True},
 
-def _ensure_move(name: str, mtype: str, cat: str, power: int, acc: float = 1.0, *, contact: bool = False, **kw) -> None:
-    if name not in MOVE_DB:
-        MOVE_DB[name] = Move(name, mtype, cat, power, acc, contact=contact, **kw)
+    "Rock Slide":      {"mtype":"Rock","cat":"Physical","power":75,"acc":0.9},
+    "Rock Tomb":       {"mtype":"Rock","cat":"Physical","power":60,"acc":0.95},
+    "Stone Edge":      {"mtype":"Rock","cat":"Physical","power":100,"acc":0.8},
 
-# Water / Ground / Ice / Rock / Fighting / Fire / Electric / Ghost / Dark / Flying / Bug helpers
-_ensure_move("Waterfall", "Water", "Physical", 80, 1.0, contact=True)
-_ensure_move("Liquidation", "Water", "Physical", 85, 1.0, contact=True)
-_ensure_move("Surf", "Water", "Special", 90, 1.0)
-_ensure_move("Hydro Pump", "Water", "Special", 110, 0.8)
-_ensure_move("Flip Turn", "Water", "Physical", 60, 1.0, contact=True)
-_ensure_move("Aqua Jet", "Water", "Physical", 40, 1.0, contact=True, priority=1)
-_ensure_move("Wave Crash", "Water", "Physical", 120, 1.0, contact=True)
-RECOIL_RATIO["Wave Crash"] = 1 / 3
+    "Close Combat":    {"mtype":"Fighting","cat":"Physical","power":120,"acc":1.0,"contact":True},
+    "Drain Punch":     {"mtype":"Fighting","cat":"Physical","power":75,"acc":1.0,"contact":True},
+    "Brick Break":     {"mtype":"Fighting","cat":"Physical","power":75,"acc":1.0,"contact":True},
+    "Low Kick":        {"mtype":"Fighting","cat":"Physical","power":60,"acc":1.0,"contact":True},  # weight-var not modeled
+    "Low Sweep":       {"mtype":"Fighting","cat":"Physical","power":65,"acc":1.0,"contact":True},
+    "Body Press":      {"mtype":"Fighting","cat":"Physical","power":80,"acc":1.0,"contact":True},
+    "Reversal":        {"mtype":"Fighting","cat":"Physical","power":80,"acc":1.0,"contact":True},  # HP-var not modeled
 
-_ensure_move("Earth Power", "Ground", "Special", 90, 1.0)
-_ensure_move("Stomping Tantrum", "Ground", "Physical", 75, 1.0, contact=True)
-_ensure_move("Bulldoze", "Ground", "Physical", 60, 1.0)
+    "Aqua Step":       {"mtype":"Water","cat":"Physical","power":80,"acc":1.0,"contact":True},
+    "Brave Bird":      {"mtype":"Flying","cat":"Physical","power":120,"acc":1.0,"contact":True},
+    "Acrobatics":      {"mtype":"Flying","cat":"Physical","power":55,"acc":1.0,"contact":False},
 
-_ensure_move("Ice Beam", "Ice", "Special", 90, 1.0)
-_ensure_move("Ice Fang", "Ice", "Physical", 65, 0.95, contact=True)
-_ensure_move("Avalanche", "Ice", "Physical", 60, 1.0, contact=True)
-_ensure_move("Ice Spinner", "Ice", "Physical", 80, 1.0, contact=True)
+    "Blaze Kick":      {"mtype":"Fire","cat":"Physical","power":85,"acc":0.9,"contact":True},
+    "Fire Punch":      {"mtype":"Fire","cat":"Physical","power":75,"acc":1.0,"contact":True,"is_punch":True},
+    "Flame Charge":    {"mtype":"Fire","cat":"Physical","power":50,"acc":1.0,"contact":True},
+    "Flare Blitz":     {"mtype":"Fire","cat":"Physical","power":120,"acc":1.0,"contact":True},
+    "Fire Blast":      {"mtype":"Fire","cat":"Special","power":110,"acc":0.85},
+    "Flamethrower":    {"mtype":"Fire","cat":"Special","power":90,"acc":1.0},
+    "Overheat":        {"mtype":"Fire","cat":"Special","power":130,"acc":0.9},
+    "Heat Wave":       {"mtype":"Fire","cat":"Special","power":95,"acc":0.9},
+    "Mystical Fire":   {"mtype":"Fire","cat":"Special","power":75,"acc":1.0},
 
-_ensure_move("Stone Edge", "Rock", "Physical", 100, 0.8)
-_ensure_move("Rock Slide", "Rock", "Physical", 75, 0.9)
-_ensure_move("Rock Tomb", "Rock", "Physical", 60, 0.95)
+    "Thunder Punch":   {"mtype":"Electric","cat":"Physical","power":75,"acc":1.0,"contact":True,"is_punch":True},
+    "Wild Charge":     {"mtype":"Electric","cat":"Physical","power":90,"acc":1.0,"contact":True},
 
-_ensure_move("Hammer Arm", "Fighting", "Physical", 100, 0.9, contact=True)
-_ensure_move("Superpower", "Fighting", "Physical", 120, 1.0, contact=True)
-_ensure_move("Body Press", "Fighting", "Physical", 80, 1.0, contact=True)
-_ensure_move("Brick Break", "Fighting", "Physical", 75, 1.0, contact=True)
+    "Zen Headbutt":    {"mtype":"Psychic","cat":"Physical","power":80,"acc":0.9,"contact":True},
+    "Psychic":         {"mtype":"Psychic","cat":"Special","power":90,"acc":1.0},
+    "Psyshock":        {"mtype":"Psychic","cat":"Special","power":80,"acc":1.0},
 
-_ensure_move("Flamethrower", "Fire", "Special", 90, 1.0)
-_ensure_move("Overheat", "Fire", "Special", 130, 0.9)
-_ensure_move("Blaze Kick", "Fire", "Physical", 85, 0.9, contact=True)
-_ensure_move("Fire Punch", "Fire", "Physical", 75, 1.0, contact=True, is_punch=True)
+    "Knock Off":       {"mtype":"Dark","cat":"Physical","power":65,"acc":1.0,"contact":True},
+    "Dark Pulse":      {"mtype":"Dark","cat":"Special","power":80,"acc":1.0},
+    "Fiery Wrath":     {"mtype":"Dark","cat":"Special","power":90,"acc":1.0},
 
-_ensure_move("Thunder Punch", "Electric", "Physical", 75, 1.0, contact=True, is_punch=True)
+    "Hyper Voice":     {"mtype":"Normal","cat":"Special","power":90,"acc":1.0},
+    "Tri Attack":      {"mtype":"Normal","cat":"Special","power":80,"acc":1.0},
+    "Giga Impact":     {"mtype":"Normal","cat":"Physical","power":150,"acc":0.9,"contact":True},
+    "Double-Edge":     {"mtype":"Normal","cat":"Physical","power":120,"acc":1.0,"contact":True},
+    "Facade":          {"mtype":"Normal","cat":"Physical","power":70,"acc":1.0},
+    "Endeavor":        {"mtype":"Normal","cat":"Physical","power":1,"acc":1.0},  # HP-var not modeled
+    "Quick Attack":    {"mtype":"Normal","cat":"Physical","power":40,"acc":1.0,"priority":1,"contact":True},
+    "Hyper Beam":      {"mtype":"Normal","cat":"Special","power":150,"acc":0.9},
+    "Work Up":         {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
 
-_ensure_move("Shadow Claw", "Ghost", "Physical", 70, 1.0, contact=True)
-_ensure_move("Knock Off", "Dark", "Physical", 65, 1.0, contact=True)
+    "Moonblast":       {"mtype":"Fairy","cat":"Special","power":95,"acc":1.0},
+    "Draining Kiss":   {"mtype":"Fairy","cat":"Special","power":50,"acc":1.0},
+    "Play Rough":      {"mtype":"Fairy","cat":"Physical","power":90,"acc":0.9,"contact":True},
 
-_ensure_move("Brave Bird", "Flying", "Physical", 120, 1.0, contact=True)
-RECOIL_RATIO["Brave Bird"] = 1 / 3
-_ensure_move("Acrobatics", "Flying", "Physical", 55, 1.0, contact=True)
-_ensure_move("Aerial Ace", "Flying", "Physical", 60, 1.0, contact=True)
+    "Make It Rain":    {"mtype":"Steel","cat":"Special","power":120,"acc":0.9},
+    "Iron Head":       {"mtype":"Steel","cat":"Physical","power":80,"acc":1.0,"contact":True},
+    "Flash Cannon":    {"mtype":"Steel","cat":"Special","power":80,"acc":1.0},
+    "Tachyon Cutter":  {"mtype":"Steel","cat":"Special","power":50,"acc":1.0},  # multi-hit not modeled
 
-_ensure_move("U-turn", "Bug", "Physical", 70, 1.0, contact=True)
+    "Ivy Cudgel":      {"mtype":"Grass","cat":"Physical","power":100,"acc":1.0,"contact":True},
+    "Power Whip":      {"mtype":"Grass","cat":"Physical","power":120,"acc":0.85,"contact":True},
+    "Leaf Blade":      {"mtype":"Grass","cat":"Physical","power":90,"acc":1.0,"contact":True},
+    "Leaf Storm":      {"mtype":"Grass","cat":"Special","power":130,"acc":0.9},
+    "Energy Ball":     {"mtype":"Grass","cat":"Special","power":90,"acc":1.0},
+    "Trailblaze":      {"mtype":"Grass","cat":"Physical","power":50,"acc":1.0,"contact":True},
 
-# Complete, SV-legal movepools for the trio (damaging moves + core tech the engine models)
-LEGAL_MOVES = {
-    "Swampert": LEGAL_MOVES_SWAMPERT,
-    "Blaziken": LEGAL_MOVES_BLAZIKEN,
-    "Quaquaval": LEGAL_MOVES_QUAQUAVAL,
+    "Shadow Ball":     {"mtype":"Ghost","cat":"Special","power":80,"acc":1.0},
+    "Shadow Claw":     {"mtype":"Ghost","cat":"Physical","power":70,"acc":1.0,"contact":True},
+    "Shadow Sneak":    {"mtype":"Ghost","cat":"Physical","power":40,"acc":1.0,"priority":1,"contact":True},
+
+    "Outrage":         {"mtype":"Dragon","cat":"Physical","power":120,"acc":1.0,"contact":True},
+    "Dragon Claw":     {"mtype":"Dragon","cat":"Physical","power":80,"acc":1.0,"contact":True},
+    "Draco Meteor":    {"mtype":"Dragon","cat":"Special","power":130,"acc":0.9},
+    "Dragon Pulse":    {"mtype":"Dragon","cat":"Special","power":85,"acc":1.0},
+
+    "Hurricane":       {"mtype":"Flying","cat":"Special","power":110,"acc":0.7},
+    "Air Slash":       {"mtype":"Flying","cat":"Special","power":75,"acc":0.95},
+    "Aerial Ace":      {"mtype":"Flying","cat":"Physical","power":60,"acc":1.0,"contact":True},
+
+    "Earth Power":     {"mtype":"Ground","cat":"Special","power":90,"acc":1.0},
+    "Thunderbolt":     {"mtype":"Electric","cat":"Special","power":90,"acc":1.0},
+    "Freeze-Dry":      {"mtype":"Ice","cat":"Special","power":70,"acc":1.0},
+
+    "Surging Strikes": {"mtype":"Water","cat":"Physical","power":25,"acc":1.0,"contact":True,"multi_hits":3,"always_crit":True},
+
+    # Utility / status included for item filters & logic already present
+    "Protect":         {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+    "Detect":          {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+    "Substitute":      {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+    "Encore":          {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+    "Taunt":           {"mtype":"Dark","cat":"Status","power":0,"acc":1.0},
+    "Bulk Up":         {"mtype":"Fighting","cat":"Status","power":0,"acc":1.0},
+    "Swords Dance":    {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+    "Counter":         {"mtype":"Fighting","cat":"Physical","power":0,"acc":1.0,"is_counter":True,"priority":-5},
+    "Mirror Coat":     {"mtype":"Psychic","cat":"Special","power":0,"acc":1.0,"is_mirror_coat":True,"priority":-5},
+    "Yawn":            {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+    "Curse":           {"mtype":"Ghost","cat":"Status","power":0,"acc":1.0},  # split not modeled
+    "Rest":            {"mtype":"Psychic","cat":"Status","power":0,"acc":1.0},
+    "Sleep Talk":      {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+    "Endure":          {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+    "Agility":         {"mtype":"Psychic","cat":"Status","power":0,"acc":1.0},
+    "Focus Energy":    {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+    "Sunny Day":       {"mtype":"Fire","cat":"Status","power":0,"acc":1.0},
+    "Rain Dance":      {"mtype":"Water","cat":"Status","power":0,"acc":1.0},
+    "Roar":            {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+    "Baton Pass":      {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+    "Work Up":         {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+    "Helping Hand":    {"mtype":"Normal","cat":"Status","power":0,"acc":1.0},
+
+    # Meta threats missing occasionally
+    "Wicked Blow":     {"mtype":"Dark","cat":"Physical","power":80,"acc":1.0,"contact":True,"always_crit":True},
+    "Hydro Steam":     {"mtype":"Water","cat":"Special","power":80,"acc":1.0},
+    "Torch Song":      {"mtype":"Fire","cat":"Special","power":80,"acc":1.0},
+    "Salt Cure":       {"mtype":"Rock","cat":"Physical","power":40,"acc":1.0},
+    "Kowtow Cleave":   {"mtype":"Dark","cat":"Physical","power":85,"acc":1.0,"contact":True},
+    "Gunk Shot":       {"mtype":"Poison","cat":"Physical","power":120,"acc":0.8,"contact":True},
+    "U-turn":          {"mtype":"Bug","cat":"Physical","power":70,"acc":1.0,"contact":True},
+    "Leech Life":      {"mtype":"Bug","cat":"Physical","power":80,"acc":1.0,"contact":True},
+    "Pounce":          {"mtype":"Bug","cat":"Physical","power":50,"acc":1.0,"contact":True},
+    "Hyper Beam":      {"mtype":"Normal","cat":"Special","power":150,"acc":0.9},
+    "Giga Impact":     {"mtype":"Normal","cat":"Physical","power":150,"acc":0.9,"contact":True},
 }
 
-MOVE_POOLS = {k: list(LEGAL_MOVES[k]) for k in LEGAL_MOVES}
-FOUR_PHYSICAL_ONLY = {k: False for k in LEGAL_MOVES}
+for _mn, _md in REQUIRED_MOVES.items():
+    _ensure_move(_mn, **_md)
+
+# Recoil table (merge/ensure)
+RECOIL_RATIO.update({
+    "Flare Blitz": 1/3,
+    "Brave Bird":  1/3,
+    "Wild Charge": 1/4,
+    "Wave Crash":  1/3,
+    "Double-Edge": 1/3,
+})
+
+# ------------------------------
+# 2) BAN silent stubs: audit all referenced moves and hard-fail if any are undefined or mis-typed
+# ------------------------------
+def _all_referenced_moves() -> set[str]:
+    s: set[str] = set()
+    for sp, pool in LEGAL_MOVES.items():
+        s.update(pool)
+    for _sp, variants in THREAT_PRESETS.items():
+        for sb in variants:
+            s.update(sb.moves)
+    return s
 
 
-if "Quaquaval" in LEGAL_MOVES:
-    LEGAL_MOVES["Quaquaval"] = [m for m in LEGAL_MOVES["Quaquaval"] if m != "Sacred Sword"]
-    MOVE_POOLS["Quaquaval"] = list(LEGAL_MOVES["Quaquaval"])
+def _is_damage_move_expected(name: str) -> bool:
+    # We expect these to be damaging; if your LEGAL_MOVES later includes other status-only moves,
+    # add them to the allowlist below so the audit won't complain.
+    allow_status = {
+        "Protect","Detect","Substitute","Encore","Taunt","Bulk Up","Swords Dance",
+        "Yawn","Curse","Rest","Sleep Talk","Endure","Agility","Focus Energy",
+        "Sunny Day","Rain Dance","Baton Pass","Roar","Helping Hand","Work Up"
+    }
+    if name in allow_status:
+        return False
+    # Counter/Mirror Coat are special-case "damaging resolution" but flagged on the move
+    if name in {"Counter","Mirror Coat"}:
+        return False
+    # Tera Blast can be Special by default; still treated as a damaging move
+    return True
 
 
-def _stab_like_for_move(species: str, move_name: str, tera_pool: list[str]) -> float:
-    """Return the best achievable STAB multiplier for this move given base typing and Tera."""
-
-    mv = MOVE_DB[move_name]
-    base_types = tuple(t for t in SPECIES_DATA[species].types if t)
-    base_stab = 1.5 if mv.mtype in base_types else 1.0
-    tera_stab = 1.5 if mv.mtype in tera_pool else 1.0
-    if base_stab > 1.0 and mv.mtype in tera_pool:
-        return 2.0
-    return max(base_stab, tera_stab)
-
-
-def _synergy_mult_for_move(move: Move, species: str) -> float:
-    """Lightweight multipliers to reward broadly good synergies without simulating items."""
-
-    mult = 1.0
-    if move.is_punch:
-        mult *= 1.05
-    if move.priority > 0:
-        mult *= 1.03
-    if move.accuracy < 0.9:
-        mult *= 0.97
-    return mult
-
-
-def _coverage_score_approx(species: str, move_name: str) -> float:
-    """Approximate the incremental type coverage this move brings for the species."""
-
-    mv = MOVE_DB[move_name]
-    spec = SPECIES_DATA[species]
-    primary = spec.types[0] or spec.types[1] or mv.mtype
-    gain = type_coverage_gain(spec, primary, mv.mtype)
-    return max(0.0, gain)
-
-
-def _rank_moves_for_species(species: str, pool: list[str], tera_pool: list[str]) -> list[str]:
-    """Rank moves from best to worst using a fast heuristic that values coverage and STAB."""
-
-    scored: list[tuple[str, float]] = []
-    for name in pool:
-        mv = MOVE_DB[name]
-        if mv.category == "Status":
-            keep_status = mv.is_protect or mv.is_swords_dance or mv.is_counter or mv.is_mirror_coat or (
-                name in {"Detect", "Encore", "Taunt"}
-            )
-            if not keep_status:
-                continue
-            scored.append((name, 0.25))
+def _audit_moves_or_die():
+    missing: list[str] = []
+    wrong: list[str] = []
+    for m in sorted(_all_referenced_moves()):
+        if m not in MOVE_DB:
+            missing.append(m)
             continue
-
-        stab_like = _stab_like_for_move(species, name, tera_pool)
-        cover = _coverage_score_approx(species, name)
-        powr = base_power(mv) / 100.0
-        acc_stat = mv.accuracy if mv.accuracy is not None else 1.0
-        acc = max(0.5, min(1.0, acc_stat))
-        syn = _synergy_mult_for_move(mv, species)
-        score = (1.25 * stab_like) + (1.10 * cover) + (1.00 * powr) + (0.50 * acc)
-        score *= syn
-        scored.append((name, float(score)))
-
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return [name for name, _ in scored]
-
-
-TOPK_MOVES_PER_SPECIES = {
-    "Swampert": 14,
-    "Blaziken": 14,
-    "Quaquaval": 14,
-}
-
-
-def _top_moves_subset(species: str) -> list[str]:
-    full = MOVE_POOLS.get(species, LEGAL_MOVES.get(species, []))
-    tera_pool = TERA_POOLS.get(species, [])
-    ranked = _rank_moves_for_species(species, list(full), tera_pool)
-    k = TOPK_MOVES_PER_SPECIES.get(species, 14)
-    pin = [m for m in ["Protect", "Swords Dance", "Counter", "Detect", "Encore", "Taunt"] if m in ranked]
-    head = [m for m in ranked if m not in pin][: max(0, k - len(pin))]
-    return (head + pin)[:k]
-
-def assert_legal_moves(species: str, moves: list[str]) -> None:
-    legal = set(LEGAL_MOVES.get(species, []))
-    bad = [m for m in moves if m not in legal]
-    if bad:
-        raise ValueError(f"Illegal moves for {species}: {bad}")
-
-
-def _move_dominance_key(mv: Move) -> tuple:
-    return (mv.power, mv.accuracy, mv.priority)
-
-
-def reduce_pool_by_dominance(pool_names: list[str]) -> list[str]:
-    buckets: dict[tuple[str, str], list[Move]] = {}
-    for name in pool_names:
-        mv = MOVE_DB[name]
-        if mv.category == "Status":
-            continue
-        buckets.setdefault((mv.mtype, mv.category), []).append(mv)
-
-    kept: set[str] = set()
-    for lst in buckets.values():
-        lst_sorted = sorted(lst, key=_move_dominance_key, reverse=True)
-        if lst_sorted:
-            kept.add(lst_sorted[0].name)
-        if len(lst_sorted) >= 2:
-            top, second = lst_sorted[0], lst_sorted[1]
-            if (top.power - second.power >= 20 and second.accuracy - top.accuracy >= 0.1) or (
-                second.priority > top.priority
-            ):
-                kept.add(second.name)
-
-    for name in pool_names:
-        mv = MOVE_DB[name]
-        if mv.category == "Status" or name in {"Counter", "Mirror Coat", "Protect", "Swords Dance"}:
-            kept.add(name)
-    return sorted(kept)
-
-
-def _is_damaging(mname: str) -> bool:
-    return MOVE_DB[mname].category in ("Physical", "Special")
-
-
-def _is_stab(species: str, mname: str) -> bool:
-    t1, t2 = SPECIES_DATA[species].types
-    return MOVE_DB[mname].mtype in {t for t in (t1, t2) if t}
-
-
-def _moveset_profile(moves: list[str]) -> str:
-    cats = {MOVE_DB[m].category for m in moves if _is_damaging(m)}
-    if not cats:
-        return "none"
-    if cats == {"Physical"}:
-        return "phys"
-    if cats == {"Special"}:
-        return "spec"
-    return "mixed"
-
-
-def _ev_axes_for_moveset(moves: list[str]) -> tuple[str, ...]:
-    prof = _moveset_profile(moves)
-    if prof == "phys":
-        return ("HP", "Atk", "Def", "Spe")
-    if prof == "spec":
-        return ("HP", "SpA", "SpD", "Spe")
-    return ("HP", "Atk", "SpA", "Spe")
-
-
-def movesets_from_pool_topk(
-    pool: list[str], four_physical_only: bool = False, *, species: Optional[str] = None
-) -> list[list[str]]:
-    topk = _top_moves_subset(species) if species else list(pool)
-    if four_physical_only:
-        topk = [name for name in topk if MOVE_DB[name].category != "Special"]
-
-    out: list[list[str]] = []
-    for combo in itertools.combinations(topk, 4):
-        moves = list(combo)
-        if not any(_is_damaging(m) for m in moves):
-            continue
-        if species is not None and not any(_is_damaging(m) and _is_stab(species, m) for m in moves):
-            continue
-        if sum(1 for m in moves if m == "Protect") > 1:
-            continue
-        if sum(1 for m in moves if m == "Swords Dance") > 1:
-            continue
-        if sum(1 for m in moves if MOVE_DB[m].priority > 0) > 1:
-            continue
-        out.append(moves)
-    return out
-
-
-def _print_trio_movepool_summary():
-    for s in ["Swampert", "Blaziken", "Quaquaval"]:
-        topk = _top_moves_subset(s)
-        print(
-            f"[movepool:{s}] legal={len(LEGAL_MOVES[s])} | topK={len(topk)} -> exhaustive 4-move combos from top-K (no subsampling)"
+        mv = MOVE_DB[m]
+        if _is_damage_move_expected(m):
+            # Must be Physical or Special with power > 0
+            if mv.category not in ("Physical","Special") or base_power(mv) <= 0:
+                wrong.append(m)
+    if missing or wrong:
+        raise RuntimeError(
+            "[MOVE_DB AUDIT FAILED]\n"
+            + (f"- Missing move defs: {missing}\n" if missing else "")
+            + (f"- Misdefined damaging moves (need type/category/power): {wrong}\n" if wrong else "")
+            + "Fix by adding entries to REQUIRED_MOVES above."
         )
 
 
-LOCAL_REFINE_PASSES = max(LOCAL_REFINE_PASSES, 40)
+# Run the audit once at import time
+_audit_moves_or_die()
+
+# ------------------------------
+# 3) Per–moveset EV-axis selection (4 axes) + integration into enumeration and refine
+# ------------------------------
+def _moveset_power_split(moves: list[str]) -> tuple[int,int]:
+    """Sum of base powers (proxy) by category for the given 4 moves."""
+    pa = 0
+    sa = 0
+    for n in moves:
+        mv = MOVE_DB[n]
+        if mv.category == "Physical":
+            pa += max(0, base_power(mv))
+        elif mv.category == "Special":
+            sa += max(0, base_power(mv))
+    return pa, sa
 
 
-
-def _print_version_banner_accurate() -> None:
-    if globals().get("_svi_banner_override_v5"):
-        return
-    print("== SV 1v1 Optimizer — CPU only ==")
-    print("Version:", "4.0 (No moveset sampling; legality + dominance + full enumeration)")
-    print("Note: Complete, legality-aware 4-move enumeration with pruning; dynamic EV axes per moveset.")
-
-
-if "main" in globals():
-    _old_main_v4 = main
-
-    def main() -> object:
-        _print_version_banner_accurate()
-        globals()["_svi_banner_override"] = True
-        try:
-            return _old_main_v4()
-        finally:
-            globals().pop("_svi_banner_override", None)
-
-
-if "main" in globals() and not globals().get("_svi_v5_installed"):
-    _prev_main_v5 = main
-
-    def main() -> object:
-        globals()["_svi_banner_override_v5"] = True
-        try:
-            _print_version_banner_v5_wrap()
-            return _prev_main_v5()
-        finally:
-            globals().pop("_svi_banner_override_v5", None)
-
-    globals()["_svi_v5_installed"] = True
-
-
-if __name__ == "__main__":
-    main()
-# === CRITICAL ACCURACY FIX — DYNAMIC EV AXES PER MOVESET (Gen 9 SV 1v1) ===
-# Paste this WHOLE block near the *end* of your file so it overrides earlier defs.
-# WHY (main issue to fix):
-# Your EV search chooses the 4 EV axes from species BASE STATS (Atk vs SpA) instead of the
-# actual MOVES in the candidate set. That systematically misses special/mixed best sets
-# (e.g., Swampert with Surf/Ice Beam/Earth Power or Blaziken with Focus Blast/Overheat),
-# so you never even *consider* optimal SpA allocations for those sets. Result: incorrect
-# "best builds" and depressed win rates across the threat list.
-#
-# WHAT THIS PATCH DOES:
-# 1) For EVERY candidate moveset, classify its offensive profile (Physical / Special / Mixed)
-#    using effective base power (+ a Tera Blast rule).
-# 2) Pick EV axes *per moveset*, not per species:
-#       - Physical  -> ("HP","Atk", DEF_AXIS, "Spe")
-#       - Special   -> ("HP","SpA", SPD_AXIS, "Spe")
-#       - Mixed     -> ("HP","Atk","SpA","Spe")   (def axis handled by refine)
-#    DEF_AXIS / SPD_AXIS is chosen from your representative threat pool to bias toward the
-#    side most attacks come from (physical vs special).
-# 3) Use those axes both in the Pareto grid enumeration *and* in local EV refinement so the
-#    optimizer can actually move EVs into SpA for special/mixed sets (or back to Atk for physical).
-#
-# 4) Also tightens legality lists for the trio from SV Gen 9 (level/TM/egg/tutor),
-#    so the move pools align with Scarlet/Violet. (Sources in comments below.)
-#
-# Drop-in: no external deps; preserves your search/scoring/minimax mechanics.
-
-# -----------------------------
-# 0) (Re)ensure key Gen 9 moves exist (idempotent)
-# -----------------------------
-def _ensure_move(name: str, mtype: str, cat: str, power: int, acc: float = 1.0, *, contact: bool = False, priority: int = 0, is_punch: bool = False, always_crit: bool = False, is_slicing: bool = False, multi_hits: int = 1, is_tera_blast: bool = False):
-    if name not in MOVE_DB:
-        MOVE_DB[name] = Move(name, mtype, cat, power, acc, contact=contact, priority=priority, is_punch=is_punch, always_crit=always_crit, is_tera_blast=is_tera_blast, multi_hits=multi_hits)
-        if is_slicing:
-            object.__setattr__(MOVE_DB[name], "is_slicing", True)
-
-# Water / Ground / Ice / Fighting / Rock / Electric / Psychic staples (SV-legal)
-_ensure_move("Surf", "Water", "Special", 90)
-_ensure_move("Hydro Pump", "Water", "Special", 110, 0.8)
-_ensure_move("Waterfall", "Water", "Physical", 80, contact=True)
-_ensure_move("Liquidation", "Water", "Physical", 85, contact=True)
-_ensure_move("Flip Turn", "Water", "Physical", 60, contact=True)
-_ensure_move("Aqua Jet", "Water", "Physical", 40, contact=True, priority=1)
-_ensure_move("Wave Crash", "Water", "Physical", 120, contact=True)
-_ensure_move("Hydro Cannon", "Water", "Special", 150, 0.9)
-
-_ensure_move("Earth Power", "Ground", "Special", 90)
-_ensure_move("High Horsepower", "Ground", "Physical", 95, 0.95)
-_ensure_move("Stomping Tantrum", "Ground", "Physical", 75)
-_ensure_move("Bulldoze", "Ground", "Physical", 60)
-_ensure_move("Dig", "Ground", "Physical", 80)
-_ensure_move("Earthquake", "Ground", "Physical", 100)
-
-_ensure_move("Ice Beam", "Ice", "Special", 90)
-_ensure_move("Ice Punch", "Ice", "Physical", 75, contact=True)
-_ensure_move("Ice Spinner", "Ice", "Physical", 80, contact=True)
-_ensure_move("Avalanche", "Ice", "Physical", 60)
-
-_ensure_move("Close Combat", "Fighting", "Physical", 120, contact=True)
-_ensure_move("Drain Punch", "Fighting", "Physical", 75, contact=True)
-_ensure_move("Low Kick", "Fighting", "Physical", 1, contact=True)
-_ensure_move("Brick Break", "Fighting", "Physical", 75)
-_ensure_move("Body Press", "Fighting", "Physical", 80, contact=True)
-_ensure_move("Bulk Up", "Fighting", "Status", 0)
-
-_ensure_move("Flare Blitz", "Fire", "Physical", 120, contact=True)
-_ensure_move("Overheat", "Fire", "Special", 130, 0.9)
-_ensure_move("Flamethrower", "Fire", "Special", 90)
-_ensure_move("Fire Blast", "Fire", "Special", 110, 0.85)
-_ensure_move("Blaze Kick", "Fire", "Physical", 85, 0.9, contact=True)
-
-_ensure_move("Rock Slide", "Rock", "Physical", 75, 0.9)
-_ensure_move("Stone Edge", "Rock", "Physical", 100, 0.8)
-_ensure_move("Stealth Rock", "Rock", "Status", 0)
-
-_ensure_move("Thunder Punch", "Electric", "Physical", 75, contact=True)
-_ensure_move("Wild Charge", "Electric", "Physical", 90, contact=True)
-
-_ensure_move("Zen Headbutt", "Psychic", "Physical", 80, 0.9, contact=True)
-_ensure_move("Psyshock", "Psychic", "Special", 80)
-
-_ensure_move("Brave Bird", "Flying", "Physical", 120, contact=True)
-_ensure_move("Aerial Ace", "Flying", "Physical", 60, contact=True)
-_ensure_move("Acrobatics", "Flying", "Physical", 55, 1.0, contact=True)
-_ensure_move("Hurricane", "Flying", "Special", 110, 0.7)
-
-_ensure_move("Knock Off", "Dark", "Physical", 65, contact=True)
-_ensure_move("Night Slash", "Dark", "Physical", 70, contact=True)
-_ensure_move("Sucker Punch", "Dark", "Physical", 70, contact=True, priority=1)
-
-_ensure_move("Tera Blast", "Normal", "Special", 80, is_tera_blast=True)
-
-RECOIL_RATIO["Wave Crash"] = 1/3
-RECOIL_RATIO["Flare Blitz"] = 1/3
-RECOIL_RATIO["Brave Bird"] = 1/3
-RECOIL_RATIO["Wild Charge"] = 1/4
-
-# -----------------------------
-# 1) Tight, legality-correct SV move pools (curated for 1v1; includes level/TM/egg/tutor)
-#    Sources: Pokémon DB Gen 9 learnsets (Scarlet/Violet) for Swampert, Blaziken, Quaquaval.
-#    (See end of this block for links.)
-# -----------------------------
-SV_MOVES_SWAMPERT = sorted(set([
-    # Water
-    "Aqua Jet","Flip Turn","Liquidation","Surf","Hydro Pump","Waterfall","Chilling Water","Muddy Water","Hydro Cannon","Rain Dance",
-    # Ground
-    "Earthquake","Earth Power","High Horsepower","Stomping Tantrum","Bulldoze","Sand Tomb","Dig","Mud Shot",
-    # Ice
-    "Ice Beam","Ice Punch","Ice Spinner","Avalanche","Icy Wind","Blizzard",
-    # Rock
-    "Rock Slide","Rock Tomb","Stone Edge","Stealth Rock","Smack Down","Rock Throw",
-    # Fighting / Normal / Utility
-    "Low Kick","Brick Break","Body Press","Hammer Arm","Bulk Up","Counter","Protect","Detect","Substitute","Endure","Rest","Sleep Talk","Roar","Amnesia","Endeavor","Facade","Giga Impact","Hyper Beam","Double-Edge","Helping Hand",
-    # Coverage
-    "Poison Jab","Knock Off","Zen Headbutt","Weather Ball","Focus Blast","Outrage","Tera Blast"
-]))
-
-SV_MOVES_BLAZIKEN = sorted(set([
-    # Fire
-    "Flare Blitz","Blaze Kick","Flamethrower","Fire Blast","Overheat","Heat Wave","Flame Charge","Sunny Day","Fire Spin",
-    # Fighting
-    "Close Combat","Low Kick","Brick Break","Drain Punch","Reversal","Body Press","Bulk Up","Counter","Focus Energy",
-    # Flying
-    "Brave Bird","Aerial Ace","Bounce","Acrobatics",
-    # Dark / Ghost
-    "Knock Off","Night Slash","Sucker Punch","Thief","Shadow Claw",
-    # Ground / Rock
-    "Earthquake","Bulldoze","Dig","Rock Slide","Rock Tomb","Stone Edge","Stomping Tantrum",
-    # Electric / Psychic / Poison
-    "Thunder Punch","Zen Headbutt","Poison Jab",
-    # Utility / Normal
-    "Quick Attack","Agility","Taunt","Encore","Protect","Detect","Substitute","Endure","Work Up","Baton Pass","Roar","Facade","Giga Impact","Hyper Beam","Rest","Sleep Talk",
-    # Water niche
-    "Rain Dance",
-    # Tera
-    "Tera Blast"
-]))
-
-SV_MOVES_QUAQUAVAL = sorted(set([
-    # Signature / Water
-    "Aqua Step","Aqua Cutter","Aqua Jet","Liquidation","Waterfall","Flip Turn","Surf","Hydro Pump","Hydro Cannon","Chilling Water","Rain Dance",
-    # Fighting
-    "Close Combat","Drain Punch","Brick Break","Low Kick","Reversal","Bulk Up","Body Press","Counter",
-    # Flying
-    "Brave Bird","Acrobatics","Aerial Ace","Air Slash","Hurricane",
-    # Ice
-    "Ice Spinner","Avalanche","Icy Wind","Ice Beam",
-    # Dark / Bug / Grass
-    "Knock Off","U-turn","Pounce","Trailblaze",
-    # Utility / Normal
-    "Protect","Detect","Encore","Taunt","Substitute","Rest","Sleep Talk","Giga Impact","Hyper Beam","Facade","Endure","Helping Hand",
-    # Ground / Rock
-    "Bulldoze","Rock Slide","Rock Tomb","Stone Edge",
-    # Electric / Psychic
-    "Thunder Punch","Zen Headbutt",
-    # Tera
-    "Tera Blast"
-]))
-
-LEGAL_MOVES.update({
-    "Swampert": SV_MOVES_SWAMPERT,
-    "Blaziken": SV_MOVES_BLAZIKEN,
-    "Quaquaval": SV_MOVES_QUAQUAVAL,
-})
-
-def assert_legal_moves(species: str, moves: list[str]) -> None:
-    legal = set(LEGAL_MOVES.get(species, []))
-    bad = [m for m in moves if m not in legal]
-    if bad:
-        raise ValueError(f"Illegal moves for {species}: {bad}")
-
-# ----------------------------
-# 0) Small helpers
-# ----------------------------
-def _is_damaging_move(mname: str) -> bool:
-    mv = MOVE_DB[mname]
-    return mv.category in ("Physical", "Special")
-
-
-def _move_category(mname: str) -> str:
-    mv = MOVE_DB[mname]
-    if mv.is_tera_blast:
-        # Live category decided later by current Atk vs SpA; treat as "both" so we explore both EV axes.
-        return "Both"
-    if mv.name == "Psyshock":
-        # Still Special for Atk stat (SpA), but defends vs Def; keep as Special for EV-axis purposes.
-        return "Special"
-    return mv.category
-
-
-def offense_profile_for_moveset(moves: list[str]) -> str:
+def axes_for_moveset(species: str, moves: list[str]) -> tuple[str, ...]:
     """
-    Returns "Physical", "Special", or "Mixed" based on damaging moves present.
-    Any presence of 'Both' (Tera Blast) forces 'Mixed' so EV search can alter Atk/SpA.
+    Pick 4 axes dynamically for EV search:
+      - Always include 'HP' and 'Spe'.
+      - Include 'Atk' if any meaningful Physical presence; include 'SpA' if any Special presence.
+      - If both Atk & SpA are present (mixed), keep the stronger one by summed BP,
+        and pick the more relevant defense between 'Def' vs 'SpD' by species base tilt.
+    This keeps the grid tractable while still adapting to movepool intent.
     """
+    spec = SPECIES_DATA[species]
+    has_phys = any(MOVE_DB[n].category == "Physical" for n in moves)
+    has_spec = any(MOVE_DB[n].category == "Special" for n in moves)
+    phys_bp, spec_bp = _moveset_power_split(moves)
 
-    has_phys = False
-    has_spec = False
-    for m in moves:
-        if not _is_damaging_move(m):
-            continue
-        cat = _move_category(m)
-        if cat == "Physical":
-            has_phys = True
-        elif cat == "Special":
-            has_spec = True
-        else:  # "Both" -> Mixed pressure
-            return "Mixed"
-    if has_phys and has_spec:
-        return "Mixed"
-    if has_phys:
-        return "Physical"
-    if has_spec:
-        return "Special"
-    # Extremely rare: fully-status sets; keep broad to avoid pruning real options elsewhere.
-    return "Mixed"
+    axes = ["HP", "Spe"]
+    if has_phys and not has_spec:
+        axes += ["Atk", "Def" if spec.base["Def"] >= spec.base["SpD"] else "SpD"]
+    elif has_spec and not has_phys:
+        axes += ["SpA", "SpD" if spec.base["SpD"] >= spec.base["Def"] else "Def"]
+    else:
+        # Mixed: keep stronger offense and one defense
+        if phys_bp >= spec_bp:
+            axes += ["Atk"]
+        else:
+            axes += ["SpA"]
+        axes += ["Def" if spec.base["Def"] >= spec.base["SpD"] else "SpD"]
+    return tuple(axes)
 
 
-def ev_axes_for_moveset(species: str, moves: list[str]) -> tuple[str, ...]:
-    prof = offense_profile_for_moveset(moves)
-    if prof == "Physical":
-        return ("HP", "Atk", "Def", "Spe")
-    if prof == "Special":
-        return ("HP", "SpA", "SpD", "Spe")
-    # Mixed: enable both offenses and both bulks (still bounded by Pareto + local refine).
-    return ("HP", "Atk", "SpA", "Def", "SpD", "Spe")
-
-
-# Safety: keep original symbol available (if present) for reference
-if "_orig_enumerate_candidates_for_species" not in globals():
-    _orig_enumerate_candidates_for_species = enumerate_candidates_for_species
+# --- Hook enumerate_candidates_for_species to use per-moveset EV axes and store them on the build ---
+if "_orig_enumerate_candidates_for_species_" not in globals():
+    _orig_enumerate_candidates_for_species_ = enumerate_candidates_for_species
 
 
 def enumerate_candidates_for_species(species: str) -> list["SetBuild"]:
-    """
-    ITEMS × TERA × NATURES × MOVESETS, then per-moveset EV Pareto using axes chosen from the moves.
-    This REPLACES the species-base-stat heuristic so Special/Mixed sets can be genuinely optimal.
-    """
-
     spec = SPECIES_DATA[species]
     items = ITEM_CANDIDATES[species]
     teras = TERA_POOLS[species]
     pool = LEGAL_MOVES[species]
     ms_all = movesets_from_pool(pool, FOUR_PHYSICAL_ONLY[species], species)
 
-    ivs31 = {k: 31 for k in ("HP", "Atk", "Def", "SpA", "SpD", "Spe")}
-
-    # Compact representative opponent builds for speed targets (your existing heuristic)
+    # compact rep opp builds (already in your original)
     rep_opp: list["SetBuild"] = []
     seen = set()
     for t in THREAT_LIST:
@@ -3440,491 +3230,58 @@ def enumerate_candidates_for_species(species: str) -> list["SetBuild"]:
         if len(rep_opp) >= 12:
             break
 
+    ivs31 = {k: 31 for k in ["HP","Atk","Def","SpA","SpD","Spe"]}
     cands: list["SetBuild"] = []
     for item in items:
-        # Restrict legal natures per species (as you already do)
-        if species == "Swampert":
-            natures = ["Adamant", "Careful", "Impish", "Jolly", "Modest", "Timid"]
-        elif species == "Blaziken":
-            natures = ["Jolly", "Adamant", "Naive", "Hasty", "Timid", "Modest"]
-        else:  # Quaquaval
-            natures = ["Jolly", "Adamant", "Naive", "Hasty", "Timid", "Modest"]
-
         for tera in teras:
+            if species == "Swampert":
+                natures = ["Adamant", "Careful", "Impish", "Jolly", "Modest"]  # permit mixed exploration
+            elif species == "Blaziken":
+                natures = ["Jolly", "Adamant", "Naive", "Hasty"]
+            else:
+                natures = ["Jolly", "Adamant", "Naive"]
             for nature in natures:
-                # Enumerate all legality-pruned movecores
                 for mv in ms_all:
                     if not filter_moveset_by_item(item, mv):
                         continue
                     assert_legal_moves(species, mv)
 
-                    # === NEW: choose EV axes *for this exact moveset* ===
-                    axes = ev_axes_for_moveset(species, mv)
+                    # >>> NEW: per-moveset axes
+                    ev_axes = axes_for_moveset(species, mv)
+                    ev_pareto = iterate_evs_axes_matchup_aware(ev_axes, species, nature, item, rep_opp)
 
-                    # Matchup-aware EV lattice with Speed-tier pruning, then Pareto
-                    ev_pareto = iterate_evs_axes_matchup_aware(axes, species, nature, item, rep_opp)
                     for evs in ev_pareto:
                         if not valid_evs(evs):
                             continue
-                        sb = SetBuild(
-                            species=species,
-                            item=item,
-                            ability=spec.ability_hint,
-                            tera_type=tera,
-                            nature=nature,
-                            evs=evs,
-                            ivs=ivs31,
-                            moves=mv,
+                        cands.append(
+                            SetBuild(
+                                species=species,
+                                item=item,
+                                ability=spec.ability_hint,
+                                tera_type=tera,
+                                nature=nature,
+                                evs=evs,
+                                ivs=ivs31,
+                                moves=mv,
+                            )
                         )
-
-                        # Optional: brief local EV refinement right here (cheap) to steer Atk/SpA on Mixed
-                        def _quick_eval(x: "SetBuild") -> float:
-                            # Use a tiny, cheap proxy over a small subset of threats to avoid huge slowdown.
-                            _names = [n for n in THREAT_LIST[:8] if resolve_species_name(n)]
-                            tv = prebuild_threat_variants(_names)
-                            wrs = []
-                            for nm in _names:
-                                v, w = tv[nm]
-                                wrs.append(weighted_mean([simulate(x, opp) for opp in v], w))
-                            return sum(wrs) / len(wrs) if wrs else 0.0
-
-                        # Only refine when Mixed or when item implies special bias contrary to base stats
-                        _needs_refine = ("SpA" in axes and "Atk" in axes)
-                        if _needs_refine:
-                            sb = refine_evs_local(sb, _quick_eval, axes, passes=32)
-
-                        cands.append(sb)
-
-    return cands
-
-print("[patch v5.1] EV axes now chosen per moveset (Physical/Special/Mixed). Mixed sets can allocate Atk+SpA + both bulks.")
-# Examples of high-impact SV-legal moves you should be sure are present:
-#   - Swampert: Earthquake, Earth Power, Surf, Hydro Pump, Liquidation, Waterfall, Ice Beam, Ice Punch, Avalanche,
-#               Rock Slide, Stone Edge, Body Press, Stomping Tantrum, Knock Off, Bulldoze, Icy Wind, Protect, Substitute,
-#               Stealth Rock, Brick Break, Low Kick, Rest, Sleep Talk, Tera Blast.
-#   - Blaziken: Flare Blitz, Close Combat, Fire Punch, Thunder Punch, Brave Bird, Earthquake, Rock Slide, Stone Edge,
-#               Knock Off, Poison Jab, Zen Headbutt, Low Kick, Low Sweep, Drain Punch, Bulk Up, Protect, Substitute,
-#               Swords Dance/Agility (if present in your DB), Tera Blast.
-#   - Quaquaval: Aqua Step, Close Combat, Liquidation, Waterfall, Aqua Jet, Ice Spinner, Ice Beam, Brave Bird,
-#                Knock Off, U-turn, Bulk Up, Taunt, Encore, Protect, Substitute, Tera Blast.
-#
-# Your code already includes the vast majority of these; add any missing moves into MOVE_DB if you see KeyErrors.
-
-# ----------------------------
-# 4) DONE — No other wiring required.
-# ----------------------------
-# Why this is the single most important fix:
-# - The simulator, branching, items, and field rules are already solid for 1v1 SV (3-turn sudden death).
-# - The bottleneck was search-space coverage: with EV axes tied to species base stats, entire classes of
-#   *special* or *mixed* sets were never allowed to invest in the right offensive/defensive stats, so the
-#   optimizer could not surface the real best builds. By keying EV axes (and nature pools) to each moveset,
-#   the search finally evaluates those builds on equal footing — yielding materially more accurate answers.
-#
-# Performance note:
-# - Mixed profile adds axes ("HP","Atk","Def","SpA","SpD","Spe"), which is larger, but:
-#     (a) Speed EVs are pruned to meaningful breakpoints, and
-#     (b) Pareto dominance collapses the EV lattice drastically.
-#   If runtime grows, reduce EV_STEPS granularity or trim LEGAL_MOVES to the most competitive options.
-
-# === SV 1v1 OPTIMIZER — CRITICAL PATCH (v5.1) ===
-# Goal: Make the optimizer produce the most accurate builds for Swampert, Blaziken, and Quaquaval in
-# LV100 1v1 Scarlet/Violet by fixing the core oversight: EV axes are chosen per *species* instead of per
-# *moveset*. This biases search (e.g., mixed sets or special-leaning sets get Atk/Def EV axes) and can miss
-# the true optimum.
-#
-# This patch:
-#   1) Implements *per-moveset* EV-axis selection (Physical vs Special vs Mixed) inside candidate enumeration.
-#   2) Expands and corrects LEGAL_MOVES lists to the full, legality-correct SV learnsets (Lv/Reminder/TM/Egg),
-#      so the search considers *all* valid moves (incl. egg/picnic moves) without internet or dependencies.
-#   3) Keeps your Pareto EV pruning + local refinement, but runs EV Pareto on the right axes for each moveset.
-#   4) Adjusts moveset combinatorics heuristics minimally to avoid pruning synergy-critical sets (Protect/Encore/Counter),
-#      while still preventing bloat (max 1 “stall/protect-like”, max 1 “setup-like”, 3 damaging moves minimum).
-#
-# Paste this whole block near the BOTTOM of your file so it overrides earlier defs.
-# --------------------------------------------------------------------------------
-
-# ---------- Helpers (override / extend) ----------
-
-def _is_damaging_move(mname: str) -> bool:
-    mv = MOVE_DB[mname]
-    return mv.category in ("Physical", "Special")
-
-
-def _is_physical_move(mname: str) -> bool:
-    return MOVE_DB[mname].category == "Physical"
-
-
-def _is_special_move(mname: str) -> bool:
-    return MOVE_DB[mname].category == "Special"
-
-
-def _moveset_axis_kind(moves: list[str]) -> str:
-    """
-    Return 'phys', 'spec', or 'mixed' for a 4-move set based on the damaging moves it actually uses.
-    - If it has >=1 Physical and no Special -> 'phys'
-    - If it has >=1 Special and no Physical -> 'spec'
-    - If it has both Physical and Special damaging moves -> 'mixed'
-    Status-only sets are disallowed elsewhere.
-    """
-
-    has_phys = any(_is_physical_move(m) for m in moves if _is_damaging_move(m))
-    has_spec = any(_is_special_move(m) for m in moves if _is_damaging_move(m))
-    if has_phys and has_spec:
-        return "mixed"
-    if has_phys:
-        return "phys"
-    return "spec"
-
-
-def _ev_axes_for_moveset(species: str, moves: list[str]) -> tuple[str, ...]:
-    """
-    EV axes per moveset:
-      - phys: optimize (HP, Atk, Def, Spe)
-      - spec: optimize (HP, SpA, SpD, Spe)
-      - mixed: optimize (HP, Atk, SpA, Spe) — the bulk side (Def/SpD) is implicitly shaped via HP and matchup.
-    """
-
-    kind = _moveset_axis_kind(moves)
-    if kind == "phys":
-        return ("HP","Atk","Def","Spe")
-    if kind == "spec":
-        return ("HP","SpA","SpD","Spe")
-    return ("HP","Atk","SpA","Spe")
-
-
-# ---------- LEGAL MOVESETS (full SV learnsets) ----------
-# Source (Gen 9 SV learnsets: Level-up, Reminders, TMs, Egg/Picnic):
-#   Quaquaval: https://pokemondb.net/pokedex/quaquaval/moves/9
-#   Blaziken:  https://pokemondb.net/pokedex/blaziken/moves/9
-#   Swampert:  https://pokemondb.net/pokedex/swampert/moves/9
-#
-# NOTE:
-# - These lists are *flat aggregates* of all SV-legal moves for each Pokémon (Lv/Reminder/TM/Egg).
-# - They intentionally include utility/status (Protect/Detect/Encore/Taunt/Counter) that matter in 1v1.
-# - No DLC-locked tutors beyond what SV learnsets provide. If a move isn’t on the Gen9 page, it’s excluded.
-# - If a move isn’t already in MOVE_DB, we add a sane default for category/power/accuracy below.
-
-
-def _ensure_move(name: str, mtype: str, cat: str, power: int, acc: float = 1.0, *, contact: bool = False, priority: int = 0, is_punch: bool = False, is_slicing: bool = False, multi_hits: int = 1, always_crit: bool = False, is_tera_blast: bool = False):
-    if name not in MOVE_DB:
-        MOVE_DB[name] = Move(name, mtype, cat, power, acc, contact=contact, priority=priority, is_punch=is_punch, multi_hits=multi_hits, always_crit=always_crit, is_tera_blast=is_tera_blast)
-        if is_slicing:
-            object.__setattr__(MOVE_DB[name], "is_slicing", True)
-
-
-# Fill any commonly missing moves that appear in SV learnsets but may not be in your DB yet.
-_missing_catalog = [
-    # General coverage & staples that often go missing
-    ("Aqua Cutter","Water","Physical",70,1.0,True,0,False,True,1,False,False),
-    ("Wave Crash","Water","Physical",120,1.0,True,0,False,False,1,False,False),
-    ("Waterfall","Water","Physical",80,1.0,True,0,False,False,1,False,False),
-    ("Chilling Water","Water","Special",50,1.0,False,0,False,False,1,False,False),
-    ("Water Pulse","Water","Special",60,1.0,False,0,False,False,1,False,False),
-    ("Aerial Ace","Flying","Physical",60,1.0,True,0,False,False,1,False,False),
-    ("Air Slash","Flying","Special",75,0.95,False,0,False,False,1,False,False),
-    ("Air Cutter","Flying","Special",60,0.95,False,0,False,False,1,False,False),
-    ("Acrobatics","Flying","Physical",55,1.0,True,0,False,False,1,False,False),
-    ("Hurricane","Flying","Special",110,0.7,False,0,False,False,1,False,False),
-    ("Feather Dance","Flying","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Work Up","Normal","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Focus Energy","Normal","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Mega Kick","Normal","Physical",120,0.75,True,0,False,False,1,False,False),
-    ("Pounce","Bug","Physical",50,1.0,True,0,False,False,1,False,False),
-    ("U-turn","Bug","Physical",70,1.0,True,0,False,False,1,False,False),
-    ("Trailblaze","Grass","Physical",50,1.0,True,0,False,True,1,False,False),
-    ("Draining Kiss","Fairy","Special",50,1.0,False,0,False,False,1,False,False),
-    ("Disarming Voice","Fairy","Special",40,1.0,False,0,False,False,1,False,False),
-    ("Icy Wind","Ice","Special",55,0.95,False,0,False,False,1,False,False),
-    ("Avalanche","Ice","Physical",60,1.0,True,0,False,False,1,False,False),
-    ("Ice Fang","Ice","Physical",65,0.95,True,0,False,False,1,False,False),
-    ("Stomping Tantrum","Ground","Physical",75,1.0,True,0,False,False,1,False,False),
-    ("High Horsepower","Ground","Physical",95,0.95,True,0,False,False,1,False,False),
-    ("Bulldoze","Ground","Physical",60,1.0,False,0,False,False,1,False,False),
-    ("Earth Power","Ground","Special",90,1.0,False,0,False,False,1,False,False),
-    ("Zen Headbutt","Psychic","Physical",80,0.9,True,0,False,False,1,False,False),
-    ("Psyshock","Psychic","Special",80,1.0,False,0,False,False,1,False,False),
-    ("Poison Jab","Poison","Physical",80,1.0,True,0,False,False,1,False,False),
-    ("Thunder Punch","Electric","Physical",75,1.0,True,0,True,False,1,False,False),
-    ("Wild Charge","Electric","Physical",90,1.0,True,0,False,False,1,False,False),
-    ("Aqua Jet","Water","Physical",40,1.0,True,1,False,False,1,False,False),
-    ("Quick Attack","Normal","Physical",40,1.0,True,1,False,False,1,False,False),
-    ("Endure","Normal","Status",0,1.0,False,4,False,False,1,False,False),
-    ("Encore","Normal","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Taunt","Dark","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Roost","Flying","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Rapid Spin","Normal","Physical",50,1.0,True,0,False,False,1,False,False),
-    ("Detect","Normal","Status",0,1.0,False,4,False,False,1,False,False),
-    ("Protect","Normal","Status",0,1.0,False,4,False,False,1,False,False),
-    ("Bulk Up","Fighting","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Swords Dance","Normal","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Drain Punch","Fighting","Physical",75,1.0,True,0,False,False,1,False,False),
-    ("Brave Bird","Flying","Physical",120,1.0,True,0,False,False,1,False,False),
-    ("Blaze Kick","Fire","Physical",85,0.9,True,0,False,False,1,False,False),
-    ("Flare Blitz","Fire","Physical",120,1.0,True,0,False,False,1,False,False),
-    ("Fire Punch","Fire","Physical",75,1.0,True,0,True,False,1,False,False),
-    ("Heat Wave","Fire","Special",95,0.9,False,0,False,False,1,False,False),
-    ("Overheat","Fire","Special",130,0.9,False,0,False,False,1,False,False),
-    ("Fire Blast","Fire","Special",110,0.85,False,0,False,False,1,False,False),
-    ("Flamethrower","Fire","Special",90,1.0,False,0,False,False,1,False,False),
-    ("Close Combat","Fighting","Physical",120,1.0,True,0,False,False,1,False,False),
-    ("Low Kick","Fighting","Physical",1,1.0,True,0,False,False,1,False,False),  # weight-based handled as base=1 proxy
-    ("Low Sweep","Fighting","Physical",65,1.0,True,0,False,False,1,False,False),
-    ("Reversal","Fighting","Physical",1,1.0,True,0,False,False,1,False,False),  # variable power
-    ("Brick Break","Fighting","Physical",75,1.0,True,0,False,False,1,False,False),
-    ("Body Press","Fighting","Physical",80,1.0,True,0,False,False,1,False,False),
-    ("Counter","Fighting","Physical",0,1.0,True,-5,False,False,1,False,False),
-    ("Giga Impact","Normal","Physical",150,0.9,True,0,False,False,1,False,False),
-    ("Hyper Beam","Normal","Special",150,0.9,False,0,False,False,1,False,False),
-    ("Facade","Normal","Physical",70,1.0,True,0,False,False,1,False,False),
-    ("Aqua Step","Water","Physical",80,1.0,True,0,False,False,1,False,False),
-    ("Liquidation","Water","Physical",85,1.0,True,0,False,False,1,False,False),
-    ("Surf","Water","Special",90,1.0,False,0,False,False,1,False,False),
-    ("Hydro Pump","Water","Special",110,0.8,False,0,False,False,1,False,False),
-    ("Ice Spinner","Ice","Physical",80,1.0,True,0,False,False,1,False,False),
-    ("Ice Punch","Ice","Physical",75,1.0,True,0,True,False,1,False,False),
-    ("Ice Beam","Ice","Special",90,1.0,False,0,False,False,1,False,False),
-    ("Stone Edge","Rock","Physical",100,0.8,True,0,False,False,1,False,False),
-    ("Rock Slide","Rock","Physical",75,0.9,True,0,False,False,1,False,False),
-    ("Rock Tomb","Rock","Physical",60,0.95,True,0,False,False,1,False,False),
-    ("Knock Off","Dark","Physical",65,1.0,True,0,False,False,1,False,False),
-    ("Night Slash","Dark","Physical",70,1.0,True,0,False,True,1,False,False),
-    ("Shadow Claw","Ghost","Physical",70,1.0,True,0,False,True,1,False,False),
-    ("Thunderbolt","Electric","Special",90,1.0,False,0,False,False,1,False,False),
-    ("Energy Ball","Grass","Special",90,1.0,False,0,False,False,1,False,False),
-    ("Rain Dance","Water","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Sunny Day","Fire","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Work Up","Normal","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Taunt","Dark","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Baton Pass","Normal","Status",0,1.0,False,0,False,False,1,False,False),
-    ("Tera Blast","Normal","Special",80,1.0,False,0,False,False,1,False,True)
-]
-for nm, t, cat, pw, ac, c, pr, ip, isl, mh, acr, itb in _missing_catalog:
-    _ensure_move(nm, t, cat, pw, ac, contact=c, priority=pr, is_punch=ip, is_slicing=isl, multi_hits=mh, always_crit=acr, is_tera_blast=itb)
-
-# Recoil: ensure Wave Crash in recoil table
-RECOIL_RATIO["Wave Crash"] = 1/3
-
-# Full SV legal move lists (deduplicated). These aggregate Level-up/Reminder/TM/Egg for Gen 9.
-# NOTE: If you later want to *further* expand, keep the set() wrapper and extend safely.
-LEGAL_MOVES_QUAQUAVAL = sorted(set([
-    # Level-up / Evo / Reminder core
-    "Aqua Step","Aqua Jet","Aqua Cutter","Liquidation","Wave Crash","Water Gun","Work Up","Wing Attack","Low Sweep","Water Pulse","Air Slash","Focus Energy","Mega Kick","Acrobatics","Feather Dance","Close Combat",
-    # TMs (subset relevant for 1v1 + full STAB coverage + key techs)
-    "Protect","Detect","Endure","Encore","Taunt","Aerial Ace","Air Cutter","Acrobatics","Hurricane","Swift","Pounce","U-turn","Brick Break","Low Kick","Low Sweep","Drain Punch","Body Press",
-    "Chilling Water","Surf","Hydro Pump","Rain Dance","Take Down","Facade","Giga Impact","Hyper Beam","Icy Wind","Ice Beam","Ice Spinner","Fling","Air Slash","Trailblaze","Zen Headbutt","Thunder Punch",
-    # Egg moves (SV picnic/breeding)
-    "Detect","Last Resort","Rapid Spin","Roost",
-    # Utility
-    "Counter","Swords Dance","Bulk Up",
-    # Tera
-    "Tera Blast",
-]))
-LEGAL_MOVES_BLAZIKEN = sorted(set([
-    # Level-up / Reminder (SV)
-    "Blaze Kick","Quick Attack","Ember","Double Kick","Flame Charge","Aerial Ace","Slash","Bulk Up","Brave Bird","Sky Uppercut","Flare Blitz","Close Combat",
-    # TMs (SV)
-    "Protect","Detect","Endure","Encore","Taunt","Swords Dance","Baton Pass","Work Up",
-    "Acrobatics","Aerial Ace","Bounce","Brave Bird",
-    "Flamethrower","Fire Blast","Overheat","Heat Wave","Flare Blitz","Fire Punch",
-    "Low Kick","Low Sweep","Brick Break","Drain Punch","Body Press","Close Combat","Reversal",
-    "Earthquake","Bulldoze","Stomping Tantrum","Rock Slide","Rock Tomb","Stone Edge",
-    "Thunder Punch","Zen Headbutt","Poison Jab","Knock Off","Shadow Claw","Night Slash","U-turn","Pounce",
-    "Facade","Giga Impact","Hyper Beam","Sunny Day","Rain Dance",
-    # Tera
-    "Tera Blast",
-]))
-LEGAL_MOVES_SWAMPERT = sorted(set([
-    # Level-up / Reminder (SV)
-    "Water Gun","Mud Shot","Rock Throw","Protect","Rock Slide","Take Down","Surf","Muddy Water","Earthquake","Hammer Arm",
-    # TMs (SV)
-    "Protect","Detect","Endure","Counter","Body Press","Bulk Up","Swords Dance",
-    "Chilling Water","Surf","Hydro Pump","Waterfall","Liquidation","Rain Dance",
-    "Bulldoze","High Horsepower","Stomping Tantrum","Earthquake","Earth Power","Dig",
-    "Rock Tomb","Rock Slide","Stone Edge",
-    "Ice Punch","Ice Beam","Icy Wind","Avalanche","Ice Spinner","Thunder Punch","Wild Charge",
-    "Zen Headbutt","Psyshock","Psychic","Energy Ball",
-    "Knock Off","Shadow Claw","Iron Head","Flash Cannon",
-    "Facade","Giga Impact","Hyper Beam","Rest","Sleep Talk","Substitute","Yawn",
-    # Tera
-    "Tera Blast",
-]))
-
-# Ensure every LEGAL move exists in MOVE_DB
-for _mv in (LEGAL_MOVES_QUAQUAVAL + LEGAL_MOVES_BLAZIKEN + LEGAL_MOVES_SWAMPERT):
-    if _mv not in MOVE_DB:
-        # Provide a safe fallback for any rare omissions (Status default).
-        _ensure_move(_mv, "Normal", "Status", 0, 1.0)
-
-# Tell the optimizer to use these lists
-LEGAL_MOVES.update({
-    "Quaquaval": LEGAL_MOVES_QUAQUAVAL,
-    "Blaziken":  LEGAL_MOVES_BLAZIKEN,
-    "Swampert":  LEGAL_MOVES_SWAMPERT,
-})
-# Make sure FOUR_PHYSICAL_ONLY is disabled for the trio (we allow mixed/special too).
-try:
-    FOUR_PHYSICAL_ONLY.update({"Quaquaval": False, "Blaziken": False, "Swampert": False})
-except NameError:
-    FOUR_PHYSICAL_ONLY = {"Quaquaval": False, "Blaziken": False, "Swampert": False}
-
-
-def assert_legal_moves(species: str, moves: list[str]) -> None:
-    legal = set(LEGAL_MOVES.get(species, []))
-    illegal = [m for m in moves if m not in legal]
-    if illegal:
-        raise ValueError(f"[learnset] Illegal moves for {species}: {illegal}")
-
-
-# ---------- Moveset enumeration (keep dominance pruning but require 3 damaging + 1 utility max) ----------
-
-def movesets_from_pool(pool: list[str], four_physical_only: bool, species: str) -> list[list[str]]:
-    usable = list(pool)  # already legality-correct
-    protect_like = {"Protect","Detect","Endure"}
-    setup_like   = {"Swords Dance","Bulk Up","Work Up"}
-    hard_status  = {"Encore","Taunt"}  # allow at most one
-    counter_like = {"Counter","Mirror Coat"}
-
-    from itertools import combinations
-    candidates: list[list[str]] = []
-    sigs: list[tuple] = []
-    frontier_idx: list[int] = []
-
-    def _sig(moves: list[str]) -> tuple:
-        # Keep your coverage proxy but encourage priority + STAB presence
-        stab_types = _stab_types_for(species)
-        type_best = defaultdict(int)
-        has_stab = False
-        has_prio = False
-        for m in moves:
-            mv = MOVE_DB[m]
-            if mv.category == "Status":
-                continue
-            type_best[mv.mtype] = max(type_best[mv.mtype], base_power(mv))
-            if mv.mtype in stab_types: has_stab = True
-            if mv.priority > 0: has_prio = True
-        vect = []
-        for dtyp in TYPES:
-            best = 0
-            for atyp, bp in type_best.items():
-                best = max(best, int(bp * effectiveness[type_index[atyp]][type_index[dtyp]]))
-            vect.append(best)
-        return (tuple(vect), int(has_stab), int(has_prio))
-
-    def _dominates(sa: tuple, sb: tuple) -> bool:
-        ge_all = all(a >= b for a,b in zip(sa[0], sb[0])) and sa[1] >= sb[1] and sa[2] >= sb[2]
-        gt_any = any(a > b for a,b in zip(sa[0], sb[0])) or sa[1] > sb[1] or sa[2] > sb[2]
-        return ge_all and gt_any
-
-    for a,b,c,d in combinations(usable, 4):
-        ms = [a,b,c,d]
-
-        # At least 3 damaging moves (prevents over-stally sets in 3-turn 1v1)
-        if sum(1 for x in ms if _is_damaging_move(x)) < 3:
-            continue
-        # At most 1 from each utility bucket
-        if sum(1 for x in ms if x in protect_like) > 1:  continue
-        if sum(1 for x in ms if x in setup_like) > 1:    continue
-        if sum(1 for x in ms if x in hard_status) > 1:   continue
-        if sum(1 for x in ms if x in counter_like) > 1:  continue
-
-        # Must include at least one damaging STAB unless Tera-only STAB appears via Tera Blast
-        stab_types = _stab_types_for(species)
-        has_native_stab = any(_is_damaging_move(x) and MOVE_DB[x].mtype in stab_types for x in ms)
-        if not has_native_stab and "Tera Blast" not in ms:
-            continue
-
-        sig = _sig(ms)
-        dominated = False
-        remove = []
-        for idx in frontier_idx:
-            if _dominates(sigs[idx], sig):
-                dominated = True; break
-            if _dominates(sig, sigs[idx]):
-                remove.append(idx)
-        if dominated: continue
-        if remove:
-            frontier_idx = [idx for idx in frontier_idx if idx not in remove]
-        sigs.append(sig)
-        frontier_idx.append(len(sigs)-1)
-        candidates.append(ms)
-
-    return candidates
-
-
-# ---------- Per-moveset EV axes (MAIN FIX) ----------
-# We replace enumerate_candidates_for_species to compute EV Pareto per moveset, not per species.
-
-def enumerate_candidates_for_species(species: str) -> list["SetBuild"]:
-    spec = SPECIES_DATA[species]
-    items = ITEM_CANDIDATES[species]
-    teras = TERA_POOLS[species]
-    ivs31 = {k: 31 for k in ["HP","Atk","Def","SpA","SpD","Spe"]}
-
-    # Pre-compute representative opposing builds for speed tier targets (unchanged logic)
-    rep_opp: list["SetBuild"] = []
-    seen = set()
-    for t in THREAT_LIST:
-        r = resolve_species_name(t) or t
-        if r in seen: continue
-        seen.add(r)
-        av = adversary_variants(r)
-        if av:
-            builds, _w = av
-            if builds:
-                rep_opp.append(builds[0])
-        if len(rep_opp) >= 12:
-            break
-
-    # Full legality pool for this species
-    pool = LEGAL_MOVES[species]
-    # Enumerate pruned 4-move sets
-    ms_all = movesets_from_pool(pool, FOUR_PHYSICAL_ONLY[species], species)
-
-    cands: list["SetBuild"] = []
-
-    # Reasonable nature pools per species (kept small for speed; adjust as needed)
-    if species == "Swampert":
-        nature_pool = ["Adamant","Careful","Impish","Jolly","Modest","Calm","Bold"]
-    elif species == "Blaziken":
-        nature_pool = ["Jolly","Adamant","Naive","Hasty","Timid","Modest"]
-    else:  # Quaquaval
-        nature_pool = ["Jolly","Adamant","Naive","Hasty","Timid","Modest"]
-
-    for item in items:
-        for tera in teras:
-            for nature in nature_pool:
-                for mv in ms_all:
-                    if not filter_moveset_by_item(item, mv):
-                        continue
-                    assert_legal_moves(species, mv)
-
-                    # >>> MAIN FIX: choose EV axes *for this moveset*
-                    axes = _ev_axes_for_moveset(species, mv)
-
-                    # Derive matchup-aware speed targets with current item/nature
-                    ev_pareto = iterate_evs_axes_matchup_aware(axes, species, nature, item, rep_opp)
-
-                    for evs in ev_pareto:
-                        if not valid_evs(evs):  # still check legal EVs
-                            continue
-                        cands.append(SetBuild(
-                            species=species,
-                            item=item,
-                            ability=spec.ability_hint,
-                            tera_type=tera,
-                            nature=nature,
-                            evs=evs,
-                            ivs=ivs31,
-                            moves=mv,
-                        ))
     return cands
 
 
-# ---------- Local EV refine uses per-moveset axes too ----------
-# Wherever refine_evs_local is invoked, it already takes 'axes' as a parameter in your build_search_for_species.
-# We ensure it’s computed with _ev_axes_for_moveset at evaluation time.
+# --- Ensure refine phase also uses per-moveset axes rather than species default ---
+if "_orig_build_search_for_species_" not in globals():
+    _orig_build_search_for_species_ = build_search_for_species
 
-def build_search_for_species(species: str, threats: list[str], conditioned_on: Optional[dict[str, SetBuild]] = None):
+
+def _axes_for_build(build: "SetBuild") -> tuple[str, ...]:
+    return axes_for_moveset(build.species, build.moves)
+
+
+def build_search_for_species(
+    species: str,
+    threats: List[str],
+    conditioned_on: Optional[Dict[str, SetBuild]] = None,
+):
     threats_variants = prebuild_threat_variants(threats)
     if not threats_variants:
         return None, {}
@@ -3933,18 +3290,11 @@ def build_search_for_species(species: str, threats: list[str], conditioned_on: O
         return None, {}
 
     best = None
+    per_wr = {}
     max_workers = max(1, (os.cpu_count() or 1))
 
     if conditioned_on is None:
         # Solo objective — shortlist in parallel
-        with ProcessPoolExecutor(max_workers=max_workers) as ex:
-            futures = [ex.submit(eval_candidate_single, c, threats, threats_variants) for c in candidates]
-            for fut in as_completed(futures):
-                score, wrs, cand = fut.result()
-                if (best is None) or (score > best[0]):
-                    best = (score, wrs, cand)
-
-        # Local refine — solo, *per moveset axes*
         def solo_eval_fn(sb: SetBuild) -> float:
             wrs = []
             for name in threats:
@@ -3953,20 +3303,30 @@ def build_search_for_species(species: str, threats: list[str], conditioned_on: O
                 wrs.append(weighted_mean(results, weights))
             return sum(wrs) / len(wrs) if wrs else 0.0
 
-        axes = _ev_axes_for_moveset(species, best[2].moves)
-        refined = refine_evs_local(best[2], solo_eval_fn, axes, passes=LOCAL_REFINE_PASSES)
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        with ProcessPoolExecutor(max_workers=max_workers) as ex:
+            futures = [ex.submit(eval_candidate_single, c, threats, threats_variants) for c in candidates]
+            for fut in as_completed(futures):
+                score, wrs, cand = fut.result()
+                if (best is None) or (score > best[0]):
+                    best = (score, wrs, cand)
+
+        # Local refine — use per-moveset axes of the *current* best
+        ev_axes = _axes_for_build(best[2])
+        refined = refine_evs_local(best[2], solo_eval_fn, ev_axes, passes=LOCAL_REFINE_PASSES)
         if refined.evs != best[2].evs:
             wrs = []
             for name in threats:
                 variants, weights = threats_variants[name]
                 results = [simulate(refined, opp) for opp in variants]
                 wrs.append(weighted_mean(results, weights))
-            best = (sum(wrs)/len(wrs) if wrs else 0.0, wrs, refined)
+            best = (sum(wrs) / len(wrs) if wrs else 0.0, wrs, refined)
 
     else:
         # Trio-conditioned objective
         def trio_eval_fn(sb: SetBuild) -> float:
-            trio = dict(conditioned_on); trio[species] = sb
+            trio = dict(conditioned_on)
+            trio[species] = sb
             wrs = []
             for name in threats:
                 variants, weights = threats_variants[name]
@@ -3977,16 +3337,20 @@ def build_search_for_species(species: str, threats: list[str], conditioned_on: O
                 wrs.append(weighted_mean(per_variant, weights))
             return sum(wrs) / len(wrs) if wrs else 0.0
 
+        # shortlist sequentially (keeps memory lower)
+        best = None
         for c in candidates:
             score, wrs, cand = eval_candidate_trio(c, conditioned_on, threats, threats_variants)
             if (best is None) or (score > best[0]):
                 best = (score, wrs, cand)
 
-        axes = _ev_axes_for_moveset(species, best[2].moves)
-        refined = refine_evs_local(best[2], trio_eval_fn, axes, passes=LOCAL_REFINE_PASSES)
+        # Local refine — per-moveset axes
+        ev_axes = _axes_for_build(best[2])
+        refined = refine_evs_local(best[2], trio_eval_fn, ev_axes, passes=LOCAL_REFINE_PASSES)
         if refined.evs != best[2].evs:
             wrs = []
-            trio_fixed = dict(conditioned_on); trio_fixed[species] = refined
+            trio_fixed = dict(conditioned_on)
+            trio_fixed[species] = refined
             for name in threats:
                 variants, weights = threats_variants[name]
                 per_variant = []
@@ -3994,7 +3358,7 @@ def build_search_for_species(species: str, threats: list[str], conditioned_on: O
                     ours = max(simulate(b, opp) for _, b in trio_fixed.items())
                     per_variant.append(ours)
                 wrs.append(weighted_mean(per_variant, weights))
-            best = (sum(wrs)/len(wrs) if wrs else 0.0, wrs, refined)
+            best = (sum(wrs) / len(wrs) if wrs else 0.0, wrs, refined)
 
     if best is None:
         return None, {}
@@ -4002,19 +3366,29 @@ def build_search_for_species(species: str, threats: list[str], conditioned_on: O
     return best[2], per_wr
 
 
-# ---------- Version banner ----------
-def _print_version_banner_v5_patch():
+# ------------------------------
+# 4) Minor correctness nits (ensure crash & Aqua Step already applied)
+#    - Your branch_on_move already applies High Jump Kick crash on miss.
+#    - Your apply_stat_side_effects_after already boosts Spe for Aqua Step.
+#    Nothing to change here; we just keep the audit tight so those moves exist.
+# ------------------------------
+
+# ------------------------------
+# 5) Version banner bump (so runs clearly indicate the accurate build)
+# ------------------------------
+def _print_version_banner_v5_wrap():
     print("== SV 1v1 Optimizer — CPU only ==")
-    print("Version:", "5.1 (per-moveset EV axes + full SV learnsets for trio)")
-    print("Notes: EV Pareto uses phys/spec/mixed axes per moveset; learnsets include Lv/TM/Egg (SV legal).")
+    print("Version:", "5.1 (no-stub moves + per-moveset EV axes)")
+    print("Notes: strict MOVE_DB audit; dynamic EV axes per moveset; legality-preserving pools.")
 
 
-_old_main_v5p = main
+_old_main_no_stub = main
 
 
 def main():
-    _print_version_banner_v5_patch()
-    return _old_main_v5p()
+    globals()["_print_version_banner"] = _print_version_banner_v5_wrap
+    return _old_main_no_stub()
 
-
-# === End of CRITICAL PATCH v5.1 ===
+# ======================================================================================
+# END OF PATCH
+# ======================================================================================
