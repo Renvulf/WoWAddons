@@ -44,6 +44,7 @@ import itertools
 import math
 import os
 import time
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -393,7 +394,8 @@ def enumerate_candidates_for_species(species: str) -> List["SetBuild"]:
     spec = SPECIES_DATA[species]
     items = ITEM_CANDIDATES[species]
     teras = TERA_POOLS[species]
-    movesets = movesets_from_pool(MOVE_POOLS[species], FOUR_PHYSICAL_ONLY[species])
+    pool = LEGAL_MOVES[species]
+    ms_all = movesets_from_pool(pool, FOUR_PHYSICAL_ONLY[species], species)
 
     if pick_offense_category(spec) == "Physical":
         ev_axes = ("HP", "Atk", "Def", "Spe")
@@ -401,9 +403,6 @@ def enumerate_candidates_for_species(species: str) -> List["SetBuild"]:
         ev_axes = ("HP", "SpA", "SpD", "Spe")
 
     ivs = {k: 31 for k in ["HP", "Atk", "Def", "SpA", "SpD", "Spe"]}
-
-    def sample_movesets(ms: List[List[str]]) -> List[List[str]]:
-        return ms[:16] + ms[16:48:2]
 
     rep_opp_builds: List["SetBuild"] = []
     seen = set()
@@ -436,7 +435,7 @@ def enumerate_candidates_for_species(species: str) -> List["SetBuild"]:
                 for evs in ev_packs:
                     if not valid_evs(evs):
                         continue
-                    for mv in sample_movesets(movesets):
+                    for mv in ms_all:
                         if not filter_moveset_by_item(item, mv):
                             continue
                         assert_legal_moves(species, mv)
@@ -1658,46 +1657,52 @@ def _ensure_move_full(
         )
 
 
-# --- Shared staples already present in the DB (safe no-ops if already defined)
+# Shared utility / status
 _ensure_move_full("Protect", "Normal", "Status", 0, 1.0)
-_ensure_move_full("Swords Dance", "Normal", "Status", 0, 1.0)
-_ensure_move_full("Counter", "Fighting", "Physical", 0, 1.0, priority=-5)
 _ensure_move_full("Detect", "Normal", "Status", 0, 1.0)
+_ensure_move_full("Swords Dance", "Normal", "Status", 0, 1.0)
 _ensure_move_full("Encore", "Normal", "Status", 0, 1.0)
 _ensure_move_full("Taunt", "Dark", "Status", 0, 1.0)
+_ensure_move_full("Counter", "Fighting", "Physical", 0, 1.0, priority=-5)
+_ensure_move_full("Bulk Up", "Fighting", "Status", 0, 1.0)
+_ensure_move_full("Yawn", "Normal", "Status", 0, 1.0)
+_ensure_move_full("Endeavor", "Normal", "Physical", 1, 1.0)
 
-# --- Water / Ground / Rock / Ice coverage family (Swampert + Quaquaval)
+# Priority / staples already covered elsewhere, but ensure here too
+_ensure_move_full("Aqua Jet", "Water", "Physical", 40, 1.0, contact=True, priority=1)
+_ensure_move_full("Extreme Speed", "Normal", "Physical", 80, 1.0, contact=True, priority=2)
+_ensure_move_full("Bullet Punch", "Steel", "Physical", 40, 1.0, contact=True, priority=1)
+
+# Water / Ground / Ice / Rock family (Swampert + Quaquaval)
 _ensure_move_full("Waterfall", "Water", "Physical", 80, 1.0, contact=True)
 _ensure_move_full("Liquidation", "Water", "Physical", 85, 1.0, contact=True)
 _ensure_move_full("Aqua Tail", "Water", "Physical", 90, 0.9, contact=True)
 _ensure_move_full("Flip Turn", "Water", "Physical", 60, 1.0, contact=True)
-_ensure_move_full("Aqua Jet", "Water", "Physical", 40, 1.0, contact=True, priority=1)
+_ensure_move_full("Aqua Cutter", "Water", "Physical", 70, 1.0, contact=True)
 
 _ensure_move_full("Earthquake", "Ground", "Physical", 100, 1.0)
-_ensure_move_full("Bulldoze", "Ground", "Physical", 60, 1.0)
-_ensure_move_full("Stomping Tantrum", "Ground", "Physical", 75, 1.0, contact=True)
 _ensure_move_full("High Horsepower", "Ground", "Physical", 95, 0.95, contact=True)
-
-_ensure_move_full("Rock Slide", "Rock", "Physical", 75, 0.9)
-_ensure_move_full("Stone Edge", "Rock", "Physical", 100, 0.8)
-_ensure_move_full("Rock Tomb", "Rock", "Physical", 60, 0.95)
+_ensure_move_full("Stomping Tantrum", "Ground", "Physical", 75, 1.0, contact=True)
+_ensure_move_full("Bulldoze", "Ground", "Physical", 60, 1.0)
 
 _ensure_move_full("Ice Punch", "Ice", "Physical", 75, 1.0, contact=True, is_punch=True)
 _ensure_move_full("Ice Fang", "Ice", "Physical", 65, 0.95, contact=True)
-_ensure_move_full("Avalanche", "Ice", "Physical", 60, 1.0, contact=True)
 _ensure_move_full("Ice Spinner", "Ice", "Physical", 80, 1.0, contact=True)
-_ensure_move_full("Icicle Crash", "Ice", "Physical", 85, 0.9, contact=True)
+_ensure_move_full("Avalanche", "Ice", "Physical", 60, 1.0, contact=True)
 
-# --- Fire / Fighting / Flying / Dark / Electric / Poison coverage (Blaziken + Quaquaval)
-_ensure_move_full("Flare Blitz", "Fire", "Physical", 120, 1.0, contact=True)
-_ensure_move_full("Blaze Kick", "Fire", "Physical", 85, 0.9, contact=True)
-_ensure_move_full("Fire Punch", "Fire", "Physical", 75, 1.0, contact=True, is_punch=True)
+_ensure_move_full("Rock Slide", "Rock", "Physical", 75, 0.9)
+_ensure_move_full("Rock Tomb", "Rock", "Physical", 60, 0.95)
+_ensure_move_full("Stone Edge", "Rock", "Physical", 100, 0.8)
 
+# Fighting / Fire / Flying / Dark / Electric / Poison (Blaziken + Quaquaval)
 _ensure_move_full("Close Combat", "Fighting", "Physical", 120, 1.0, contact=True)
 _ensure_move_full("Brick Break", "Fighting", "Physical", 75, 1.0, contact=True)
 _ensure_move_full("Low Kick", "Fighting", "Physical", 60, 1.0, contact=True)
 _ensure_move_full("Drain Punch", "Fighting", "Physical", 75, 1.0, contact=True, is_punch=True)
-_ensure_move_full("Sacred Sword", "Fighting", "Physical", 90, 1.0, contact=True)
+
+_ensure_move_full("Flare Blitz", "Fire", "Physical", 120, 1.0, contact=True)
+_ensure_move_full("Blaze Kick", "Fire", "Physical", 85, 0.9, contact=True)
+_ensure_move_full("Fire Punch", "Fire", "Physical", 75, 1.0, contact=True, is_punch=True)
 
 _ensure_move_full("Brave Bird", "Flying", "Physical", 120, 1.0, contact=True)
 _ensure_move_full("Acrobatics", "Flying", "Physical", 55, 1.0, contact=True)
@@ -1706,46 +1711,53 @@ _ensure_move_full("Knock Off", "Dark", "Physical", 65, 1.0, contact=True)
 _ensure_move_full("Sucker Punch", "Dark", "Physical", 70, 1.0, contact=True, priority=1)
 
 _ensure_move_full("Thunder Punch", "Electric", "Physical", 75, 1.0, contact=True, is_punch=True)
+_ensure_move_full("Wild Charge", "Electric", "Physical", 90, 1.0, contact=True)
 _ensure_move_full("Poison Jab", "Poison", "Physical", 80, 1.0, contact=True)
-
 _ensure_move_full("Shadow Claw", "Ghost", "Physical", 70, 1.0, contact=True)
-_ensure_move_full("Aqua Cutter", "Water", "Physical", 70, 1.0, contact=True)
+
+# A few utility/edge picks that matter in 1v1
 _ensure_move_full("Aqua Step", "Water", "Physical", 80, 1.0, contact=True)
-
 _ensure_move_full("U-turn", "Bug", "Physical", 70, 1.0, contact=True)
-
-# --- Utility that matters for physical 1v1 sets
 _ensure_move_full("Roost", "Flying", "Status", 0, 1.0)
 
 
 LEGAL_MOVES_SWAMPERT = [
-    "Waterfall",
+    # Water STAB
     "Liquidation",
+    "Waterfall",
     "Aqua Tail",
-    "Flip Turn",
     "Aqua Jet",
+    "Flip Turn",
+    # Ground STAB
     "Earthquake",
-    "Bulldoze",
-    "Stomping Tantrum",
     "High Horsepower",
+    "Stomping Tantrum",
+    "Bulldoze",
+    # Coverage
     "Ice Punch",
     "Ice Fang",
     "Avalanche",
     "Rock Slide",
     "Stone Edge",
     "Rock Tomb",
+    # Utility / tech
     "Protect",
     "Counter",
+    "Yawn",
+    "Endeavor",
 ]
 
 LEGAL_MOVES_BLAZIKEN = [
+    # Fire STAB
     "Flare Blitz",
     "Blaze Kick",
     "Fire Punch",
+    # Fighting STAB
     "Close Combat",
     "Brick Break",
     "Low Kick",
     "Drain Punch",
+    # Coverage / priority
     "Brave Bird",
     "Acrobatics",
     "Rock Slide",
@@ -1753,40 +1765,46 @@ LEGAL_MOVES_BLAZIKEN = [
     "Earthquake",
     "Knock Off",
     "Sucker Punch",
-    "Shadow Claw",
-    "Poison Jab",
     "Thunder Punch",
-    "U-turn",
+    "Poison Jab",
+    "Shadow Claw",
+    # Utility
     "Protect",
+    "Detect",
     "Swords Dance",
     "Counter",
-    "Detect",
     "Encore",
     "Taunt",
+    "Bulk Up",
 ]
 
 LEGAL_MOVES_QUAQUAVAL = [
+    # Water STAB
     "Aqua Step",
     "Liquidation",
     "Waterfall",
     "Aqua Cutter",
-    "Flip Turn",
     "Aqua Jet",
+    "Flip Turn",
+    # Fighting STAB
     "Close Combat",
+    "Drain Punch",
     "Brick Break",
     "Low Kick",
-    "Drain Punch",
+    # Coverage / tech
     "Ice Spinner",
-    "Icicle Crash",
+    "Avalanche",
     "Brave Bird",
     "Acrobatics",
     "Knock Off",
     "U-turn",
+    # Utility
     "Swords Dance",
     "Protect",
     "Detect",
     "Encore",
     "Taunt",
+    "Bulk Up",
 ]
 
 LEGAL_MOVES = {
@@ -1795,12 +1813,13 @@ LEGAL_MOVES = {
     "Quaquaval": LEGAL_MOVES_QUAQUAVAL,
 }
 
-MOVE_POOLS = {k: list(v) for k, v in LEGAL_MOVES.items()}
-FOUR_PHYSICAL_ONLY: Dict[str, bool] = {
-    "Swampert": True,
-    "Blaziken": True,
-    "Quaquaval": True,
-}
+# If you keep FOUR_PHYSICAL_ONLY, these pools are already physical+utility.
+FOUR_PHYSICAL_ONLY = {"Swampert": True, "Blaziken": True, "Quaquaval": True}
+
+RECOIL_RATIO.setdefault("Flare Blitz", 1 / 3)
+RECOIL_RATIO.setdefault("Brave Bird", 1 / 3)
+RECOIL_RATIO.setdefault("Wild Charge", 1 / 4)
+RECOIL_RATIO.setdefault("Wave Crash", 1 / 3)
 
 
 def assert_legal_moves(species: str, moves: list[str]) -> None:
@@ -1810,15 +1829,11 @@ def assert_legal_moves(species: str, moves: list[str]) -> None:
         raise ValueError(f"Illegal moves for {species}: {bad}")
 
 
-def _sample_movesets_broaden(ms: list[list[str]]) -> list[list[str]]:
-    primary = ms[:32]
-    secondary = ms[32:96:2]
-    return primary + secondary
-
-
 def _print_trio_movepool_summary():
     for s in ["Swampert", "Blaziken", "Quaquaval"]:
-        print(f"[movepool:{s}] {len(LEGAL_MOVES[s])} moves, physical-only search={FOUR_PHYSICAL_ONLY[s]}")
+        print(
+            f"[movepool:{s}] {len(LEGAL_MOVES[s])} moves; physical-only={FOUR_PHYSICAL_ONLY[s]}"
+        )
 
 
 # =========================
@@ -3517,15 +3532,130 @@ def valid_evs(ev: Dict[str, int]) -> bool:
     return sum(ev.values()) <= EV_TOTAL_MAX
 
 
-def movesets_from_pool(pool: List[str], four_physical_only: bool) -> List[List[str]]:
-    phys_ok = [n for n in pool if MOVE_DB[n].category != "Special"]
-    base = phys_ok if four_physical_only else list(pool)
-    out = []
-    for combo in itertools.combinations(base, 4):
-        if not any(MOVE_DB[n].category != "Status" for n in combo):
+def _stab_types_for(species: str) -> set[str]:
+    t1, t2 = SPECIES_DATA[species].types
+    return {t for t in (t1, t2) if t}
+
+
+def _move_is_status(name: str) -> bool:
+    mv = MOVE_DB[name]
+    return mv.category == "Status" or mv.is_counter or mv.is_mirror_coat
+
+
+def _coverage_proxy(species: str, moves: list[str]) -> tuple:
+    """Cheap, order-invariant signature for Pareto pruning."""
+
+    stab_types = _stab_types_for(species)
+    type_best_bp: defaultdict[str, int] = defaultdict(int)
+    has_stab = False
+    has_priority = False
+
+    for mname in moves:
+        mv = MOVE_DB[mname]
+        if mv.category == "Status":
             continue
-        out.append(list(combo))
-    return out
+        bp = base_power(mv)
+        type_best_bp[mv.mtype] = max(type_best_bp[mv.mtype], bp)
+        if mv.mtype in stab_types:
+            has_stab = True
+        if mv.priority > 0:
+            has_priority = True
+
+    vect = []
+    for dtyp in TYPES:
+        best = 0.0
+        for atyp, bp in type_best_bp.items():
+            best = max(
+                best,
+                bp * effectiveness[type_index[atyp]][type_index[dtyp]],
+            )
+        vect.append(int(best))
+    return (tuple(vect), int(has_stab), int(has_priority))
+
+
+def _dominates(sig_a: tuple, sig_b: tuple) -> bool:
+    ge_all = (
+        all(a >= b for a, b in zip(sig_a[0], sig_b[0]))
+        and sig_a[1] >= sig_b[1]
+        and sig_a[2] >= sig_b[2]
+    )
+    gt_any = (
+        any(a > b for a, b in zip(sig_a[0], sig_b[0]))
+        or sig_a[1] > sig_b[1]
+        or sig_a[2] > sig_b[2]
+    )
+    return ge_all and gt_any
+
+
+def movesets_from_pool(
+    pool: List[str], four_physical_only: bool, species: str
+) -> List[List[str]]:
+    usable: list[str] = []
+    for name in pool:
+        mv = MOVE_DB[name]
+        if four_physical_only and mv.category == "Special":
+            continue
+        usable.append(name)
+
+    protect_like = {"Protect", "Detect"}
+    setup_like = {"Swords Dance", "Bulk Up"}
+    status_like = {
+        "Protect",
+        "Detect",
+        "Swords Dance",
+        "Bulk Up",
+        "Encore",
+        "Taunt",
+        "Counter",
+    }
+
+    stab_types = _stab_types_for(species)
+    candidates: list[list[str]] = []
+    sigs: list[tuple] = []
+    frontier_idx: list[int] = []
+
+    def _sort_key(mname: str) -> tuple[int, int, int]:
+        mv = MOVE_DB[mname]
+        stab = 1 if (mv.category != "Status" and mv.mtype in stab_types) else 0
+        return (stab, base_power(mv), 1 if mv.priority > 0 else 0)
+
+    usable_sorted = sorted(usable, key=_sort_key, reverse=True)
+
+    from itertools import combinations
+
+    for a, b, c, d in combinations(usable_sorted, 4):
+        subset = [a, b, c, d]
+        if sum(1 for x in subset if x in protect_like) > 1:
+            continue
+        if sum(1 for x in subset if x in setup_like) > 1:
+            continue
+        if sum(1 for x in subset if x in status_like) > 1:
+            continue
+        if not any(
+            MOVE_DB[x].category != "Status" and MOVE_DB[x].mtype in stab_types
+            for x in subset
+        ):
+            continue
+
+        sig = _coverage_proxy(species, subset)
+
+        dominated = False
+        remove: list[int] = []
+        for idx in frontier_idx:
+            if _dominates(sigs[idx], sig):
+                dominated = True
+                break
+            if _dominates(sig, sigs[idx]):
+                remove.append(idx)
+        if dominated:
+            continue
+        if remove:
+            frontier_idx = [idx for idx in frontier_idx if idx not in remove]
+        sigs.append(sig)
+        frontier_idx.append(len(sigs) - 1)
+        candidates.append(subset)
+
+    return candidates
 
 
 def filter_moveset_by_item(item: str, moves: List[str]) -> bool:
@@ -3803,7 +3933,7 @@ def main():
     print("\nSearch knobs:")
     print("  EV search: matchup-aware 4-EV lattice with Pareto pruning + local redistribution.")
     _mv_counts = {
-        sp: len(movesets_from_pool(MOVE_POOLS[sp], FOUR_PHYSICAL_ONLY[sp]))
+        sp: len(movesets_from_pool(LEGAL_MOVES[sp], FOUR_PHYSICAL_ONLY[sp], sp))
         for sp in order
     }
     print(f"  Movesets per species: {_mv_counts}")
@@ -4011,37 +4141,6 @@ def assert_legal_moves(species: str, moves: List[str]) -> None:
 # ------------------------------
 def _is_damaging(mname: str) -> bool:
     return MOVE_DB[mname].category in ("Physical", "Special")
-
-
-def _moveset_profile(moves: List[str]) -> str:
-    cats = {MOVE_DB[m].category for m in moves if _is_damaging(m)}
-    if not cats:
-        return "none"
-    if cats == {"Physical"}:
-        return "phys"
-    if cats == {"Special"}:
-        return "spec"
-    return "mixed"
-
-
-def _ev_axes_for_moveset(moves: List[str]) -> Tuple[str, ...]:
-    prof = _moveset_profile(moves)
-    if prof == "phys":
-        return ("HP", "Atk", "Def", "Spe")
-    if prof == "spec":
-        return ("HP", "SpA", "SpD", "Spe")
-    return ("HP", "Atk", "SpA", "Spe")
-
-
-def movesets_from_pool(pool: List[str], four_physical_only: bool) -> List[List[str]]:
-    # Override: ignore four_physical_only; we already globally set it False above.
-    base = list(pool)
-    out = []
-    for combo in itertools.combinations(base, 4):
-        if not any(MOVE_DB[n].category != "Status" for n in combo):
-            continue
-        out.append(list(combo))
-    return out
 
 
 # ------------------------------
