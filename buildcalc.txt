@@ -2249,7 +2249,7 @@ THREAT_PRESETS: dict[str, list[SetBuild]] = {
         SetBuild(
             "Iron Bundle",
             "Booster Energy",
-            None,
+            "Quark Drive",
             "Ice",
             "Timid",
             _evs(0, 0, 4, 252, 0, 252),
@@ -2259,7 +2259,7 @@ THREAT_PRESETS: dict[str, list[SetBuild]] = {
         SetBuild(
             "Iron Bundle",
             "Focus Sash",
-            None,
+            "Quark Drive",
             "Ice",
             "Timid",
             _evs(0, 0, 4, 252, 0, 252),
@@ -2468,12 +2468,7 @@ THREAT_PRESETS: dict[str, list[SetBuild]] = {
             "Jolly",
             _evs(0, 252, 4, 0, 0, 252),
             _IV31,
-            [
-                "Close Combat",
-                "Dire Claw" if "Dire Claw" in MOVE_DB else "Gunk Shot",
-                "Acrobatics",
-                "Ice Punch",
-            ],
+            ["Close Combat", "Gunk Shot", "Acrobatics", "Ice Punch"],
         ),
     ],
     "Dondozo": [
@@ -2485,12 +2480,7 @@ THREAT_PRESETS: dict[str, list[SetBuild]] = {
             "Impish",
             _evs(252, 252, 4, 0, 0, 0),
             _IV31,
-            [
-                "Wave Crash",
-                "Body Press",
-                "Protect",
-                "Rest" if "Rest" in MOVE_DB else "Rock Slide",
-            ],
+            ["Wave Crash", "Body Press", "Protect", "Rest"],
         ),
     ],
     "Porygon-Z": [
@@ -2502,12 +2492,7 @@ THREAT_PRESETS: dict[str, list[SetBuild]] = {
             "Timid",
             _evs(0, 0, 0, 252, 4, 252),
             _IV31,
-            [
-                "Hyper Voice",
-                "Tri Attack" if "Tri Attack" in MOVE_DB else "Shadow Ball",
-                "Dark Pulse",
-                "Ice Beam",
-            ],
+            ["Hyper Voice", "Tri Attack", "Dark Pulse", "Ice Beam"],
         ),
     ],
     "Kyurem": [
@@ -2531,12 +2516,7 @@ THREAT_PRESETS: dict[str, list[SetBuild]] = {
             "Adamant",
             _evs(252, 252, 4, 0, 0, 0),
             _IV31,
-            [
-                "Belly Drum" if "Belly Drum" in MOVE_DB else "Play Rough",
-                "Aqua Jet",
-                "Play Rough",
-                "Liquidation",
-            ],
+            ["Play Rough", "Aqua Jet", "Liquidation", "Ice Punch"],
         ),
     ],
     "Goodra-Hisui": [
@@ -2608,12 +2588,7 @@ THREAT_PRESETS: dict[str, list[SetBuild]] = {
             "Modest",
             _evs(0, 0, 0, 252, 4, 252),
             _IV31,
-            [
-                "Steam Eruption",
-                "Flamethrower",
-                "Earth Power",
-                "Sludge Bomb" if "Sludge Bomb" in MOVE_DB else "Flash Cannon",
-            ],
+            ["Steam Eruption", "Flamethrower", "Earth Power", "Sludge Bomb"],
         ),
     ],
     "Manaphy": [
@@ -2625,12 +2600,7 @@ THREAT_PRESETS: dict[str, list[SetBuild]] = {
             "Timid",
             _evs(0, 0, 4, 252, 0, 252),
             _IV31,
-            [
-                "Surf",
-                "Ice Beam",
-                "Energy Ball" if "Energy Ball" in MOVE_DB else "Grass Knot",
-                "Protect",
-            ],
+            ["Surf", "Ice Beam", "Energy Ball", "Protect"],
         ),
     ],
     "Galarian Moltres": [
@@ -2666,12 +2636,7 @@ THREAT_PRESETS: dict[str, list[SetBuild]] = {
             "Jolly",
             _evs(0, 252, 4, 0, 0, 252),
             _IV31,
-            [
-                "Flower Trick",
-                "Knock Off",
-                "Play Rough",
-                "Low Kick" if "Low Kick" in MOVE_DB else "Brick Break",
-            ],
+            ["Flower Trick", "Knock Off", "Play Rough", "Low Kick"],
         ),
     ],
 }
