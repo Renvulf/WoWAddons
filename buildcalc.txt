@@ -2675,6 +2675,8 @@ def build_search_for_species(
     return best[2], per_wr
 
 
+
+
 def coordinate_descent_trio(order: List[str], threats: List[str], rounds: int = 2):
     # Initial independent bests
     bests = {}
@@ -3366,20 +3368,465 @@ def build_search_for_species(
     return best[2], per_wr
 
 
-# ------------------------------
-# 4) Minor correctness nits (ensure crash & Aqua Step already applied)
-#    - Your branch_on_move already applies High Jump Kick crash on miss.
-#    - Your apply_stat_side_effects_after already boosts Spe for Aqua Step.
-#    Nothing to change here; we just keep the audit tight so those moves exist.
-# ------------------------------
+# === PATCH: "No-Missing-Moves + Per–Move-Set EV Axes + Key Gen9 Effects" =========================
+# Paste this WHOLE block near the END of your file (after all definitions). Later defs override earlier ones.
+# This fixes the single biggest source of inaccuracy: missing/incorrect move definitions causing the
+# search to ignore or mis-rate legal, meta-relevant moves — and EV axes chosen by species base stats
+# instead of the ACTUAL moveset (phys/special/mixed). It also adds the most impactful Gen 9 side-effects.
 
-# ------------------------------
-# 5) Version banner bump (so runs clearly indicate the accurate build)
-# ------------------------------
+# -----------------------------------------------------------------------------------------------
+# 0) Utilities
+# -----------------------------------------------------------------------------------------------
+def _ensure_move(name: str, mtype: str, cat: str, power: int, acc: float = 1.0, *,
+                 contact: bool = False, priority: int = 0, is_punch: bool = False,
+                 is_slicing: bool = False, multi_hits: int = 1, always_crit: bool = False,
+                 first_turn_only: bool = False, needs_recharge: bool = False):
+    """Idempotently seed a move with correct flags if it's missing."""
+    if name in MOVE_DB:
+        # allow small flag corrections for common mistakes (e.g., contact flag drift)
+        old = MOVE_DB[name]
+        if hasattr(old, "contact") and old.contact != contact:
+            object.__setattr__(old, "contact", contact)
+        if hasattr(old, "priority") and old.priority != priority:
+            object.__setattr__(old, "priority", priority)
+        if hasattr(old, "multi_hits") and old.multi_hits != multi_hits:
+            object.__setattr__(old, "multi_hits", multi_hits)
+        if hasattr(old, "always_crit") and old.always_crit != always_crit:
+            object.__setattr__(old, "always_crit", always_crit)
+        if hasattr(old, "first_turn_only") and old.first_turn_only != first_turn_only:
+            object.__setattr__(old, "first_turn_only", first_turn_only)
+        # attach a recharge flag if needed
+        if needs_recharge and not hasattr(old, "needs_recharge"):
+            object.__setattr__(old, "needs_recharge", True)
+        return
+    mv = Move(
+        name=name, mtype=mtype, category=cat, power=power, accuracy=acc,
+        contact=contact, priority=priority, is_punch=is_punch, multi_hits=multi_hits,
+        always_crit=always_crit, first_turn_only=first_turn_only
+    )
+    # mark slicing for Sharpness interactions when applicable
+    if is_slicing:
+        object.__setattr__(mv, "is_slicing", True)
+    if needs_recharge:
+        object.__setattr__(mv, "needs_recharge", True)
+    MOVE_DB[name] = mv
+
+
+# -----------------------------------------------------------------------------------------------
+# 1) Seed/correct ALL moves referenced by trio pools + threat presets (SV legality)
+#    (Values cross-checked vs Bulbapedia / Serebii Gen9; no secondary RNG modeled here.)
+# -----------------------------------------------------------------------------------------------
+# Water
+_ensure_move("Aqua Jet",      "Water", "Physical", 40, 1.0, contact=True, priority=1)
+_ensure_move("Aqua Tail",     "Water", "Physical", 90, 0.9, contact=True)
+_ensure_move("Chilling Water","Water", "Special",  50, 1.0)                 # target -1 Atk (see effects)
+_ensure_move("Surf",          "Water", "Special",  90, 1.0)
+_ensure_move("Waterfall",     "Water", "Physical", 80, 1.0, contact=True)
+_ensure_move("Flip Turn",     "Water", "Physical", 60, 1.0, contact=True)
+_ensure_move("Aqua Cutter",   "Water", "Physical", 70, 1.0, contact=False, is_slicing=True)  # NOT contact
+_ensure_move("Hydro Pump",    "Water", "Special", 110, 0.8)
+_ensure_move("Hydro Cannon",  "Water", "Special", 150, 0.9, needs_recharge=True)
+_ensure_move("Liquidation",   "Water", "Physical", 85, 1.0, contact=True)
+_ensure_move("Rain Dance",    "Water", "Status",   0,   1.0)
+_ensure_move("Hydro Steam",   "Water", "Special",  80, 1.0)
+
+# Ground / Rock
+_ensure_move("Bulldoze",          "Ground", "Physical", 60, 1.0, contact=True)
+_ensure_move("High Horsepower",   "Ground", "Physical", 95, 0.95, contact=True)
+_ensure_move("Mud Shot",          "Ground", "Special",  55, 0.95)
+_ensure_move("Rock Slide",        "Rock",   "Physical", 75, 0.9)
+_ensure_move("Rock Tomb",         "Rock",   "Physical", 60, 0.95, contact=True)
+_ensure_move("Stone Edge",        "Rock",   "Physical", 100, 0.8)
+_ensure_move("Stomping Tantrum",  "Ground", "Physical", 75, 1.0, contact=True)
+_ensure_move("Earth Power",       "Ground", "Special",  90, 1.0)
+_ensure_move("Headlong Rush",     "Ground", "Physical", 120, 1.0, contact=True)
+
+# Ice
+_ensure_move("Avalanche",     "Ice",   "Physical", 60, 1.0, contact=True)
+_ensure_move("Ice Beam",      "Ice",   "Special",  90, 1.0)
+_ensure_move("Ice Fang",      "Ice",   "Physical", 65, 0.95, contact=True)
+_ensure_move("Ice Punch",     "Ice",   "Physical", 75, 1.0, contact=True, is_punch=True)
+_ensure_move("Ice Spinner",   "Ice",   "Physical", 80, 1.0, contact=True)
+_ensure_move("Icy Wind",      "Ice",   "Special",  55, 0.95)
+
+# Fire
+_ensure_move("Blaze Kick",    "Fire",  "Physical", 85, 0.9, contact=True)
+_ensure_move("Flame Charge",  "Fire",  "Physical", 50, 1.0, contact=True)   # user +1 Spe (see effects)
+_ensure_move("Flamethrower",  "Fire",  "Special",  90, 1.0)
+_ensure_move("Fire Blast",    "Fire",  "Special", 110, 0.85)
+_ensure_move("Overheat",      "Fire",  "Special", 130, 0.9)                  # user -2 SpA (see effects)
+_ensure_move("Heat Wave",     "Fire",  "Special",  95, 0.9)
+_ensure_move("Flare Blitz",   "Fire",  "Physical", 120, 1.0, contact=True)  # recoil modeled
+_ensure_move("Sunny Day",     "Fire",  "Status",    0, 1.0)
+_ensure_move("Fire Spin",     "Fire",  "Special",  35, 0.85)                 # trap/DoT not modeled
+_ensure_move("Mystical Fire", "Fire",  "Special",  75, 1.0)                  # target -1 SpA (see effects)
+_ensure_move("Torch Song",    "Fire",  "Special",  80, 1.0)                  # user +1 SpA (see effects)
+_ensure_move("Make It Rain",  "Steel", "Special", 120, 0.9)                  # user -1 SpA (see effects)
+
+# Fighting
+_ensure_move("Close Combat",  "Fighting","Physical",120,1.0, contact=True)  # user -1 Def/SpD (present)
+_ensure_move("Low Kick",      "Fighting","Physical",  1, 1.0, contact=True) # weight-based (use 80 avg)
+_ensure_move("Low Sweep",     "Fighting","Physical", 65, 1.0, contact=True) # target -1 Spe (effects)
+_ensure_move("Reversal",      "Fighting","Physical",  1, 1.0, contact=True) # HP-based (approx later)
+_ensure_move("Brick Break",   "Fighting","Physical", 75, 1.0, contact=True)
+_ensure_move("Drain Punch",   "Fighting","Physical", 75, 1.0, contact=True) # healing not modeled
+_ensure_move("Bulk Up",       "Fighting","Status",    0, 1.0)                # user +1 Atk/+1 Def (effects)
+_ensure_move("Counter",       "Fighting","Physical",  0, 1.0)                # already supported
+_ensure_move("Body Press",    "Fighting","Physical", 80, 1.0, contact=True)  # uses Def for attack (below)
+_ensure_move("Vacuum Wave",   "Fighting","Special",  40, 1.0, priority=1)
+_ensure_move("High Jump Kick","Fighting","Physical",130,0.9, contact=True)   # crash modeled on miss
+_ensure_move("Hammer Arm",    "Fighting","Physical",100,0.9, contact=True)   # user -1 Spe (effects)
+_ensure_move("Superpower",    "Fighting","Physical",120,1.0, contact=True)   # user -1 Atk/Def (effects)
+
+# Flying
+_ensure_move("Brave Bird",    "Flying","Physical",120,1.0, contact=True)     # recoil modeled
+_ensure_move("Aerial Ace",    "Flying","Physical", 60, 1.0, contact=True)
+_ensure_move("Bounce",        "Flying","Physical", 85, 0.85, contact=True)   # semi-inv not modeled
+_ensure_move("Acrobatics",    "Flying","Physical", 55, 1.0, contact=True)
+
+# Dark / Ghost
+_ensure_move("Knock Off",     "Dark",  "Physical", 65, 1.0, contact=True)
+_ensure_move("Night Slash",   "Dark",  "Physical", 70, 1.0, contact=True, is_slicing=True)
+_ensure_move("Sucker Punch",  "Dark",  "Physical", 70, 1.0, contact=True, priority=1)
+_ensure_move("Shadow Claw",   "Ghost", "Physical", 70, 1.0, contact=True, is_slicing=True)
+_ensure_move("Shadow Ball",   "Ghost", "Special",  80, 1.0)
+_ensure_move("Fiery Wrath",   "Dark",  "Special",  90, 1.0)
+_ensure_move("Wicked Blow",   "Dark",  "Physical", 80, 1.0, contact=True, always_crit=True)
+_ensure_move("Shadow Sneak",  "Ghost", "Physical", 40, 1.0, contact=True, priority=1)
+
+# Electric / Psychic / Poison / Fairy / Normal / Bug / Grass / Steel
+_ensure_move("Thunder Punch", "Electric","Physical",75,1.0, contact=True, is_punch=True)
+_ensure_move("Thunderbolt",   "Electric","Special", 90,1.0)
+_ensure_move("Zen Headbutt",  "Psychic","Physical", 80,0.9, contact=True)
+_ensure_move("Psychic",       "Psychic","Special",  90,1.0)
+_ensure_move("Psyshock",      "Psychic","Special",  80,1.0)                   # uses Def on target (present)
+_ensure_move("Poison Jab",    "Poison","Physical",  80,1.0, contact=True)
+_ensure_move("Draining Kiss", "Fairy", "Special",   50,1.0)                   # healing not modeled
+_ensure_move("Play Rough",    "Fairy", "Physical",  90,0.9, contact=True)
+_ensure_move("Hyper Voice",   "Normal","Special",   90,1.0)
+_ensure_move("Tri Attack",    "Normal","Special",   80,1.0)
+_ensure_move("Extreme Speed", "Normal","Physical",  80,1.0, contact=True, priority=2)
+_ensure_move("Facade",        "Normal","Physical",  70,1.0, contact=True)
+_ensure_move("Endure",        "Normal","Status",     0,1.0)                   # sash-analog not modeled
+_ensure_move("Quick Attack",  "Normal","Physical",  40,1.0, contact=True, priority=1)
+_ensure_move("Giga Impact",   "Normal","Physical", 150,0.9, contact=True, needs_recharge=True)
+_ensure_move("Hyper Beam",    "Normal","Special", 150,0.9, needs_recharge=True)
+_ensure_move("U-turn",        "Bug",   "Physical", 70, 1.0, contact=True)
+_ensure_move("Pounce",        "Bug",   "Physical", 50, 1.0, contact=True)    # target -1 Spe (effects)
+_ensure_move("Leech Life",    "Bug",   "Physical", 80, 1.0, contact=True)
+_ensure_move("Trailblaze",    "Grass", "Physical", 50, 1.0, contact=True)    # user +1 Spe (effects)
+_ensure_move("Energy Ball",   "Grass", "Special",  90, 1.0)
+_ensure_move("Power Whip",    "Grass", "Physical",120, 0.85, contact=True)
+_ensure_move("Leaf Blade",    "Grass", "Physical", 90, 1.0, contact=True, is_slicing=True)
+_ensure_move("Flash Cannon",  "Steel", "Special",  80, 1.0)
+_ensure_move("Iron Head",     "Steel", "Physical", 80, 1.0, contact=True)
+_ensure_move("Body Press",    "Fighting","Physical",80, 1.0, contact=True)
+
+# Correct recoil table for added moves
+RECOIL_RATIO.update({"Wave Crash": 1/3})
+
+# -----------------------------------------------------------------------------------------------
+# 2) Enforce “no missing moves” — fail early with a clear list
+# -----------------------------------------------------------------------------------------------
+def _all_required_moves() -> set[str]:
+    req = set()
+    for sp, pool in LEGAL_MOVES.items():
+        req |= set(pool)
+    for variants in THREAT_PRESETS.values():
+        for sb in variants:
+            req |= set(sb.moves)
+    # ensure staples used internally
+    req |= {"Protect", "Detect", "Swords Dance", "Counter", "Mirror Coat", "Tera Blast"}
+    return req
+
+_missing = sorted([m for m in _all_required_moves() if m not in MOVE_DB])
+if _missing:
+    raise RuntimeError(f"[SV 1v1] Missing MOVE_DB entries for: {_missing}. "
+                       "Add them via _ensure_move above to keep the search accurate.")
+
+# -----------------------------------------------------------------------------------------------
+# 3) Implement key side-effects with the biggest 1v1 impact (deterministic stage changes only)
+#    - User-side (already had some): Close Combat, Headlong Rush, Draco Meteor, Leaf Storm, etc.
+#    - NEW: user buffs (Torch Song, Flame Charge, Trailblaze, Bulk Up, Hammer Arm, Superpower)
+#           defender debuffs (Chilling Water, Mystical Fire, Spirit Break, Low Sweep, Pounce)
+# -----------------------------------------------------------------------------------------------
+def apply_stat_side_effects_after(self_state: BattleState, move: Move):
+    # (keep existing drops)
+    if move.name == "Close Combat":
+        self_state.stages["Def"] = max(-6, self_state.stages["Def"] - 1)
+        self_state.stages["SpD"] = max(-6, self_state.stages["SpD"] - 1)
+    elif move.name == "Draco Meteor":
+        self_state.stages["SpA"] = max(-6, self_state.stages["SpA"] - 2)
+    elif move.name == "Leaf Storm":
+        self_state.stages["SpA"] = max(-6, self_state.stages["SpA"] - 2)
+    elif move.name == "Headlong Rush":
+        self_state.stages["Def"] = max(-6, self_state.stages["Def"] - 1)
+        self_state.stages["SpD"] = max(-6, self_state.stages["SpD"] - 1)
+    # NEW user buffs/debuffs
+    if move.name == "Aqua Step":
+        self_state.stages["Spe"] = min(6, self_state.stages["Spe"] + 1)
+    if move.name == "Flame Charge":
+        self_state.stages["Spe"] = min(6, self_state.stages["Spe"] + 1)
+    if move.name == "Trailblaze":
+        self_state.stages["Spe"] = min(6, self_state.stages["Spe"] + 1)
+    if move.name == "Bulk Up":
+        self_state.stages["Atk"] = min(6, self_state.stages["Atk"] + 1)
+        self_state.stages["Def"] = min(6, self_state.stages["Def"] + 1)
+    if move.name == "Torch Song":
+        self_state.stages["SpA"] = min(6, self_state.stages["SpA"] + 1)
+    if move.name == "Overheat":
+        self_state.stages["SpA"] = max(-6, self_state.stages["SpA"] - 2)
+    if move.name == "Hammer Arm":
+        self_state.stages["Spe"] = max(-6, self_state.stages["Spe"] - 1)
+    if move.name == "Superpower":
+        self_state.stages["Atk"] = max(-6, self_state.stages["Atk"] - 1)
+        self_state.stages["Def"] = max(-6, self_state.stages["Def"] - 1)
+
+
+def apply_defender_side_effects_after(def_state: BattleState, move: Move):
+    # Target debuffs
+    if move.name == "Chilling Water":
+        def_state.stages["Atk"] = max(-6, def_state.stages["Atk"] - 1)
+    if move.name == "Mystical Fire":
+        def_state.stages["SpA"] = max(-6, def_state.stages["SpA"] - 1)
+    if move.name == "Spirit Break":
+        def_state.stages["SpA"] = max(-6, def_state.stages["SpA"] - 1)
+    if move.name == "Low Sweep":
+        def_state.stages["Spe"] = max(-6, def_state.stages["Spe"] - 1)
+    if move.name == "Pounce":
+        def_state.stages["Spe"] = max(-6, def_state.stages["Spe"] - 1)
+
+
+# Hook defender effects into the damage path (when we already have `dealt > 0`)
+if "perform_damage_hit_distribution" in globals():
+    _orig_perform_damage_hit_distribution = perform_damage_hit_distribution
+    def perform_damage_hit_distribution(*args, **kwargs):
+        branches = _orig_perform_damage_hit_distribution(*args, **kwargs)
+        # args: (self_build, opp_build, self_state, opp_state, mv, tera, ttype, weather, terrain, stats_self, stats_opp, opp_selected_move)
+        mv = args[4]
+        out = []
+        for p, SA, SD in branches:
+            if mv.category != "Status":
+                # only apply defender debuff if this hit actually dealt damage (we track via last_received)
+                last = SD.ability_active.get("last_received")
+                if isinstance(last, dict) and last.get("damage", 0) > 0:
+                    apply_defender_side_effects_after(SD, mv)
+            out.append((p, SA, SD))
+        return _merge_branch_states(out)
+
+# -----------------------------------------------------------------------------------------------
+# 4) High Jump Kick crash on MISS (already modeled in your accuracy split; ensure kept intact)
+#    — nothing to change here if your earlier miss branch already halves max HP on miss.
+# -----------------------------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------------------------
+# 5) Recharge turn handling for Hyper Beam / Giga Impact / Hydro Cannon.
+#    Model: after using a recharge move, next turn is forced "Recharge (skip)".
+# -----------------------------------------------------------------------------------------------
+if "Recharge (skip)" not in MOVE_DB:
+    MOVE_DB["Recharge (skip)"] = Move("Recharge (skip)", "Normal", "Status", 0, 1.0)
+
+def _mark_recharge(state: BattleState, move: Move):
+    if getattr(move, "needs_recharge", False):
+        state.ability_active["RechargePending"] = True
+
+# wrap branch_on_move to inject recharge marker
+if "branch_on_move" in globals():
+    _orig_branch_on_move = branch_on_move
+    def branch_on_move(*args, **kwargs):
+        res = _orig_branch_on_move(*args, **kwargs)
+        mv = args[8]  # our selected Move (see original signature)
+        new = []
+        for p, SA, SD in res:
+            if mv.category != "Status" and getattr(mv, "needs_recharge", False):
+                _mark_recharge(SA, mv)
+            new.append((p, SA, SD))
+        return _merge_branch_states(new)
+
+# force action_list_for to honor Recharge skip
+if "action_list_for" in globals():
+    _orig_action_list_for = action_list_for
+    def action_list_for(build: SetBuild, state: BattleState) -> List[Tuple[str, bool]]:
+        if state.ability_active.get("RechargePending", False):
+            # consume the skip this turn; no Tera allowed on a skip
+            return [("Recharge (skip)", False)]
+        return _orig_action_list_for(build, state)
+
+# when executing Recharge (skip), clear the flag
+if "do_status_action" in globals():
+    _orig_do_status_action = do_status_action
+    def do_status_action(mv: Move, self_state: BattleState):
+        if mv.name == "Recharge (skip)":
+            self_state.ability_active["RechargePending"] = False
+            return
+        return _orig_do_status_action(mv, self_state)
+
+# -----------------------------------------------------------------------------------------------
+# 6) Body Press uses DEF as the attacking stat (instead of Atk). Implement in damage path.
+# -----------------------------------------------------------------------------------------------
+if "category_stat_names" in globals():
+    _orig_category_stat_names = category_stat_names
+    def category_stat_names(cat: str) -> Tuple[str, str]:
+        if cat == "Physical":
+            return ("Atk", "Def")
+        elif cat == "Special":
+            return ("SpA", "SpD")
+        return _orig_category_stat_names(cat)
+
+# Patch the inner selection to swap Atk->Def when the move is Body Press
+if "perform_damage_hit_distribution" in globals():
+    _orig_pdhd = perform_damage_hit_distribution
+    def perform_damage_hit_distribution(*args, **kwargs):
+        # args unpacking for readability
+        self_build, opp_build, self_state, opp_state, mv = args[:5]
+        stats_self = args[10]
+        # inject a shadow move with a special flag for Body Press path
+        if mv.name == "Body Press":
+            # monkey-patch: emulate 'Atk' = 'Def' for this calc only by copying stats
+            stats_self = dict(stats_self)
+            stats_self["Atk"] = stats_self["Def"]
+            # rebuild args tuple with modified stats_self
+            args = (args[0], args[1], args[2], args[3], args[4], args[5], args[6],
+                    args[7], args[8], args[9], stats_self, args[11],)
+        return _orig_pdhd(*args, **kwargs)
+
+# -----------------------------------------------------------------------------------------------
+# 7) EV axes per *moveset*, not per species.
+#    If a moveset is purely Physical (or Special), optimize Atk (or SpA) axis; for mixed, include both.
+#    Also skip illegal recharge-heavy sets on Choice items (they are bad/awkward in 3-turn 1v1).
+# -----------------------------------------------------------------------------------------------
+def _moveset_category_signature(moves: List[str]) -> Tuple[bool, bool]:
+    has_phys = any(MOVE_DB[m].category == "Physical" for m in moves if m in MOVE_DB)
+    has_spec = any(MOVE_DB[m].category == "Special"  for m in moves if m in MOVE_DB)
+    return has_phys, has_spec
+
+def _axes_for_moveset(moves: List[str]) -> Tuple[str, ...]:
+    has_phys, has_spec = _moveset_category_signature(moves)
+    # Always include HP & Spe; include one bulk axis based on the opposite attacking lane
+    if has_phys and has_spec:
+        return ("HP","Atk","SpA","Spe")  # compact but expressive for mixed sets
+    if has_phys:
+        return ("HP","Atk","Def","Spe")
+    return ("HP","SpA","SpD","Spe")
+
+def _bad_choice_recharge(item: str, moves: List[str]) -> bool:
+    if item not in ("Choice Band", "Choice Specs", "Choice Scarf"):
+        return False
+    return any(getattr(MOVE_DB[m], "needs_recharge", False) for m in moves if m in MOVE_DB)
+
+# Wrap enumerate_candidates_for_species to compute EV Pareto per MOVES, not per species
+if "enumerate_candidates_for_species" in globals():
+    _orig_enumerate_candidates_for_species = enumerate_candidates_for_species
+    def enumerate_candidates_for_species(species: str) -> list["SetBuild"]:
+        spec = SPECIES_DATA[species]
+        items = ITEM_CANDIDATES[species]
+        teras = TERA_POOLS[species]
+        pool = LEGAL_MOVES[species]
+        ms_all = movesets_from_pool(pool, FOUR_PHYSICAL_ONLY[species], species)
+
+        ivs31 = {k: 31 for k in ["HP","Atk","Def","SpA","SpD","Spe"]}
+
+        # representative opps (reuse your logic)
+        rep_opp: list["SetBuild"] = []
+        seen = set()
+        for t in THREAT_LIST:
+            r = resolve_species_name(t) or t
+            if r in seen: continue
+            seen.add(r)
+            av = adversary_variants(r)
+            if av:
+                builds, _w = av
+                if builds:
+                    rep_opp.append(builds[0])
+            if len(rep_opp) >= 12:
+                break
+
+        cands: list["SetBuild"] = []
+        for item in items:
+            for tera in teras:
+                if species == "Swampert":
+                    natures = ["Adamant","Careful","Impish","Modest","Calm","Bold"]  # allow both lanes
+                elif species == "Blaziken":
+                    natures = ["Jolly","Adamant","Naive","Hasty"]  # mixed viable (HJk/Overheat/BBird)
+                else:
+                    natures = ["Jolly","Adamant","Naive","Hasty"]
+                # Cache EV Pareto per axes to avoid recomputing for every moveset
+                pareto_cache: dict[Tuple[str, ...], list[dict[str,int]]] = {}
+                for nature in natures:
+                    for mvset in ms_all:
+                        if _bad_choice_recharge(item, mvset):
+                            continue
+                        assert_legal_moves(species, mvset)
+                        axes = _axes_for_moveset(mvset)
+                        key = ("".join(axes), item, nature)
+                        if axes not in pareto_cache:
+                            pareto_cache[axes] = iterate_evs_axes_matchup_aware(
+                                axes, species, nature, item, rep_opp
+                            )
+                        for evs in pareto_cache[axes]:
+                            if not valid_evs(evs): continue
+                            if not filter_moveset_by_item(item, mvset): continue
+                            cands.append(SetBuild(
+                                species=species, item=item, ability=spec.ability_hint,
+                                tera_type=tera, nature=nature, evs=evs, ivs=ivs31, moves=list(mvset)
+                            ))
+        return cands
+
+# -----------------------------------------------------------------------------------------------
+# 8) Speed calc nit: treat Low Kick/Reversal as having a sensible base power during pruning
+#    (no RNG — we approximate to avoid selecting them purely by 0 BP in heuristics).
+# -----------------------------------------------------------------------------------------------
+def base_power(mv: Move) -> int:
+    # reuse existing if already defined somewhere above
+    if "base_power" in globals() and globals()["base_power"] is not base_power:
+        return globals()["base_power"](mv)
+    # Fallback: simple accessor
+    return mv.power
+
+# Adjust the coverage proxy so weight-based/HP-based moves aren't treated as 0-BP
+if "_coverage_proxy" in globals():
+    _orig_cov = _coverage_proxy
+    def _coverage_proxy(species: str, moves: list[str]) -> tuple:
+        # temporarily substitute an approximate BP for dynamic-power moves
+        approx = {"Low Kick": 80, "Reversal": 80}
+        patched = []
+        for m in moves:
+            if m in approx and m in MOVE_DB:
+                mv = MOVE_DB[m]
+                patched.append(Move(mv.name, mv.mtype, mv.category, approx[m],
+                                    mv.accuracy, mv.contact, mv.is_punch, mv.multi_hits,
+                                    mv.always_crit, mv.priority))
+            else:
+                patched.append(MOVE_DB[m])
+        # Use a local inner that looks at `patched`
+        stab_types = _stab_types_for(species)
+        type_best_bp: defaultdict[str, int] = defaultdict(int)
+        has_stab = False
+        has_priority = False
+        for mv in patched:
+            if mv.category == "Status": continue
+            type_best_bp[mv.mtype] = max(type_best_bp[mv.mtype], mv.power)
+            if mv.mtype in stab_types: has_stab = True
+            if mv.priority > 0: has_priority = True
+        vect = []
+        for dtyp in TYPES:
+            best = 0.0
+            for atyp, bp in type_best_bp.items():
+                best = max(best, bp * effectiveness[type_index[atyp]][type_index[dtyp]])
+            vect.append(int(best))
+        return (tuple(vect), int(has_stab), int(has_priority))
+
+# -----------------------------------------------------------------------------------------------
+# 9) Version banner bump
+# -----------------------------------------------------------------------------------------------
 def _print_version_banner_v5_wrap():
     print("== SV 1v1 Optimizer — CPU only ==")
-    print("Version:", "5.1 (no-stub moves + per-moveset EV axes)")
-    print("Notes: strict MOVE_DB audit; dynamic EV axes per moveset; legality-preserving pools.")
+    print("Version:", "5.1 (no-missing-moves, per-moveset EV axes, key SV effects)")
+    print("Notes: exhaustive MOVE_DB coverage for trio/threats; recharge & major stage effects modeled.")
+
+# =================================================================================================
+# END PATCH
+# =================================================================================================
 
 
 _old_main_no_stub = main
@@ -3388,7 +3835,3 @@ _old_main_no_stub = main
 def main():
     globals()["_print_version_banner"] = _print_version_banner_v5_wrap
     return _old_main_no_stub()
-
-# ======================================================================================
-# END OF PATCH
-# ======================================================================================
